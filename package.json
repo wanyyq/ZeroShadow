@@ -1,0 +1,16 @@
+{
+  "name": "epan",
+  "private": true,
+  "version": "1.0.0",
+  "description": "EPan - lightweight LAN cloud drive (Node + React)",
+  "type": "module",
+  "scripts": {
+    "setup": "pnpm -C server install && pnpm -C web install",
+    "dev:server": "pnpm -C server dev",
+    "dev:web": "pnpm -C web dev",
+    "build": "pnpm -C web build",
+    "start": "node server/index.js",
+    "typecheck": "pnpm -C web typecheck",
+    "lint": "pnpm -C web lint"
+  }
+}

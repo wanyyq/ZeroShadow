@@ -1,0 +1,112 @@
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+type Query = Record<string, string | number | undefined>
+
+function buildUrl(path: string, query?: Query) {
+  const url = `/api${path}`
+  if (!query) return url
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return qs ? `${url}?${qs}` : url
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  options: { query?: Query; body?: unknown } = {}
+): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(buildUrl(path, options.query), {
+      method,
+      credentials: "same-origin",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    })
+  } catch {
+    throw new ApiError(0, "网络连接失败，请检查服务是否在线")
+  }
+  let data: unknown = null
+  try {
+    data = await res.json()
+  } catch {
+    /* non-json response */
+  }
+  if (!res.ok) {
+    const message =
+      data && typeof data === "object" && "error" in data
+        ? String((data as { error: string }).error)
+        : `请求失败 (${res.status})`
+    throw new ApiError(res.status, message)
+  }
+  return data as T
+}
+
+export const api = {
+  get: <T>(path: string, query?: Query) => request<T>("GET", path, { query }),
+  post: <T>(path: string, body?: unknown, query?: Query) =>
+    request<T>("POST", path, { body, query }),
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, { body }),
+  del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, { body }),
+}
+
+export function downloadUrl(path: string, inline = false) {
+  return `/api/fs/download?path=${encodeURIComponent(path)}${inline ? "&inline=1" : ""}`
+}
+
+export function zipUrl(paths: string[]) {
+  return `/api/fs/zip?paths=${encodeURIComponent(JSON.stringify(paths))}`
+}
+
+export function triggerDownload(url: string) {
+  const a = document.createElement("a")
+  a.href = url
+  a.rel = "noopener"
+  document.body.appendChild(a)
+  a.click()
+  requestAnimationFrame(() => a.remove())
+}
+
+export interface UploadTask {
+  promise: Promise<unknown>
+  abort: () => void
+}
+
+export function uploadFiles(
+  destPath: string,
+  files: File[],
+  onProgress: (loaded: number, total: number) => void
+): UploadTask {
+  const xhr = new XMLHttpRequest()
+  const promise = new Promise((resolve, reject) => {
+    const form = new FormData()
+    for (const file of files) form.append("files", file, file.name)
+    xhr.open("POST", `/api/fs/upload?path=${encodeURIComponent(destPath)}`)
+    xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest")
+    xhr.responseType = "json"
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded, e.total)
+    }
+    xhr.onload = () => {
+      const data = xhr.response as { error?: string } | null
+      if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response)
+      else reject(new ApiError(xhr.status, data?.error || `上传失败 (${xhr.status})`))
+    }
+    xhr.onerror = () => reject(new ApiError(0, "网络错误，上传中断"))
+    xhr.onabort = () => reject(new ApiError(0, "已取消上传"))
+    xhr.send(form)
+  })
+  return { promise, abort: () => xhr.abort() }
+}
