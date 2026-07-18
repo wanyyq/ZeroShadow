@@ -28,10 +28,10 @@ function pushOutput(line) {
   state.output.push(`[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}] ${text}`)
   if (state.output.length > 120) state.output.splice(0, state.output.length - 120)
   const m = text.match(/(https?:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+)/)
-  if (m && !state.url) {
+  if (m) {
     const url = m[1].replace(/[.,;]+$/, "")
     state.url = url
-    info("tunnel_url", { msg: `公网地址: ${state.url}` })
+    if (!url.includes("dashboard")) info("tunnel_url", { msg: `公网地址: ${url}` })
   }
 }
 
@@ -69,10 +69,8 @@ function buildArgs(tunnelCfg) {
     }
     args.push(target)
   } else {
-    // serveo
-    const sub = state.subdomain || randomSubdomain()
-    state.subdomain = sub
-    args.push("-N", "-R", `${sub}:80:localhost:${env.port}`, "serveo.net")
+    // serveo: 标准用法，URL 由 serveo 服务端自然输出
+    args.push("-N", "-R", `80:localhost:${env.port}`, "serveo.net")
   }
   return args
 }
@@ -110,18 +108,6 @@ function launch(tunnelCfg) {
   state.running = true
   state.startedAt = Date.now()
   pushOutput(`ssh ${args.join(" ")}`)
-
-  // serveo: 直接预测 URL；pinggy 和 localhost.run 等解析出 stderr/stdout URL
-  if (tunnelCfg.mode !== "custom" && tunnelCfg.mode !== "localhostrun" && tunnelCfg.mode !== "pinggy" && state.subdomain) {
-    const predicted = `https://${state.subdomain}.serveo.net`
-    if (!state.url) {
-      state.url = predicted
-      info("tunnel_url", { msg: `公网地址: ${predicted}` })
-      pushOutput(`（预测地址）${predicted}`)
-    }
-  } else {
-    state.url = null
-  }
 
   info("tunnel_start", { msg: `模式: ${tunnelCfg.mode}` })
 
