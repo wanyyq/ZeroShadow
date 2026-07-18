@@ -1,10 +1,11 @@
 import { Router } from "express"
+import { env } from "../env.js"
 import { requireRole } from "../auth.js"
 import { getConfig, saveConfig } from "../config.js"
-import { batchMembers, createMembers, listMembers, resetPassword } from "../users.js"
-import { clearLogs, info, queryLogs } from "../logger.js"
+import { batchMembers, createMembers, findById, findByUsername, listMembers, persist, resetPassword } from "../users.js"
 import { getStatus } from "../status.js"
 import { applyTunnelConfig, tunnelStatus, validateCustomHost } from "../tunnel.js"
+import { clearLogs, info, queryLogs } from "../logger.js"
 
 const router = Router()
 
@@ -116,6 +117,28 @@ router.post("/members/:id/password", async (req, res, next) => {
     const error = await resetPassword(String(req.params.id), String(req.body?.password || ""))
     if (error) throw httpError(400, error)
     info("members_reset_password", { msg: req.params.id, ...actor(req) })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.patch("/members/:id", async (req, res, next) => {
+  try {
+    const user = findById(String(req.params.id))
+    if (!user) throw httpError(404, "用户不存在")
+    if (req.body?.username) {
+      const newName = String(req.body.username).trim()
+      // 仅校验用户名格式（密码已存在，无需重复校验）
+      const USERNAME_RE = /^[A-Za-z0-9_.-]{2,32}$/
+      if (!USERNAME_RE.test(newName)) throw httpError(400, "用户名需为 2-32 位字母、数字、_ . -")
+      if (newName.toLowerCase() === env.superUser.toLowerCase()) throw httpError(400, "该用户名已被超级管理员占用")
+      const existing = findByUsername(newName)
+      if (existing && existing.id !== user.id) throw httpError(400, "用户名已存在")
+      user.username = newName
+      await persist()
+      info("members_rename", { msg: `${req.params.id} → ${newName}`, ...actor(req) })
+    }
     res.json({ ok: true })
   } catch (err) {
     next(err)

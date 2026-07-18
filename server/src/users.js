@@ -11,7 +11,7 @@ const MAX_MEMBERS = 500
 let users = readJsonSync(USERS_FILE, [])
 if (!Array.isArray(users)) users = []
 
-function persist() {
+export function persist() {
   return writeJsonAtomic(USERS_FILE, users)
 }
 

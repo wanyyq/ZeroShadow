@@ -22,17 +22,12 @@ for (const name of fs.readdirSync(TMP_DIR)) {
 
 const app = express()
 app.disable("x-powered-by")
-app.set("trust proxy", "loopback")
 
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff")
   res.setHeader("X-Frame-Options", "SAMEORIGIN")
   res.setHeader("Referrer-Policy", "no-referrer")
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
-  )
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+  res.vary("Origin")
   next()
 })
 

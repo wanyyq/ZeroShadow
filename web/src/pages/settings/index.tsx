@@ -13,6 +13,20 @@ import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -423,6 +437,11 @@ function MembersSection() {
   const [createdInfo, setCreatedInfo] = React.useState<string[]>([])
   const [resetTarget, setResetTarget] = React.useState<Member | null>(null)
   const [resetPassword, setResetPassword] = React.useState("")
+  const [renameTarget, setRenameTarget] = React.useState<Member | null>(null)
+  const [newUsername, setNewUsername] = React.useState("")
+  const [resetBatch, setResetBatch] = React.useState(false)
+  const [batchNewPassword, setBatchNewPassword] = React.useState("")
+  const [confirmDelete, setConfirmDelete] = React.useState<{ singleId?: string } | null>(null)
 
   const load = React.useCallback(() => {
     api
@@ -473,10 +492,11 @@ function MembersSection() {
     }
   }
 
-  const batch = async (action: "enable" | "disable" | "delete") => {
-    if (!selected.size) return
+  const batch = async (action: "enable" | "disable" | "delete", singleId?: string) => {
+    const ids = singleId ? [singleId] : [...selected]
+    if (!ids.length) return
     try {
-      await api.post("/admin/members/batch", { action, ids: [...selected] })
+      await api.post("/admin/members/batch", { action, ids })
       toast.success("操作完成")
       load()
     } catch (e) {
@@ -512,10 +532,11 @@ function MembersSection() {
           {selected.size > 0 && (
             <>
               <Separator orientation="vertical" className="h-5" />
-              <span className="text-xs text-muted-foreground">已选 {selected.size} 人</span>
+              <span className="text-xs text-muted-foreground">已选 {selected.size}</span>
               <Button size="sm" variant="outline" onClick={() => batch("enable")}>启用</Button>
               <Button size="sm" variant="outline" onClick={() => batch("disable")}>禁用</Button>
-              <Button size="sm" variant="destructive" onClick={() => batch("delete")}>删除</Button>
+              <Button size="sm" variant="outline" onClick={() => setResetBatch(true)}>批量重置密码</Button>
+              <Button size="sm" variant="destructive" onClick={() => setConfirmDelete({})}>删除</Button>
             </>
           )}
         </div>
@@ -547,7 +568,7 @@ function MembersSection() {
                 <TableHead>用户名</TableHead>
                 <TableHead className="w-24">状态</TableHead>
                 <TableHead className="w-44">创建时间</TableHead>
-                <TableHead className="w-28 text-right">操作</TableHead>
+                <TableHead className="w-12 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -559,35 +580,83 @@ function MembersSection() {
                 </TableRow>
               )}
               {members.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selected.has(m.id)}
-                      onCheckedChange={() =>
-                        setSelected((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(m.id)) next.delete(m.id)
-                          else next.add(m.id)
-                          return next
-                        })
-                      }
-                    />
-                  </TableCell>
-                  <TableCell className="font-medium">{m.username}</TableCell>
-                  <TableCell>
-                    <Badge variant={m.disabled ? "secondary" : "default"}>
-                      {m.disabled ? "已禁用" : "正常"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {m.createdAt.replace("T", " ").slice(0, 19)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button size="xs" variant="ghost" onClick={() => setResetTarget(m)}>
-                      重置密码
-                    </Button>
-                  </TableCell>
-                </TableRow>
+                <ContextMenu key={m.id}>
+                  <ContextMenuTrigger render={
+                    <TableRow key={m.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selected.has(m.id)}
+                          onCheckedChange={() =>
+                            setSelected((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(m.id)) next.delete(m.id)
+                              else next.add(m.id)
+                              return next
+                            })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="font-medium">{m.username}</TableCell>
+                      <TableCell>
+                        <Badge variant={m.disabled ? "secondary" : "default"}>
+                          {m.disabled ? "已禁用" : "正常"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {m.createdAt.replace("T", " ").slice(0, 19)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" />}>
+                          <Icon name="ellipsis-vertical" className="size-3.5" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {m.disabled ? (
+                            <DropdownMenuItem onClick={() => batch("enable", m.id)}>
+                              <Icon name="check-circle" /> 启用
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => batch("disable", m.id)}>
+                              <Icon name="circle-slash" /> 禁用
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}>
+                            <Icon name="pencil-line" /> 更改用户名
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setResetTarget(m)}>
+                            <Icon name="key" /> 重置密码
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}>
+                            <Icon name="trash-2" /> 删除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                  } />
+                  <ContextMenuContent className="w-44">
+                    {m.disabled ? (
+                      <ContextMenuItem onClick={() => batch("enable", m.id)}>
+                        <Icon name="check-circle" /> 启用
+                      </ContextMenuItem>
+                    ) : (
+                      <ContextMenuItem onClick={() => batch("disable", m.id)}>
+                        <Icon name="circle-slash" /> 禁用
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}>
+                      <Icon name="pencil-line" /> 更改用户名
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => setResetTarget(m)}>
+                      <Icon name="key" /> 重置密码
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}>
+                      <Icon name="trash-2" /> 删除
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               ))}
             </TableBody>
           </Table>
@@ -615,6 +684,82 @@ function MembersSection() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>取消</Button>
             <Button onClick={createBatch} disabled={!batchText.trim()}>创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) setConfirmDelete(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmDelete?.singleId
+                ? "将永久删除该成员，操作不可撤销。"
+                : `将永久删除选中的 ${selected.size} 个成员，操作不可撤销。`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20"
+              onClick={(e) => { e.preventDefault(); batch("delete", confirmDelete?.singleId); setConfirmDelete(null) }}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={resetTarget !== null || resetBatch} onOpenChange={(o) => { if (!o) { setResetTarget(null); setResetBatch(false) } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{resetBatch ? `批量重置 ${selected.size} 个成员的密码` : `重置 ${resetTarget?.username} 的密码`}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="reset-pwd">新密码</Label>
+            <div className="flex gap-2">
+              <Input
+                id="reset-pwd"
+                value={resetBatch ? batchNewPassword : resetPassword}
+                onChange={(e) => resetBatch ? setBatchNewPassword(e.target.value) : setResetPassword(e.target.value)}
+                placeholder="至少 6 位"
+              />
+              <Button variant="outline" onClick={() => { const p = genPassword(); resetBatch ? setBatchNewPassword(p) : setResetPassword(p) }}>
+                随机生成
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setResetTarget(null); setResetBatch(false) }}>取消</Button>
+            <Button onClick={resetBatch ? async () => {
+              if (batchNewPassword.length < 6) return
+              for (const id of selected) {
+                await api.post(`/admin/members/${id}/password`, { password: batchNewPassword })
+              }
+              toast.success(`已重置 ${selected.size} 个成员的密码`)
+              setResetBatch(false); setBatchNewPassword(""); load()
+            } : doReset} disabled={resetBatch ? batchNewPassword.length < 6 : resetPassword.length < 6}>
+              确定
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renameTarget !== null} onOpenChange={(o) => !o && setRenameTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>更改 {renameTarget?.username} 的用户名</DialogTitle></DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="rename-user">新用户名</Label>
+            <Input id="rename-user" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="2-32 位字母、数字、_ . -" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameTarget(null)}>取消</Button>
+            <Button onClick={async () => {
+              if (!renameTarget || !newUsername.trim()) return
+              try {
+                await api.patch(`/admin/members/${renameTarget.id}`, { username: newUsername.trim() })
+                toast.success("用户名已更改")
+                setRenameTarget(null); load()
+              } catch (e) { toast.error((e as Error).message) }
+            }} disabled={!newUsername.trim()}>确定</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

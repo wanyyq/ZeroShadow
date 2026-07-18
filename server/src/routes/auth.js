@@ -11,10 +11,17 @@ import {
   verifySuperPassword,
 } from "../auth.js"
 import { effectivePerms, uploadLimitMB } from "../config.js"
-import { verifyLogin } from "../users.js"
+import bcrypt from "bcryptjs"
+import { verifyLogin, findById, resetPassword } from "../users.js"
 import { info, warn } from "../logger.js"
 
 const router = Router()
+
+function httpError(status, message) {
+  const err = new Error(message)
+  err.status = status
+  return err
+}
 
 router.post("/login", async (req, res) => {
   const username = String(req.body?.username || "").trim()
@@ -57,6 +64,32 @@ router.post("/login", async (req, res) => {
   res.cookie(COOKIE_NAME, signToken(auth), cookieOptions())
   info("login_success", { user: auth.username, role: auth.role, ip: req.ip })
   res.json({ role: auth.role, username: auth.username })
+})
+
+router.post("/change-password", requireRole("superadmin", "member"), async (req, res, next) => {
+  try {
+    const oldPwd = String(req.body?.oldPassword || "")
+    const newPwd = String(req.body?.newPassword || "")
+    if (!oldPwd || !newPwd) throw httpError(400, "请输入旧密码和新密码")
+    if (newPwd.length < 6 || newPwd.length > 128) throw httpError(400, "新密码长度需为 6-128 位")
+
+    if (req.auth.role === "superadmin") {
+      throw httpError(400, "超级管理员密码请直接编辑 .env 中 SUPER_ADMIN_PASSWORD，改后重启服务生效")
+    }
+
+    const user = findById(req.auth.userId)
+    if (!user) throw httpError(404, "用户不存在")
+    const ok = await bcrypt.compare(oldPwd, user.passwordHash)
+    if (!ok) throw httpError(403, "旧密码错误")
+
+    const error = await resetPassword(req.auth.userId, newPwd)
+    if (error) throw httpError(400, error)
+    res.clearCookie(COOKIE_NAME, { path: "/" })
+    info("password_change", { user: req.auth.username, role: req.auth.role })
+    res.json({ ok: true, message: "密码已修改，请重新登录" })
+  } catch (err) {
+    next(err)
+  }
 })
 
 router.post("/logout", requireRole("superadmin", "member"), (req, res) => {
