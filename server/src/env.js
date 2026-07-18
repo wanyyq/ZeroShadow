@@ -2,11 +2,8 @@ import fs from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
 
-// pkg 编译后 process.execPath 指向 .exe 所在目录，正常运行时用 import.meta.url
 const isPkg = typeof process.pkg !== "undefined"
-const ROOT_DIR = isPkg
-  ? path.dirname(process.execPath)
-  : path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:\/)/, "$1")), "..", "..")
+const ROOT_DIR = isPkg ? path.dirname(process.execPath) : process.cwd()
 const ENV_FILE = path.join(ROOT_DIR, ".env")
 
 function randomPassword() {
@@ -40,7 +37,16 @@ if (!fs.existsSync(ENV_FILE)) {
 }
 
 try {
-  process.loadEnvFile(ENV_FILE)
+  const raw = fs.readFileSync(ENV_FILE, "utf8")
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#")) continue
+    const idx = trimmed.indexOf("=")
+    if (idx < 1) continue
+    const key = trimmed.slice(0, idx).trim()
+    const value = trimmed.slice(idx + 1).trim()
+    if (!(key in process.env)) process.env[key] = value
+  }
 } catch {
   /* .env unreadable -> defaults below */
 }

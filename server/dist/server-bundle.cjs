@@ -55680,18 +55680,17 @@ var require_archiver = __commonJS({
 });
 
 // index.js
-var import_node_fs7 = __toESM(require("node:fs"));
-var import_node_path9 = __toESM(require("node:path"));
-var import_express4 = __toESM(require_express2());
-var import_cookie_parser = __toESM(require_cookie_parser());
+var import_node_fs7 = __toESM(require("node:fs"), 1);
+var import_node_path9 = __toESM(require("node:path"), 1);
+var import_express4 = __toESM(require_express2(), 1);
+var import_cookie_parser = __toESM(require_cookie_parser(), 1);
 
 // src/env.js
-var import_node_fs = __toESM(require("node:fs"));
-var import_node_path = __toESM(require("node:path"));
-var import_node_crypto = __toESM(require("node:crypto"));
-var import_meta = {};
+var import_node_fs = __toESM(require("node:fs"), 1);
+var import_node_path = __toESM(require("node:path"), 1);
+var import_node_crypto = __toESM(require("node:crypto"), 1);
 var isPkg = typeof process.pkg !== "undefined";
-var ROOT_DIR = isPkg ? import_node_path.default.dirname(process.execPath) : import_node_path.default.resolve(import_node_path.default.dirname(new URL(import_meta.url).pathname.replace(/^\/([A-Za-z]:\/)/, "$1")), "..", "..");
+var ROOT_DIR = isPkg ? import_node_path.default.dirname(process.execPath) : process.cwd();
 var ENV_FILE = import_node_path.default.join(ROOT_DIR, ".env");
 function randomPassword() {
   return import_node_crypto.default.randomBytes(12).toString("base64url");
@@ -55720,7 +55719,16 @@ if (!import_node_fs.default.existsSync(ENV_FILE)) {
   import_node_fs.default.writeFileSync(ENV_FILE, envTemplate(generatedPassword), "utf8");
 }
 try {
-  process.loadEnvFile(ENV_FILE);
+  const raw = import_node_fs.default.readFileSync(ENV_FILE, "utf8");
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx < 1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    const value = trimmed.slice(idx + 1).trim();
+    if (!(key in process.env)) process.env[key] = value;
+  }
 } catch {
 }
 function toInt(value, fallback) {
@@ -55777,15 +55785,15 @@ function loadSecret() {
 var JWT_SECRET = loadSecret();
 
 // src/auth.js
-var import_node_crypto3 = __toESM(require("node:crypto"));
-var import_jsonwebtoken = __toESM(require_jsonwebtoken());
+var import_node_crypto3 = __toESM(require("node:crypto"), 1);
+var import_jsonwebtoken = __toESM(require_jsonwebtoken(), 1);
 
 // src/config.js
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path3 = __toESM(require("node:path"), 1);
 
 // src/store.js
-var import_node_fs2 = __toESM(require("node:fs"));
-var import_node_path2 = __toESM(require("node:path"));
+var import_node_fs2 = __toESM(require("node:fs"), 1);
+var import_node_path2 = __toESM(require("node:path"), 1);
 var queues = /* @__PURE__ */ new Map();
 function withLock(key, fn) {
   const prev = queues.get(key) || Promise.resolve();
@@ -55922,8 +55930,8 @@ function uploadLimitMB(role) {
 }
 
 // src/users.js
-var import_node_path4 = __toESM(require("node:path"));
-var import_node_crypto2 = __toESM(require("node:crypto"));
+var import_node_path4 = __toESM(require("node:path"), 1);
+var import_node_crypto2 = __toESM(require("node:crypto"), 1);
 
 // node_modules/.pnpm/bcryptjs@3.0.3/node_modules/bcryptjs/index.js
 var import_crypto = __toESM(require("crypto"), 1);
@@ -57763,8 +57771,8 @@ async function resetPassword(id, password) {
 }
 
 // src/logger.js
-var import_node_fs3 = __toESM(require("node:fs"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_path5 = __toESM(require("node:path"), 1);
 function dateKey(d = /* @__PURE__ */ new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -58151,15 +58159,15 @@ function stopTunnel() {
 }
 
 // src/status.js
-var import_node_os = __toESM(require("node:os"));
-var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"), 1);
+var import_node_fs5 = __toESM(require("node:fs"), 1);
 
 // src/files.js
-var import_node_fs4 = __toESM(require("node:fs"));
-var import_node_path7 = __toESM(require("node:path"));
+var import_node_fs4 = __toESM(require("node:fs"), 1);
+var import_node_path7 = __toESM(require("node:path"), 1);
 
 // src/safety.js
-var import_node_path6 = __toESM(require("node:path"));
+var import_node_path6 = __toESM(require("node:path"), 1);
 var CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin";
 function normRel(input = "") {
   const raw = String(input).replace(/\\/g, "/");
@@ -58440,7 +58448,7 @@ async function getStatus() {
 }
 
 // src/routes/auth.js
-var import_express = __toESM(require_express2());
+var import_express = __toESM(require_express2(), 1);
 var router = (0, import_express.Router)();
 function httpError(status, message) {
   const err = new Error(message);
@@ -58524,12 +58532,12 @@ router.get("/me", (req, res) => {
 var auth_default = router;
 
 // src/routes/fs.js
-var import_node_fs6 = __toESM(require("node:fs"));
-var import_node_path8 = __toESM(require("node:path"));
-var import_node_crypto4 = __toESM(require("node:crypto"));
-var import_express2 = __toESM(require_express2());
-var import_busboy = __toESM(require_lib3());
-var import_archiver = __toESM(require_archiver());
+var import_node_fs6 = __toESM(require("node:fs"), 1);
+var import_node_path8 = __toESM(require("node:path"), 1);
+var import_node_crypto4 = __toESM(require("node:crypto"), 1);
+var import_express2 = __toESM(require_express2(), 1);
+var import_busboy = __toESM(require_lib3(), 1);
+var import_archiver = __toESM(require_archiver(), 1);
 var router2 = (0, import_express2.Router)();
 function httpError2(status, message) {
   const err = new Error(message);
@@ -58951,7 +58959,7 @@ router2.post(
 var fs_default = router2;
 
 // src/routes/admin.js
-var import_express3 = __toESM(require_express2());
+var import_express3 = __toESM(require_express2(), 1);
 var router3 = (0, import_express3.Router)();
 router3.use(requireRole("superadmin"));
 function httpError3(status, message) {

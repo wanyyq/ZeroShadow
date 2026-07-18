@@ -2,6 +2,7 @@
   "name": "zerosha-server",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "bin": "index.js",
   "scripts": {
     "start": "node index.js",
