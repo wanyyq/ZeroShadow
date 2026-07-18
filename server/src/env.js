@@ -1,10 +1,12 @@
 import fs from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
-import { fileURLToPath } from "node:url"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-export const ROOT_DIR = path.resolve(__dirname, "..", "..")
+// pkg 编译后 process.execPath 指向 .exe 所在目录，正常运行时用 import.meta.url
+const isPkg = typeof process.pkg !== "undefined"
+const ROOT_DIR = isPkg
+  ? path.dirname(process.execPath)
+  : path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:\/)/, "$1")), "..", "..")
 const ENV_FILE = path.join(ROOT_DIR, ".env")
 
 function randomPassword() {

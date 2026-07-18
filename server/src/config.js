@@ -24,7 +24,7 @@ const DEFAULTS = {
   guestHiddenPaths: [],
   tunnel: {
     enabled: false,
-    mode: "serveo",
+    mode: "pinggy",
     customHost: "",
   },
 };

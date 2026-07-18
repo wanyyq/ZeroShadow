@@ -5,3 +5,5 @@ data/
 *.log
 .DS_Store
 Thumbs.db
+ZeroShadow-Release/
+ZeroShadow-Release.zip

@@ -23,6 +23,20 @@ for (const name of fs.readdirSync(TMP_DIR)) {
 const app = express()
 app.disable("x-powered-by")
 
+// 健康检查：最简裸响应，验证隧道代理可达
+app.get("/ping", (_req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8")
+  res.end("pong")
+})
+
+// 请求日志：诊断隧道请求
+app.use((req, _res, next) => {
+  if (req.path !== "/favicon.ico" && req.path !== "/resources/lucide.min.js") {
+    console.log(`[REQ] ${req.method} ${req.path} host=${req.headers.host} ua=${(req.headers["user-agent"] || "").slice(0, 40)}`)
+  }
+  next()
+})
+
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff")
   res.setHeader("X-Frame-Options", "SAMEORIGIN")
@@ -32,12 +46,20 @@ app.use((_req, res, next) => {
 
 app.use(cookieParser())
 app.use(express.json({ limit: "1mb" }))
+
+// 全局限流：防止隧道代理场景下的 TCP 缓冲问题
+app.use((req, _res, next) => {
+  if (req.socket) req.socket.setNoDelay(true)
+  next()
+})
+
 app.use(attachAuth)
 app.use("/api", csrfGuard)
 
 app.get("/api/meta", (_req, res) => {
   res.json({ name: "ZeroShadow", version: "1.0.0" })
 })
+
 app.use("/api/auth", authRoutes)
 app.use("/api/fs", fsRoutes)
 app.use("/api/admin", adminRoutes)
@@ -103,9 +125,6 @@ const server = app.listen(env.port, env.host, () => {
   const tunnel = getConfig().tunnel
   if (tunnel.enabled) applyTunnelConfig(tunnel)
 })
-
-server.requestTimeout = 0
-server.headersTimeout = 120000
 
 function shutdown() {
   stopTunnel()

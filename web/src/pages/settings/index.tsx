@@ -561,7 +561,7 @@ function TunnelSection() {
 
   const load = React.useCallback(() => {
     api.get<{ config: { enabled: boolean; mode: string; customHost: string }; status: TunnelStatus }>("/admin/tunnel")
-      .then((d) => { setConfig(d.config); setStatus(d.status) }).catch((e) => toast.error((e as Error).message))
+      .then((d) => { setConfig((prev) => prev ?? d.config); setStatus(d.status) }).catch((e) => toast.error((e as Error).message))
   }, [])
   React.useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [load])
 
@@ -587,7 +587,7 @@ function TunnelSection() {
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm">隧道服务</span>
-            <Select value={config.mode} onValueChange={(v) => { if (v) setConfig({ ...config, mode: v }) }}>
+            <Select value={config.mode} onValueChange={(v) => v && setConfig({ ...config, mode: v })}>
               <SelectTrigger className="w-40"><SelectValue>pinggy.io</SelectValue></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pinggy">pinggy.io（推荐）</SelectItem>
