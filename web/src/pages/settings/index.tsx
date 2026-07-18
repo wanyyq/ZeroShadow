@@ -967,13 +967,13 @@ function PermsSection() {
 /* ---------- 公网访问（超级管理员） ---------- */
 
 function TunnelSection() {
-  const [config, setConfig] = React.useState<{ enabled: boolean; mode: "serveo" | "localhostrun" | "custom"; customHost: string } | null>(null)
+  const [config, setConfig] = React.useState<{ enabled: boolean; mode: "serveo" | "localhostrun" | "pinggy" | "custom"; customHost: string } | null>(null)
   const [status, setStatus] = React.useState<TunnelStatus | null>(null)
   const [busy, setBusy] = React.useState(false)
 
   const load = React.useCallback(() => {
     api
-      .get<{ config: { enabled: boolean; mode: "serveo" | "localhostrun" | "custom"; customHost: string }; status: TunnelStatus }>(
+      .get<{ config: { enabled: boolean; mode: "serveo" | "localhostrun" | "pinggy" | "custom"; customHost: string }; status: TunnelStatus }>(
         "/admin/tunnel"
       )
       .then((d) => {
@@ -989,7 +989,7 @@ function TunnelSection() {
     return () => clearInterval(timer)
   }, [load])
 
-  const apply = async (next: { enabled: boolean; mode: "serveo" | "localhostrun" | "custom"; customHost: string }) => {
+  const apply = async (next: { enabled: boolean; mode: "serveo" | "localhostrun" | "pinggy" | "custom"; customHost: string }) => {
     setBusy(true)
     try {
       const d = await api.post<{ config: typeof next; status: TunnelStatus }>("/admin/tunnel", next)
@@ -1030,12 +1030,13 @@ function TunnelSection() {
             <Label>隧道服务</Label>
             <Select
               value={config.mode}
-              onValueChange={(v) => setConfig({ ...config, mode: v as "serveo" | "localhostrun" | "custom" })}
+              onValueChange={(v) => setConfig({ ...config, mode: v as "serveo" | "localhostrun" | "pinggy" | "custom" })}
             >
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="serveo">serveo.net</SelectItem>
+                <SelectItem value="pinggy">pinggy.io（推荐）</SelectItem>
                 <SelectItem value="localhostrun">localhost.run</SelectItem>
+                <SelectItem value="serveo">serveo.net</SelectItem>
                 <SelectItem value="custom">自定义 SSH</SelectItem>
               </SelectContent>
             </Select>

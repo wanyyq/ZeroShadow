@@ -1,14 +1,18 @@
 import { spawn } from "node:child_process"
+import crypto from "node:crypto"
 import { env } from "./env.js"
 import { info, warn } from "./logger.js"
 
-const HOST_RE = /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(?::\d{1,5})?$/
+function randomSubdomain() {
+  return crypto.randomBytes(4).toString("hex")
+}
 
 const state = {
   proc: null,
   running: false,
   desired: false,
   url: null,
+  subdomain: null,
   output: [],
   startedAt: null,
   restarts: 0,
@@ -23,17 +27,15 @@ function pushOutput(line) {
   if (!text) return
   state.output.push(`[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}] ${text}`)
   if (state.output.length > 120) state.output.splice(0, state.output.length - 120)
-  // 匹配各种隧道服务的 URL 格式
-  // serveo: https://xxx.serveo.net
-  // localhost.run: https://xxx.lhr.life
-  // 通用: any http(s) URL
   const m = text.match(/(https?:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+)/)
   if (m && !state.url) {
     const url = m[1].replace(/[.,;]+$/, "")
     state.url = url
-    info("tunnel_url", { msg: `公网地址: ${url}` })
+    info("tunnel_url", { msg: `公网地址: ${state.url}` })
   }
 }
+
+const HOST_RE = /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(?::\d{1,5})?$/
 
 export function validateCustomHost(host) {
   const value = String(host || "").trim()
@@ -44,16 +46,21 @@ export function validateCustomHost(host) {
 }
 
 function buildArgs(tunnelCfg) {
-  const args = [
+  const base = [
     "-o", "StrictHostKeyChecking=accept-new",
     "-o", "ServerAliveInterval=60",
     "-o", "ServerAliveCountMax=3",
     "-o", "ConnectTimeout=15",
     "-o", "UserKnownHostsFile=NUL",
-    "-N",
-    "-R", `80:localhost:${env.port}`,
   ]
-  if (tunnelCfg.mode === "custom") {
+  const args = [...base]
+  if (tunnelCfg.mode === "pinggy") {
+    // pinggy 需要输出 banner → 不能用 -N，改用 -T
+    args.push("-T", "-p", "443", "-R", `0:localhost:${env.port}`, "a.pinggy.io")
+  } else if (tunnelCfg.mode === "localhostrun") {
+    args.push("-N", "-R", `80:localhost:${env.port}`, "nokey@localhost.run")
+  } else if (tunnelCfg.mode === "custom") {
+    args.push("-N", "-R", `80:localhost:${env.port}`)
     let target = tunnelCfg.customHost.trim()
     const portMatch = target.match(/^(.*):(\d{1,5})$/)
     if (portMatch) {
@@ -61,10 +68,11 @@ function buildArgs(tunnelCfg) {
       args.push("-p", portMatch[2])
     }
     args.push(target)
-  } else if (tunnelCfg.mode === "localhostrun") {
-    args.push("nokey@localhost.run")
   } else {
-    args.push("serveo.net")
+    // serveo
+    const sub = state.subdomain || randomSubdomain()
+    state.subdomain = sub
+    args.push("-N", "-R", `${sub}:80:localhost:${env.port}`, "serveo.net")
   }
   return args
 }
@@ -101,11 +109,22 @@ function launch(tunnelCfg) {
   state.proc = proc
   state.running = true
   state.startedAt = Date.now()
-  state.url = null
   pushOutput(`ssh ${args.join(" ")}`)
+
+  // serveo: 直接预测 URL；pinggy 和 localhost.run 等解析出 stderr/stdout URL
+  if (tunnelCfg.mode !== "custom" && tunnelCfg.mode !== "localhostrun" && tunnelCfg.mode !== "pinggy" && state.subdomain) {
+    const predicted = `https://${state.subdomain}.serveo.net`
+    if (!state.url) {
+      state.url = predicted
+      info("tunnel_url", { msg: `公网地址: ${predicted}` })
+      pushOutput(`（预测地址）${predicted}`)
+    }
+  } else {
+    state.url = null
+  }
+
   info("tunnel_start", { msg: `模式: ${tunnelCfg.mode}` })
 
-  // 10 秒后仍无 URL 且进程存活 → 提示用户手动访问
   if (state.urlTimer) clearTimeout(state.urlTimer)
   state.urlTimer = setTimeout(() => {
     if (!state.url && state.proc && state.running) {
@@ -125,7 +144,6 @@ function launch(tunnelCfg) {
     state.proc = null
     state.running = false
     if (state.urlTimer) { clearTimeout(state.urlTimer); state.urlTimer = null }
-    if (!state.url) state.url = null
     state.lastExit = { code, signal, at: Date.now() }
     pushOutput(`ssh 已退出 (code=${code ?? "-"} signal=${signal ?? "-"})`)
     if (state.desired) {
@@ -150,6 +168,7 @@ export function applyTunnelConfig(tunnelCfg) {
     }
     state.running = false
     state.url = null
+    state.subdomain = null
     return
   }
   state.backoffMs = 5000
