@@ -13,7 +13,7 @@ function randomPassword() {
 
 function envTemplate(password) {
   return [
-    "# ===== EPan 服务配置 =====",
+    "# ===== ZeroShadow 服务配置 =====",
     "PORT=5170",
     "HOST=0.0.0.0",
     "",
@@ -25,7 +25,7 @@ function envTemplate(password) {
     "SESSION_HOURS=72",
     "",
     "# 网盘文件根目录（留空则使用 ./data/files）",
-    "# FILES_DIR=D:\\EPanFiles",
+    "# FILES_DIR=D:\\ZeroShadowFiles",
     "",
   ].join("\n")
 }

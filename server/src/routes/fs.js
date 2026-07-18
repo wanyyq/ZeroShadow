@@ -167,7 +167,7 @@ router.get("/zip", requirePerm("zip"), async (req, res, next) => {
     if (!items.length) throw httpError(404, "没有可下载的内容")
 
     const zipName =
-      items.length === 1 ? `${items[0].name}.zip` : `EPan-${new Date().toISOString().slice(0, 10)}.zip`
+      items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
     res.setHeader("Content-Type", "application/zip")
     res.setHeader("Content-Disposition", contentDisposition("attachment", zipName))
     res.setHeader("Cache-Control", "no-store")

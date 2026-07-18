@@ -19,7 +19,7 @@ const DEFAULTS: ClientSettings = {
   foldersFirst: true,
 }
 
-const STORAGE_KEY = "epan-client-settings"
+const STORAGE_KEY = "zs-client-settings"
 
 interface ClientSettingsState extends ClientSettings {
   update: (partial: Partial<ClientSettings>) => void

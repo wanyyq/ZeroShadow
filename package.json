@@ -1,8 +1,8 @@
 {
-  "name": "epan",
+  "name": "zerosha",
   "private": true,
   "version": "1.0.0",
-  "description": "EPan - lightweight LAN cloud drive (Node + React)",
+  "description": "ZeroShadow - lightweight LAN cloud drive (Node + React)",
   "type": "module",
   "scripts": {
     "setup": "pnpm -C server install && pnpm -C web install",

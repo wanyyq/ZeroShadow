@@ -42,7 +42,7 @@ app.use(attachAuth)
 app.use("/api", csrfGuard)
 
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "EPan", version: "1.0.0" })
+  res.json({ name: "ZeroShadow", version: "1.0.0" })
 })
 app.use("/api/auth", authRoutes)
 app.use("/api/fs", fsRoutes)
@@ -91,9 +91,9 @@ app.use((err, req, res, _next) => {
 })
 
 const server = app.listen(env.port, env.host, () => {
-  info("server_start", { msg: `EPan 已启动，端口 ${env.port}` })
+  info("server_start", { msg: `ZeroShadow 已启动，端口 ${env.port}` })
   console.log("")
-  console.log("  EPan 网盘已启动")
+  console.log("  ZeroShadow 网盘已启动")
   console.log(`  本机访问:   http://localhost:${env.port}`)
   for (const addr of lanAddresses()) {
     console.log(`  局域网访问: http://${addr}:${env.port}`)

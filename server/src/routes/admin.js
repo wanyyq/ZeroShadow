@@ -161,7 +161,7 @@ router.post("/tunnel", async (req, res, next) => {
   try {
     const body = req.body || {}
     const enabled = !!body.enabled
-    const mode = body.mode === "custom" ? "custom" : "serveo"
+    const mode = body.mode === "custom" ? "custom" : body.mode === "localhostrun" ? "localhostrun" : "serveo"
     const customHost = String(body.customHost || "").trim()
     if (enabled && mode === "custom") {
       const invalid = validateCustomHost(customHost)

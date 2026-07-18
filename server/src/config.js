@@ -27,7 +27,7 @@ const DEFAULTS = {
     mode: "serveo",
     customHost: "",
   },
-}
+};
 
 function deepMerge(base, extra) {
   if (Array.isArray(base)) return Array.isArray(extra) ? extra : base

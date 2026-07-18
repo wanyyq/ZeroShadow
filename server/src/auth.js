@@ -5,7 +5,7 @@ import { effectivePerms } from "./config.js"
 import { findById } from "./users.js"
 import { warn } from "./logger.js"
 
-export const COOKIE_NAME = "epan_token"
+export const COOKIE_NAME = "zs_token"
 
 const superPasswordVersion = crypto
   .createHash("sha256")

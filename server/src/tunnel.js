@@ -15,6 +15,7 @@ const state = {
   lastExit: null,
   restartTimer: null,
   backoffMs: 5000,
+  urlTimer: null,
 }
 
 function pushOutput(line) {
@@ -22,10 +23,15 @@ function pushOutput(line) {
   if (!text) return
   state.output.push(`[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}] ${text}`)
   if (state.output.length > 120) state.output.splice(0, state.output.length - 120)
-  const match = text.match(/https?:\/\/[^\s"']+/)
-  if (match && /serveo|forward|tunnel/i.test(text)) {
-    state.url = match[0]
-    info("tunnel_url", { msg: `公网地址: ${state.url}` })
+  // 匹配各种隧道服务的 URL 格式
+  // serveo: https://xxx.serveo.net
+  // localhost.run: https://xxx.lhr.life
+  // 通用: any http(s) URL
+  const m = text.match(/(https?:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+)/)
+  if (m && !state.url) {
+    const url = m[1].replace(/[.,;]+$/, "")
+    state.url = url
+    info("tunnel_url", { msg: `公网地址: ${url}` })
   }
 }
 
@@ -42,8 +48,8 @@ function buildArgs(tunnelCfg) {
     "-o", "StrictHostKeyChecking=accept-new",
     "-o", "ServerAliveInterval=60",
     "-o", "ServerAliveCountMax=3",
-    "-o", "ExitOnForwardFailure=yes",
-    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=15",
+    "-o", "UserKnownHostsFile=NUL",
     "-N",
     "-R", `80:localhost:${env.port}`,
   ]
@@ -55,6 +61,8 @@ function buildArgs(tunnelCfg) {
       args.push("-p", portMatch[2])
     }
     args.push(target)
+  } else if (tunnelCfg.mode === "localhostrun") {
+    args.push("nokey@localhost.run")
   } else {
     args.push("serveo.net")
   }
@@ -93,9 +101,17 @@ function launch(tunnelCfg) {
   state.proc = proc
   state.running = true
   state.startedAt = Date.now()
-  state.url = tunnelCfg.mode === "serveo" ? null : state.url
+  state.url = null
   pushOutput(`ssh ${args.join(" ")}`)
   info("tunnel_start", { msg: `模式: ${tunnelCfg.mode}` })
+
+  // 10 秒后仍无 URL 且进程存活 → 提示用户手动访问
+  if (state.urlTimer) clearTimeout(state.urlTimer)
+  state.urlTimer = setTimeout(() => {
+    if (!state.url && state.proc && state.running) {
+      pushOutput("（尚未捕获到公网地址，隧道可能仍正常工作）")
+    }
+  }, 15000)
 
   const onData = (chunk) => {
     for (const line of chunk.toString("utf8").split(/\r?\n/)) pushOutput(line)
@@ -108,7 +124,8 @@ function launch(tunnelCfg) {
   proc.on("exit", (code, signal) => {
     state.proc = null
     state.running = false
-    state.url = null
+    if (state.urlTimer) { clearTimeout(state.urlTimer); state.urlTimer = null }
+    if (!state.url) state.url = null
     state.lastExit = { code, signal, at: Date.now() }
     pushOutput(`ssh 已退出 (code=${code ?? "-"} signal=${signal ?? "-"})`)
     if (state.desired) {
@@ -124,15 +141,12 @@ export function applyTunnelConfig(tunnelCfg) {
   const shouldRun = !!tunnelCfg.enabled
   state.desired = shouldRun
   clearRestartTimer()
+  if (state.urlTimer) { clearTimeout(state.urlTimer); state.urlTimer = null }
   if (!shouldRun) {
     if (state.proc) {
-      const proc = state.proc
+      const p = state.proc
       state.proc = null
-      try {
-        proc.kill()
-      } catch {
-        /* already dead */
-      }
+      try { p.kill() } catch { /* dead */ }
     }
     state.running = false
     state.url = null
@@ -140,19 +154,11 @@ export function applyTunnelConfig(tunnelCfg) {
   }
   state.backoffMs = 5000
   if (state.proc) {
-    const proc = state.proc
+    const p = state.proc
     state.proc = null
-    proc.removeAllListeners("exit")
-    proc.on("exit", () => {
-      state.running = false
-      launch(tunnelCfg)
-    })
-    try {
-      proc.kill()
-    } catch {
-      state.running = false
-      launch(tunnelCfg)
-    }
+    p.removeAllListeners("exit")
+    p.on("exit", () => { state.running = false; launch(tunnelCfg) })
+    try { p.kill() } catch { state.running = false; launch(tunnelCfg) }
   } else {
     launch(tunnelCfg)
   }
@@ -172,12 +178,9 @@ export function tunnelStatus() {
 export function stopTunnel() {
   state.desired = false
   clearRestartTimer()
+  if (state.urlTimer) { clearTimeout(state.urlTimer); state.urlTimer = null }
   if (state.proc) {
-    try {
-      state.proc.kill()
-    } catch {
-      /* ignore */
-    }
+    try { state.proc.kill() } catch { /* ignore */ }
     state.proc = null
   }
   state.running = false

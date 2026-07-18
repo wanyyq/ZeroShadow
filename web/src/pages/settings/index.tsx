@@ -1,6 +1,6 @@
 import * as React from "react"
 import { toast } from "sonner"
-import { AppHeader } from "@/components/layout/app-header"
+import { AppShell } from "@/components/layout/app-shell"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -52,65 +52,71 @@ export function SettingsPage() {
   const isSuper = me.role === "superadmin"
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <AppHeader />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-        <h1 className="font-heading mb-1 text-2xl font-semibold tracking-tight">设置</h1>
-        <p className="mb-6 text-sm text-muted-foreground">
-          {isSuper ? "管理外观、服务器、成员与权限" : "个性化你的浏览体验"}
-        </p>
-        {ready && (
-          <Tabs defaultValue="appearance" className="gap-4">
-            <TabsList variant="line" className="flex-wrap">
-              <TabsTrigger value="appearance">
-                <Icon name="palette" /> 外观与浏览
-              </TabsTrigger>
+    <AppShell>
+      <div className="flex flex-1 flex-col overflow-auto px-4 py-4 sm:px-6 sm:py-6">
+        <div className="mx-auto w-full max-w-5xl">
+          <h1 className="font-heading mb-1 text-2xl font-semibold tracking-tight">设置</h1>
+          <p className="mb-6 text-sm text-muted-foreground">
+            {isSuper ? "管理外观、服务器、成员与权限" : "个性化你的浏览体验"}
+          </p>
+          {ready && (
+            <Tabs defaultValue="appearance" className="gap-4">
+              <TabsList variant="line" className="flex-wrap">
+                <TabsTrigger value="appearance">
+                  <Icon name="palette" /> 外观与浏览
+                </TabsTrigger>
+                {isSuper && (
+                  <>
+                    <TabsTrigger value="status">
+                      <Icon name="activity" /> 服务器状态
+                    </TabsTrigger>
+                    <TabsTrigger value="logs">
+                      <Icon name="scroll-text" /> 日志
+                    </TabsTrigger>
+                    <TabsTrigger value="members">
+                      <Icon name="users" /> 成员管理
+                    </TabsTrigger>
+                    <TabsTrigger value="perms">
+                      <Icon name="shield-check" /> 权限
+                    </TabsTrigger>
+                    <TabsTrigger value="tunnel">
+                      <Icon name="globe" /> 公网访问
+                    </TabsTrigger>
+                  </>
+                )}
+              </TabsList>
+              <TabsContent value="appearance">
+                <AppearanceSection />
+              </TabsContent>
               {isSuper && (
                 <>
-                  <TabsTrigger value="status">
-                    <Icon name="activity" /> 服务器状态
-                  </TabsTrigger>
-                  <TabsTrigger value="logs">
-                    <Icon name="scroll-text" /> 日志
-                  </TabsTrigger>
-                  <TabsTrigger value="members">
-                    <Icon name="users" /> 成员管理
-                  </TabsTrigger>
-                  <TabsTrigger value="perms">
-                    <Icon name="shield-check" /> 权限
-                  </TabsTrigger>
-                  <TabsTrigger value="tunnel">
-                    <Icon name="globe" /> 公网访问
-                  </TabsTrigger>
+                  <TabsContent value="status">
+                    <StatusSection />
+                  </TabsContent>
+                  <TabsContent value="logs">
+                    <LogsSection />
+                  </TabsContent>
+                  <TabsContent value="members">
+                    <MembersSection />
+                  </TabsContent>
+                  <TabsContent value="perms">
+                    <PermsSection />
+                  </TabsContent>
+                  <TabsContent value="tunnel">
+                    <TunnelSection />
+                  </TabsContent>
                 </>
               )}
-            </TabsList>
-            <TabsContent value="appearance">
-              <AppearanceSection />
-            </TabsContent>
-            {isSuper && (
-              <>
-                <TabsContent value="status">
-                  <StatusSection />
-                </TabsContent>
-                <TabsContent value="logs">
-                  <LogsSection />
-                </TabsContent>
-                <TabsContent value="members">
-                  <MembersSection />
-                </TabsContent>
-                <TabsContent value="perms">
-                  <PermsSection />
-                </TabsContent>
-                <TabsContent value="tunnel">
-                  <TunnelSection />
-                </TabsContent>
-              </>
-            )}
-          </Tabs>
-        )}
-      </main>
-    </div>
+            </Tabs>
+          )}
+        </div>
+      </div>
+      <div className="border-t border-border/60 px-3 py-2 sm:px-5">
+        <div className="text-center text-[11px] leading-relaxed text-muted-foreground">
+          Copyright © Wangyq 2026
+        </div>
+      </div>
+    </AppShell>
   )
 }
 
@@ -816,13 +822,13 @@ function PermsSection() {
 /* ---------- 公网访问（超级管理员） ---------- */
 
 function TunnelSection() {
-  const [config, setConfig] = React.useState<{ enabled: boolean; mode: "serveo" | "custom"; customHost: string } | null>(null)
+  const [config, setConfig] = React.useState<{ enabled: boolean; mode: "serveo" | "localhostrun" | "custom"; customHost: string } | null>(null)
   const [status, setStatus] = React.useState<TunnelStatus | null>(null)
   const [busy, setBusy] = React.useState(false)
 
   const load = React.useCallback(() => {
     api
-      .get<{ config: { enabled: boolean; mode: "serveo" | "custom"; customHost: string }; status: TunnelStatus }>(
+      .get<{ config: { enabled: boolean; mode: "serveo" | "localhostrun" | "custom"; customHost: string }; status: TunnelStatus }>(
         "/admin/tunnel"
       )
       .then((d) => {
@@ -838,7 +844,7 @@ function TunnelSection() {
     return () => clearInterval(timer)
   }, [load])
 
-  const apply = async (next: { enabled: boolean; mode: "serveo" | "custom"; customHost: string }) => {
+  const apply = async (next: { enabled: boolean; mode: "serveo" | "localhostrun" | "custom"; customHost: string }) => {
     setBusy(true)
     try {
       const d = await api.post<{ config: typeof next; status: TunnelStatus }>("/admin/tunnel", next)
@@ -879,12 +885,13 @@ function TunnelSection() {
             <Label>隧道服务</Label>
             <Select
               value={config.mode}
-              onValueChange={(v) => setConfig({ ...config, mode: v as "serveo" | "custom" })}
+              onValueChange={(v) => setConfig({ ...config, mode: v as "serveo" | "localhostrun" | "custom" })}
             >
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="serveo">serveo.net（免费）</SelectItem>
-                <SelectItem value="custom">自定义 SSH 服务器</SelectItem>
+                <SelectItem value="serveo">serveo.net</SelectItem>
+                <SelectItem value="localhostrun">localhost.run</SelectItem>
+                <SelectItem value="custom">自定义 SSH</SelectItem>
               </SelectContent>
             </Select>
           </div>

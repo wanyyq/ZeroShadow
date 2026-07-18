@@ -76,7 +76,7 @@ export interface AdminConfig {
 
 export interface TunnelConfig {
   enabled: boolean
-  mode: "serveo" | "custom"
+  mode: "serveo" | "localhostrun" | "custom"
   customHost: string
 }
 

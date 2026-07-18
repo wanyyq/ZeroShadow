@@ -12,7 +12,7 @@ import { SettingsPage } from "@/pages/settings"
 
 export default function App() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="epan-theme">
+    <ThemeProvider defaultTheme="system" storageKey="zs-theme">
       <AuthProvider>
         <ClientSettingsProvider>
           <ClipboardProvider>

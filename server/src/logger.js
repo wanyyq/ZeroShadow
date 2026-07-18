@@ -10,7 +10,7 @@ function dateKey(d = new Date()) {
 }
 
 function fileFor(key) {
-  return path.join(LOGS_DIR, `epan-${key}.log`)
+  return path.join(LOGS_DIR, `zs-${key}.log`)
 }
 
 export function log(level, event, details = {}) {
@@ -43,7 +43,7 @@ export async function queryLogs({ limit = 200, level = "", q = "" } = {}) {
   let names = []
   try {
     names = (await fs.promises.readdir(LOGS_DIR))
-      .filter((n) => /^epan-\d{4}-\d{2}-\d{2}\.log$/.test(n))
+      .filter((n) => /^zs-\d{4}-\d{2}-\d{2}\.log$/.test(n))
       .sort()
       .slice(-5)
   } catch {
