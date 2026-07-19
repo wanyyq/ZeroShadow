@@ -24,7 +24,7 @@ export default function HtmlPage() {
           <Button size="icon-xs" variant="ghost" onClick={() => navigate(-1)}><Icon name="x" /></Button>
         </div>
       </div>
-      <iframe src={url} title={name} className="flex-1 border-none" sandbox="allow-scripts allow-same-origin" />
+      <iframe src={url} title={name} className="flex-1 border-none" />
     </div>
   )
 }

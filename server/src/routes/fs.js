@@ -75,6 +75,8 @@ const INLINE_TYPES = new Map(
     xml: "text/plain; charset=utf-8",
     ini: "text/plain; charset=utf-8",
     conf: "text/plain; charset=utf-8",
+    htm: "text/html; charset=utf-8",
+    html: "text/html; charset=utf-8",
   })
 )
 
