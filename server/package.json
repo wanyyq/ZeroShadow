@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "bundle": "esbuild index.js --bundle --platform=node --format=cjs --outfile=dist/server-bundle.cjs --external:../web/* --external:../data/*"
+    "bundle": "esbuild index.js --bundle --platform=node --format=cjs --outfile=dist/server-bundle.cjs --external:../web/* --external:../data/* --external:@aws-sdk/*"
   },
   "dependencies": {
     "archiver": "^7.0.1",
