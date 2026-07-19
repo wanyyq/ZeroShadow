@@ -111,19 +111,19 @@ function AppearanceSection() {
           <div className="grid gap-3">
             <Row label="默认视图">
               <Select value={settings.view} onValueChange={(v) => settings.update({ view: v as "list" | "grid" })}>
-                <SelectTrigger className="w-28"><SelectValue>列表</SelectValue></SelectTrigger>
+                <SelectTrigger className="w-28"><SelectValue render={(_p, s) => <>{s.value}</>}>列表</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="list">列表</SelectItem><SelectItem value="grid">网格</SelectItem></SelectContent>
               </Select>
             </Row>
             <Row label="排序字段">
               <Select value={settings.sortBy} onValueChange={(v) => settings.update({ sortBy: v as "name" | "size" | "mtime" })}>
-                <SelectTrigger className="w-28"><SelectValue>名称</SelectValue></SelectTrigger>
+                <SelectTrigger className="w-28"><SelectValue render={(_p, s) => <>{s.value}</>}>名称</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="name">名称</SelectItem><SelectItem value="size">大小</SelectItem><SelectItem value="mtime">修改时间</SelectItem></SelectContent>
               </Select>
             </Row>
             <Row label="排序方向">
               <Select value={settings.sortDir} onValueChange={(v) => settings.update({ sortDir: v as "asc" | "desc" })}>
-                <SelectTrigger className="w-28"><SelectValue>升序</SelectValue></SelectTrigger>
+                <SelectTrigger className="w-28"><SelectValue render={(_p, s) => <>{s.value}</>}>升序</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="asc">升序</SelectItem><SelectItem value="desc">降序</SelectItem></SelectContent>
               </Select>
             </Row>
@@ -219,7 +219,7 @@ function LogsSection() {
       <CardContent className="grid gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Select value={level} onValueChange={(v) => setLevel(v || "all")}>
-            <SelectTrigger className="w-28" size="sm"><SelectValue>全部</SelectValue></SelectTrigger>
+            <SelectTrigger className="w-28" size="sm"><SelectValue render={(_p, s) => <>{s.value}</>}>全部</SelectValue></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部级别</SelectItem>
               <SelectItem value="info">信息</SelectItem>
@@ -229,7 +229,7 @@ function LogsSection() {
           </Select>
           <Input placeholder="搜索事件/用户/IP…" className="h-8 w-52 text-sm" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
           <Button size="sm" variant="ghost" onClick={load}><Icon name="refresh-cw" /> 刷新</Button>
-          <Button size="sm" variant="destructive" className="ml-auto" onClick={() => setConfirmClear(true)}><Icon name="trash-2" /> 清空</Button>
+          <Button size="sm" variant="destructive" onClick={() => setConfirmClear(true)}><Icon name="trash-2" /> 清空</Button>
         </div>
         <ScrollArea className="h-96 rounded-md border border-border">
           <Table>
@@ -262,7 +262,7 @@ function LogsSection() {
           <AlertDialogHeader><AlertDialogTitle>清空全部日志？</AlertDialogTitle><AlertDialogDescription>该操作不可撤销。</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={async () => { try { await api.del("/admin/logs"); toast.success("日志已清空"); load() } catch (e) { toast.error((e as Error).message) } }}>清空</AlertDialogAction>
+            <AlertDialogAction onClick={async () => { try { await api.del("/admin/logs"); toast.success("日志已清空"); load(); setConfirmClear(false) } catch (e) { toast.error((e as Error).message) } }}>清空</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -302,7 +302,7 @@ function MembersSection() {
       const failList = results.filter((r) => !r.ok)
       if (okList.length) { setCreatedInfo(okList); toast.success(`已创建 ${okList.length} 个成员`) }
       for (const f of failList) toast.error(`${f.username || "(空)"}：${f.error}`)
-      setBatchText(""); load()
+      setBatchText(""); setShowCreate(false); load()
     } catch (e) { toast.error((e as Error).message) }
   }
 
@@ -588,7 +588,7 @@ function TunnelSection() {
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm">隧道服务</span>
             <Select value={config.mode} onValueChange={(v) => v && setConfig({ ...config, mode: v })}>
-              <SelectTrigger className="w-40"><SelectValue>pinggy.io</SelectValue></SelectTrigger>
+              <SelectTrigger className="w-40"><SelectValue render={(_p, s) => <>{s.value}</>}>pinggy.io</SelectValue></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pinggy">pinggy.io（推荐）</SelectItem>
                 <SelectItem value="localhostrun">localhost.run</SelectItem>

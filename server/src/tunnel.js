@@ -56,11 +56,11 @@ function buildArgs(tunnelCfg) {
   const args = [...base]
   if (tunnelCfg.mode === "pinggy") {
     // pinggy 需要输出 banner → 不能用 -N，改用 -T
-    args.push("-T", "-p", "443", "-R", `0:localhost:${env.port}`, "a.pinggy.io")
+    args.push("-T", "-p", "443", "-R", `0:127.0.0.1:${env.port}`, "a.pinggy.io")
   } else if (tunnelCfg.mode === "localhostrun") {
-    args.push("-N", "-R", `80:localhost:${env.port}`, "nokey@localhost.run")
+    args.push("-N", "-R", `80:127.0.0.1:${env.port}`, "nokey@localhost.run")
   } else if (tunnelCfg.mode === "custom") {
-    args.push("-N", "-R", `80:localhost:${env.port}`)
+    args.push("-N", "-R", `80:127.0.0.1:${env.port}`)
     let target = tunnelCfg.customHost.trim()
     const portMatch = target.match(/^(.*):(\d{1,5})$/)
     if (portMatch) {
@@ -70,7 +70,7 @@ function buildArgs(tunnelCfg) {
     args.push(target)
   } else {
     // serveo: 标准用法，URL 由 serveo 服务端自然输出
-    args.push("-N", "-R", `80:localhost:${env.port}`, "serveo.net")
+    args.push("-N", "-R", `80:127.0.0.1:${env.port}`, "serveo.net")
   }
   return args
 }

@@ -14,8 +14,11 @@ function fileFor(key) {
 }
 
 export function log(level, event, details = {}) {
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, "0")
+  const localTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
   const entry = {
-    t: new Date().toISOString(),
+    t: localTime,
     lvl: level,
     ev: event,
     msg: details.msg || "",
