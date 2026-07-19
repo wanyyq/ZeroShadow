@@ -84,16 +84,25 @@ export interface UploadTask {
   abort: () => void
 }
 
+export interface UploadOptions {
+  overwrite?: string[]
+}
+
 export function uploadFiles(
   destPath: string,
   files: File[],
-  onProgress: (loaded: number, total: number) => void
+  onProgress: (loaded: number, total: number) => void,
+  options?: UploadOptions
 ): UploadTask {
   const xhr = new XMLHttpRequest()
   const promise = new Promise((resolve, reject) => {
     const form = new FormData()
     for (const file of files) form.append("files", file, file.name)
-    xhr.open("POST", `/api/fs/upload?path=${encodeURIComponent(destPath)}`)
+    let url = `/api/fs/upload?path=${encodeURIComponent(destPath)}`
+    if (options?.overwrite?.length) {
+      url += `&overwrite=${encodeURIComponent(JSON.stringify(options.overwrite))}`
+    }
+    xhr.open("POST", url)
     xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest")
     xhr.responseType = "json"
     xhr.upload.onprogress = (e) => {

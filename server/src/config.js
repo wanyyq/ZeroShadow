@@ -9,6 +9,7 @@ const DEFAULTS = {
   memberUploadLimitMB: 512,
   memberPerms: {
     upload: true,
+    uploadFolders: true,
     download: true,
     copy: true,
     move: true,
@@ -16,10 +17,18 @@ const DEFAULTS = {
     delete: true,
     mkdir: true,
     manageGuestVisibility: true,
+    htmlPreview: true,
+    editFiles: true,
+    compressZip: true,
+    extractZip: true,
   },
   guestPerms: {
     download: true,
     zip: true,
+    htmlPreview: false,
+    editFiles: false,
+    compressZip: false,
+    extractZip: false,
   },
   guestHiddenPaths: [],
   tunnel: {
@@ -63,6 +72,7 @@ export function effectivePerms(role) {
   if (role === "superadmin") {
     return {
       upload: true,
+      uploadFolders: true,
       download: true,
       copy: true,
       move: true,
@@ -72,12 +82,17 @@ export function effectivePerms(role) {
       manageGuestVisibility: true,
       details: true,
       zip: true,
+      htmlPreview: true,
+      editFiles: true,
+      compressZip: true,
+      extractZip: true,
     }
   }
   if (role === "member") {
     const p = config.memberPerms
     return {
       upload: !!p.upload,
+      uploadFolders: !!p.uploadFolders,
       download: !!p.download,
       copy: !!p.copy,
       move: !!p.move,
@@ -87,10 +102,15 @@ export function effectivePerms(role) {
       manageGuestVisibility: !!p.manageGuestVisibility,
       details: true,
       zip: !!p.download,
+      htmlPreview: !!p.htmlPreview,
+      editFiles: !!p.editFiles,
+      compressZip: !!p.compressZip,
+      extractZip: !!p.extractZip,
     }
   }
   return {
     upload: false,
+    uploadFolders: false,
     download: !!config.guestPerms.download,
     copy: false,
     move: false,
@@ -100,6 +120,10 @@ export function effectivePerms(role) {
     manageGuestVisibility: false,
     details: false,
     zip: !!config.guestPerms.download && !!config.guestPerms.zip,
+    htmlPreview: !!config.guestPerms.htmlPreview,
+    editFiles: !!config.guestPerms.editFiles,
+    compressZip: !!config.guestPerms.compressZip,
+    extractZip: !!config.guestPerms.extractZip,
   }
 }
 

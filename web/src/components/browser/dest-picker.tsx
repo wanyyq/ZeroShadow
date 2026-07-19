@@ -8,6 +8,9 @@ import type { Entry } from "@/lib/types"
 import { joinPath, parentOf } from "@/lib/format"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { detectConflicts } from "@/lib/conflict"
+import type { ConflictItem } from "@/lib/conflict"
+import { ConflictDialog } from "@/components/browser/conflict-dialog"
 
 export function DestPickerDialog({
   open,
@@ -28,6 +31,11 @@ export function DestPickerDialog({
   const [dirs, setDirs] = React.useState<Entry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
+  const [conflictOpen, setConflictOpen] = React.useState(false)
+  const [conflictNames, setConflictNames] = React.useState<string[]>([])
+  const [conflictExisting, setConflictExisting] = React.useState<Set<string>>(new Set())
+  const [conflictDirs, setConflictDirs] = React.useState<Set<string>>(new Set())
+  const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
 
   const load = React.useCallback((path: string) => {
     setLoading(true)
@@ -53,13 +61,58 @@ export function DestPickerDialog({
     if (busy || disabled) return
     setBusy(true)
     try {
-      await api.post(`/fs/${mode}`, { sources: sourcePaths, dest: current })
-      toast.success(mode === "copy" ? "复制完成" : "移动完成")
-      onOpenChange(false)
-      onDone()
+      const listData = await api.get<{ entries: Entry[] }>("/fs/list", { path: current })
+      const existingNames = new Set(listData.entries.map((e) => e.name))
+      const existingDirs = new Set(listData.entries.filter((e) => e.type === "dir").map((e) => e.name))
+      const sourceNames = sourcePaths.map((s) => s.split("/").pop() || "")
+      const conflicts = detectConflicts(sourceNames, existingNames)
+      if (conflicts.length === 0) {
+        await api.post(`/fs/${mode}`, { sources: sourcePaths, dest: current })
+        toast.success(mode === "copy" ? "复制完成" : "移动完成")
+        onOpenChange(false)
+        onDone()
+      } else {
+        setConflictNames(conflicts)
+        setConflictExisting(existingNames)
+        setConflictDirs(new Set(conflicts.filter((n) => existingDirs.has(n))))
+        conflictResolveRef.current = async (items) => {
+          const skipSet = new Set(items.filter((r) => r.action === "skip").map((r) => r.name))
+          const overwrite = items.some((r) => r.action === "overwrite")
+          const renameMap = new Map(items.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
+          const mergeSet = new Set(items.filter((r) => r.action === "merge").map((r) => r.name))
+          const sources: string[] = []
+          const mergeSources: string[] = []
+          for (const s of sourcePaths) {
+            const name = s.split("/").pop() || ""
+            if (skipSet.has(name)) continue
+            if (mergeSet.has(name)) { mergeSources.push(s); continue }
+            if (renameMap.has(name)) {
+              const parent = s.includes("/") ? s.slice(0, s.lastIndexOf("/")) : ""
+              sources.push(parent ? `${parent}/${renameMap.get(name)}` : renameMap.get(name)!)
+            } else {
+              sources.push(s)
+            }
+          }
+          try {
+            const promises: Promise<unknown>[] = []
+            if (sources.length) {
+              promises.push(api.post(`/fs/${mode}`, { sources, dest: current, ...(overwrite ? { overwrite: true } : {}) }))
+            }
+            if (mergeSources.length) {
+              promises.push(api.post(`/fs/${mode}`, { sources: mergeSources, dest: current, merge: true }))
+            }
+            if (promises.length === 0) { onOpenChange(false); return }
+            await Promise.all(promises)
+            toast.success(mode === "copy" ? "复制完成" : "移动完成")
+            onOpenChange(false)
+            onDone()
+          } catch (err) { toast.error((err as Error).message); setBusy(false) }
+        }
+        setConflictOpen(true)
+        setBusy(false)
+      }
     } catch (err) {
       toast.error((err as Error).message)
-    } finally {
       setBusy(false)
     }
   }
@@ -67,6 +120,7 @@ export function DestPickerDialog({
   const crumbs = current ? current.split("/") : []
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
@@ -137,5 +191,14 @@ export function DestPickerDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConflictDialog
+      open={conflictOpen}
+      onOpenChange={(o) => { setConflictOpen(o); if (!o) conflictResolveRef.current?.([]) }}
+      conflicts={conflictNames}
+      existingNames={conflictExisting}
+      directoryNames={conflictDirs}
+      onResolved={(items) => { conflictResolveRef.current?.(items); conflictResolveRef.current = null }}
+    />
+    </>
   )
 }

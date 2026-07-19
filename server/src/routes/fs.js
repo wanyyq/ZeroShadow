@@ -212,11 +212,20 @@ router.post("/mkdir", requirePerm("mkdir"), async (req, res, next) => {
 router.post("/upload", requirePerm("upload"), async (req, res, next) => {
   let destAbs
   let destRel
+  let overwriteNames = []
   try {
     const resolved = resolveSafe(req.query.path)
     destAbs = resolved.abs
     destRel = resolved.rel
     await assertDir(destAbs)
+    if (req.query.overwrite) {
+      try {
+        overwriteNames = JSON.parse(String(req.query.overwrite))
+        if (!Array.isArray(overwriteNames)) overwriteNames = []
+      } catch {
+        overwriteNames = []
+      }
+    }
   } catch (err) {
     return next(err)
   }
@@ -237,15 +246,25 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
     const saved = []
     for (const item of tmpFiles) {
       if (item.tooLarge) {
-        results.push({ name: item.name, ok: false, error: `超出大小限制 (${limitMB}MB)` })
+        const displayName = item.relDir ? `${item.relDir}/${item.name}` : item.name
+        results.push({ name: displayName, ok: false, error: `超出大小限制 (${limitMB}MB)` })
         await fs.promises.rm(item.tmp, { force: true })
         continue
       }
       try {
-        const finalName = await uniqueName(destAbs, item.name)
-        await moveEntry(item.tmp, path.join(destAbs, finalName))
-        saved.push(finalName)
-        results.push({ name: item.name, ok: true, savedAs: finalName })
+        const shouldOverwrite = overwriteNames.includes(item.name)
+        let finalName
+        if (shouldOverwrite) {
+          const targetPath = path.join(item.uploadDir, item.name)
+          await fs.promises.rm(targetPath, { force: true })
+          await moveEntry(item.tmp, targetPath)
+          finalName = item.name
+        } else {
+          finalName = await uniqueName(item.uploadDir, item.name)
+          await moveEntry(item.tmp, path.join(item.uploadDir, finalName))
+        }
+        saved.push(item.relDir ? `${item.relDir}/${finalName}` : finalName)
+        results.push({ name: item.relDir ? `${item.relDir}/${item.name}` : item.name, ok: true, savedAs: item.relDir ? `${item.relDir}/${finalName}` : finalName })
       } catch {
         results.push({ name: item.name, ok: false, error: "保存失败" })
         await fs.promises.rm(item.tmp, { force: true })
@@ -274,9 +293,15 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
 
   const pending = []
   bb.on("file", (_field, stream, fileInfo) => {
-    const name = sanitizeFileName(fileInfo.filename)
+    const rawName = String(fileInfo.filename)
+    const dirParts = rawName.includes("/") ? rawName.split("/").slice(0, -1) : []
+    const baseName = path.basename(rawName)
+    const name = sanitizeFileName(baseName)
+    const relDir = dirParts.map((d) => sanitizeFileName(d)).filter(Boolean).join("/")
+    const uploadDir = relDir ? path.join(destAbs, relDir) : destAbs
+    fs.mkdirSync(uploadDir, { recursive: true })
     const tmp = path.join(TMP_DIR, `up-${crypto.randomBytes(8).toString("hex")}`)
-    const item = { name, tmp, tooLarge: false }
+    const item = { name, uploadDir, relDir, tmp, tooLarge: false }
     tmpFiles.push(item)
     const ws = fs.createWriteStream(tmp)
     stream.on("limit", () => {
@@ -319,10 +344,21 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
     const parentAbs = path.dirname(abs)
     const target = path.join(parentAbs, newName)
     const existing = await statSafe(target)
+    let merged = false
     if (existing && path.basename(abs).toLowerCase() !== newName.toLowerCase()) {
-      throw httpError(409, "已存在同名文件或文件夹")
+      const sourceStat = await statSafe(abs)
+      if (req.body?.merge && sourceStat?.isDirectory() && existing.isDirectory()) {
+        await mergeFolder(abs, target, "move")
+        merged = true
+      } else if (req.body?.overwrite) {
+        await fs.promises.rm(target, { recursive: true, force: true })
+      } else {
+        throw httpError(409, "已存在同名文件或文件夹")
+      }
     }
-    await fs.promises.rename(abs, target)
+    if (!merged) {
+      await fs.promises.rename(abs, target)
+    }
     const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""
     if (isExactHidden(rel)) {
       await saveConfig((draft) => {
@@ -363,12 +399,40 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
   }
 })
 
+async function mergeFolder(srcAbs, destAbs, mode) {
+  const entries = await fs.promises.readdir(srcAbs, { withFileTypes: true })
+  for (const dirent of entries) {
+    const srcChild = path.join(srcAbs, dirent.name)
+    const destChild = path.join(destAbs, dirent.name)
+    if (dirent.isDirectory()) {
+      const destStat = await statSafe(destChild)
+      if (destStat && destStat.isDirectory()) {
+        await mergeFolder(srcChild, destChild, mode)
+      } else {
+        if (destStat) await fs.promises.rm(destChild, { recursive: true, force: true })
+        if (mode === "copy") await copyEntry(srcChild, destChild)
+        else await moveEntry(srcChild, destChild)
+      }
+    } else if (dirent.isFile()) {
+      if (await statSafe(destChild)) {
+        await fs.promises.rm(destChild, { force: true })
+      }
+      if (mode === "copy") await copyEntry(srcChild, destChild)
+      else await moveEntry(srcChild, destChild)
+    }
+    if (dirent.isSymbolicLink()) continue
+  }
+  if (mode === "move") await fs.promises.rm(srcAbs, { recursive: true, force: true })
+}
+
 async function transfer(req, res, next, mode) {
   try {
     const sources = req.body?.sources
     if (!Array.isArray(sources) || !sources.length || sources.length > 500) {
       throw httpError(400, "参数格式错误")
     }
+    const overwrite = !!req.body?.overwrite
+    const merge = !!req.body?.merge
     const dest = resolveSafe(req.body?.dest)
     await assertDir(dest.abs)
     const done = []
@@ -387,10 +451,21 @@ async function transfer(req, res, next, mode) {
         done.push(path.basename(src.abs))
         continue
       }
-      const finalName = await uniqueName(dest.abs, path.basename(src.abs))
-      const target = path.join(dest.abs, finalName)
-      if (mode === "copy") await copyEntry(src.abs, target)
-      else await moveEntry(src.abs, target)
+      const srcName = path.basename(src.abs)
+      const target = path.join(dest.abs, srcName)
+      const destStat = await statSafe(target)
+      if (merge && stat.isDirectory() && destStat && destStat.isDirectory()) {
+        await mergeFolder(src.abs, target, mode)
+        done.push(srcName)
+        continue
+      }
+      if (overwrite) {
+        await fs.promises.rm(target, { recursive: true, force: true })
+      }
+      const finalName = overwrite ? srcName : await uniqueName(dest.abs, srcName)
+      const finalTarget = path.join(dest.abs, finalName)
+      if (mode === "copy") await copyEntry(src.abs, finalTarget)
+      else await moveEntry(src.abs, finalTarget)
       if (mode === "move" && isExactHidden(src.rel)) {
         const newRel = joinRel(dest.rel, finalName)
         await saveConfig((draft) => {
@@ -476,5 +551,105 @@ router.post(
     }
   }
 )
+
+async function compressCommon(req, res, paths) {
+  const forGuest = req.auth.role === "guest"
+  const archive = archiver("zip", { zlib: { level: 5 } })
+  archive.on("error", () => { if (!res.headersSent) res.status(500).end(); else res.destroy() })
+  const zipName = `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
+  res.setHeader("Content-Type", "application/zip")
+  res.setHeader("Content-Disposition", contentDisposition("attachment", zipName))
+  res.setHeader("Cache-Control", "no-store")
+  archive.pipe(res)
+  for (const p of paths) {
+    const { abs, rel } = resolveSafe(p)
+    if (!rel) continue
+    if (forGuest && isHiddenFromGuest(rel)) continue
+    const stat = await statSafe(abs)
+    if (!stat || stat.isSymbolicLink()) continue
+    if (stat.isDirectory()) {
+      await addDirToArchive(archive, abs, rel, path.basename(abs), forGuest)
+    } else if (stat.isFile()) {
+      archive.file(abs, { name: path.basename(abs) })
+    }
+  }
+  info("compress", { msg: paths.join(", "), ...actor(req) })
+  await archive.finalize()
+}
+
+router.get("/compress", requirePerm("compressZip"), async (req, res, next) => {
+  try {
+    let paths = []
+    if (req.query.paths) {
+      try {
+        const parsed = JSON.parse(String(req.query.paths))
+        if (Array.isArray(parsed) && parsed.length && parsed.length <= 200) paths = parsed
+      } catch { throw httpError(400, "参数格式错误") }
+    }
+    if (!paths.length) throw httpError(400, "参数格式错误")
+    await compressCommon(req, res, paths)
+  } catch (err) { next(err) }
+})
+
+router.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
+  try {
+    const paths = req.body?.paths
+    if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
+      throw httpError(400, "参数格式错误")
+    }
+    await compressCommon(req, res, paths)
+  } catch (err) { next(err) }
+})
+
+router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
+  try {
+    const { abs, rel } = resolveSafe(req.body?.path)
+    if (!rel) throw httpError(400, "非法路径")
+    const destAbs = req.body?.dest ? resolveSafe(req.body.dest).abs : path.dirname(abs)
+    await assertDir(destAbs)
+    const stat = await assertExists(abs)
+    if (!stat.isFile() || !rel.toLowerCase().endsWith(".zip")) {
+      throw httpError(400, "只能解压 zip 文件")
+    }
+    const unzipper = await import("unzipper")
+    const directory = await unzipper.Open.file(abs)
+    let count = 0
+    for (const file of directory.files) {
+      const entryPath = file.path
+      if (file.type === "Directory") {
+        fs.mkdirSync(path.join(destAbs, entryPath), { recursive: true })
+        continue
+      }
+      const dirName = path.dirname(entryPath)
+      if (dirName && dirName !== ".") {
+        fs.mkdirSync(path.join(destAbs, dirName), { recursive: true })
+      }
+      const outPath = path.join(destAbs, entryPath)
+      const buf = await file.buffer()
+      await fs.promises.writeFile(outPath, buf)
+      count += 1
+    }
+    info("extract", { msg: `${rel} → ${count} 文件`, ...actor(req) })
+    res.json({ count })
+  } catch (err) {
+    if (err.message?.includes("Cannot find module 'unzipper'")) {
+      return next(httpError(500, "服务端未安装 unzipper 模块，请联系管理员"))
+    }
+    next(err)
+  }
+})
+
+router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
+  try {
+    const { abs, rel } = resolveSafe(req.body?.path)
+    if (!rel) throw httpError(400, "非法路径")
+    const content = String(req.body?.content || "")
+    await fs.promises.writeFile(abs, content, "utf8")
+    info("save_file", { msg: rel, ...actor(req) })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+})
 
 export default router

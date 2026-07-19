@@ -9,6 +9,9 @@ import { UploadsProvider } from "@/state/uploads"
 import { BrowserPage } from "@/pages/browser-page"
 import { LoginPage } from "@/pages/login-page"
 import { SettingsPage } from "@/pages/settings"
+import PreviewPage from "@/pages/preview-page"
+import EditorPage from "@/pages/editor-page"
+import HtmlPage from "@/pages/html-page"
 
 export default function App() {
   return (
@@ -23,6 +26,9 @@ export default function App() {
                     <Route path="/" element={<BrowserPage />} />
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/preview" element={<PreviewPage />} />
+                    <Route path="/editor" element={<EditorPage />} />
+                    <Route path="/html-preview" element={<HtmlPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </BrowserRouter>

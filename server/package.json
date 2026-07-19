@@ -15,7 +15,8 @@
     "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "unzipper": "^0.12.5"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

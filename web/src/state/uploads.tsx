@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { uploadFiles } from "@/lib/api"
 import { uid } from "@/lib/format"
 import type { UploadResult } from "@/lib/types"
+import type { UploadOptions } from "@/lib/api"
 
 export interface UploadJob {
   id: string
@@ -18,7 +19,7 @@ export interface UploadJob {
 
 interface UploadsState {
   jobs: UploadJob[]
-  start: (destPath: string, files: File[]) => void
+  start: (destPath: string, files: File[], options?: UploadOptions) => void
   cancel: (id: string) => void
   dismiss: (id: string) => void
   clearFinished: () => void
@@ -36,13 +37,13 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const start = React.useCallback(
-    (destPath: string, files: File[]) => {
+    (destPath: string, files: File[], options?: UploadOptions) => {
       if (!files.length) return
       const id = uid()
       const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
       const label =
         files.length === 1 ? files[0].name : `${files[0].name} 等 ${files.length} 个文件`
-      const task = uploadFiles(destPath, files, (loaded) => patch(id, { loaded }))
+      const task = uploadFiles(destPath, files, (loaded) => patch(id, { loaded }), options)
       setJobs((prev) => [
         { id, destPath, label, totalBytes, loaded: 0, status: "uploading", abort: task.abort },
         ...prev.slice(0, 19),

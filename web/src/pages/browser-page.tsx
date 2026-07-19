@@ -1,10 +1,11 @@
 import * as React from "react"
-import { useSearchParams } from "react-router-dom"
+import { useSearchParams, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { AppShell } from "@/components/layout/app-shell"
 import { UploadPanel } from "@/components/browser/upload-panel"
-import { DeleteDialog, DetailsDialog, NewFolderDialog, PreviewDialog, RenameDialog } from "@/components/browser/dialogs"
+import { DeleteDialog, DetailsDialog, NewFolderDialog, RenameDialog } from "@/components/browser/dialogs"
 import { DestPickerDialog } from "@/components/browser/dest-picker"
+import { ConflictDialog } from "@/components/browser/conflict-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -22,15 +23,18 @@ import { useClientSettings } from "@/state/client-settings"
 import { useClipboard } from "@/state/clipboard"
 import { useUploads } from "@/state/uploads"
 import { cn } from "@/lib/utils"
+import { detectConflicts } from "@/lib/conflict"
+import type { ConflictItem } from "@/lib/conflict"
 
 const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", member: "团队成员", guest: "访客" }
 
-type DialogKind = "newFolder" | "rename" | "delete" | "details" | "preview" | null
+type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 
 function noPermToast() { toast.warning("您没有权限执行此操作") }
 
 export function BrowserPage() {
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const path = params.get("path") || ""
   const query = params.get("q") || ""
   const { me } = useAuth()
@@ -50,6 +54,12 @@ export function BrowserPage() {
   const listRef = React.useRef<HTMLDivElement>(null)
   const lastIndexRef = React.useRef(-1)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const folderInputRef = React.useRef<HTMLInputElement>(null)
+
+  const [conflictOpen, setConflictOpen] = React.useState(false)
+  const [conflictNames, setConflictNames] = React.useState<string[]>([])
+  const [conflictDirs, setConflictDirs] = React.useState<Set<string>>(new Set())
+  const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
 
   const refresh = React.useCallback(() => {
     setLoading(true)
@@ -84,14 +94,24 @@ export function BrowserPage() {
   }, [entries, settings.sortBy, settings.sortDir, settings.foldersFirst])
 
   const goto = (p: string) => setParams(p ? { path: p } : {})
-  const openEntry = (entry: Entry) => {
-    if (entry.type === "dir") return goto(joinPath(path, entry.name))
+  const handleOpenFile = (entry: Entry) => {
     const rel = joinPath(path, entry.name)
+    const ext = (entry.name.split(".").pop() || "").toLowerCase()
     if (previewType(entry.name) && me.perms.download) {
-      setDialogEntry(entry); setDialog("preview")
+      if (ext === "html" || ext === "htm") {
+        if (me.perms.htmlPreview) navigate(`/html-preview?path=${encodeURIComponent(rel)}`)
+        else navigate(`/preview?path=${encodeURIComponent(rel)}`)
+      } else {
+        navigate(`/preview?path=${encodeURIComponent(rel)}`)
+      }
     } else if (me.perms.download) {
       triggerDownload(downloadUrl(rel))
     }
+  }
+
+  const openEntry = (entry: Entry) => {
+    if (entry.type === "dir") return goto(joinPath(path, entry.name))
+    handleOpenFile(entry)
   }
 
   const select = (entry: Entry, index: number, e: React.MouseEvent) => {
@@ -129,12 +149,45 @@ export function BrowserPage() {
   const doPaste = async () => {
     if (!clipboard.mode || !clipboard.items.length) return
     if (!me.perms[clipboard.mode === "copy" ? "copy" : "move"]) return noPermToast()
-    try {
-      await api.post(`/fs/${clipboard.mode === "copy" ? "copy" : "move"}`, { sources: clipboard.items.map((i) => i.path), dest: path })
-      toast.success(clipboard.mode === "copy" ? "复制完成" : "移动完成")
-      if (clipboard.mode === "cut") clipboard.clear()
-      refresh()
-    } catch (err) { toast.error((err as Error).message) }
+    const names = clipboard.items.map((i) => i.name)
+    const dirNames = new Set(clipboard.items.filter((i) => i.type === "dir").map((i) => i.name))
+    resolveConflicts(names, dirNames, async (resolved) => {
+      const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
+      const overwrite = resolved.some((r) => r.action === "overwrite")
+      const renameMap = new Map(resolved.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
+      const mergeSet = new Set(resolved.filter((r) => r.action === "merge").map((r) => r.name))
+      const sources: string[] = []
+      const mergeSources: string[] = []
+      for (const item of clipboard.items) {
+        if (skipSet.has(item.name)) continue
+        if (mergeSet.has(item.name)) {
+          mergeSources.push(item.path)
+          continue
+        }
+        if (renameMap.has(item.name)) {
+          const resolvedName = renameMap.get(item.name)!
+          const parent = item.path.includes("/") ? item.path.slice(0, item.path.lastIndexOf("/")) : ""
+          sources.push(parent ? `${parent}/${resolvedName}` : resolvedName)
+        } else {
+          sources.push(item.path)
+        }
+      }
+      const apiPath = `/fs/${clipboard.mode === "copy" ? "copy" : "move"}`
+      try {
+        const promises: Promise<unknown>[] = []
+        if (sources.length) {
+          promises.push(api.post(apiPath, { sources, dest: path, ...(overwrite ? { overwrite: true } : {}) }))
+        }
+        if (mergeSources.length) {
+          promises.push(api.post(apiPath, { sources: mergeSources, dest: path, merge: true }))
+        }
+        if (promises.length === 0) return
+        await Promise.all(promises)
+        toast.success(clipboard.mode === "copy" ? "复制完成" : "移动完成")
+        if (clipboard.mode === "cut") clipboard.clear()
+        refresh()
+      } catch (err) { toast.error((err as Error).message) }
+    })
   }
 
   const doVisibility = async (entry: Entry, hidden: boolean) => {
@@ -145,13 +198,176 @@ export function BrowserPage() {
     } catch (err) { toast.error((err as Error).message) }
   }
 
+  const doCompress = async (targets: Entry[]) => {
+    if (!me.perms.compressZip) return noPermToast()
+    try {
+      triggerDownload(`/api/fs/compress?paths=${encodeURIComponent(JSON.stringify(targets.map((t) => joinPath(path, t.name))))}`)
+      toast.success("开始压缩下载")
+    } catch (err) { toast.error((err as Error).message) }
+  }
+
+  const doExtract = async (entry: Entry) => {
+    if (!me.perms.extractZip) return noPermToast()
+    try {
+      const data = await api.post<{ count: number }>("/fs/extract", { path: joinPath(path, entry.name), dest: path })
+      toast.success(`已解压 ${data.count} 个文件`)
+      refresh()
+    } catch (err) { toast.error((err as Error).message) }
+  }
+
+  const doEdit = (entry: Entry) => {
+    if (!me.perms.editFiles) return noPermToast()
+    navigate(`/editor?path=${encodeURIComponent(joinPath(path, entry.name))}`)
+  }
+
+  const doHtmlPreview = (entry: Entry) => {
+    if (!me.perms.htmlPreview) return noPermToast()
+    navigate(`/html-preview?path=${encodeURIComponent(joinPath(path, entry.name))}`)
+  }
+
   const openDialog = (kind: DialogKind, entry?: Entry) => { setDialogEntry(entry ?? null); setDialog(kind) }
 
-  const onDrop = (e: React.DragEvent) => {
+  const existingNames = React.useMemo(
+    () => new Set(entries.map((e) => e.name)),
+    [entries]
+  )
+
+  const existingDirNames = React.useMemo(
+    () => new Set(entries.filter((e) => e.type === "dir").map((e) => e.name)),
+    [entries]
+  )
+
+  const resolveConflicts = React.useCallback(
+    (names: string[], dirNames: Set<string>, onResolved: (items: ConflictItem[]) => void) => {
+      const conflicts = detectConflicts(names, existingNames)
+      if (conflicts.length === 0) {
+        onResolved([])
+        return
+      }
+      conflictResolveRef.current = onResolved
+      setConflictNames(conflicts)
+      setConflictDirs(new Set(conflicts.filter((n) => dirNames.has(n))))
+      setConflictOpen(true)
+    },
+    [existingNames]
+  )
+
+  const readEntry = async (entry: FileSystemEntry, basePath = ""): Promise<File[]> => {
+    const files: File[] = []
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) => {
+        (entry as FileSystemFileEntry).file(resolve, reject)
+      })
+      const pathName = basePath ? `${basePath}/${file.name}` : file.name
+      files.push(new File([file], pathName, { type: file.type, lastModified: file.lastModified }))
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader()
+      const entries = await new Promise<FileSystemEntry[]>((resolve) => {
+        const all: FileSystemEntry[] = []
+        const readBatch = () => { reader.readEntries((batch) => { if (batch.length) { all.push(...batch); readBatch() } else resolve(all) }) }
+        readBatch()
+      })
+      const dirPath = basePath ? `${basePath}/${entry.name}` : entry.name
+      for (const child of entries) {
+        const childFiles = await readEntry(child, dirPath)
+        files.push(...childFiles)
+      }
+    }
+    return files
+  }
+
+  const handleUpload = React.useCallback(
+    (files: File[]) => {
+      if (!files.length || !me.perms.upload) return
+      const hasPaths = files.some((f) => f.name.includes("/"))
+      if (hasPaths) {
+        const rootFolders = new Set<string>()
+        for (const f of files) {
+          const slash = f.name.indexOf("/")
+          if (slash > 0) rootFolders.add(f.name.slice(0, slash))
+        }
+        if (me.perms.uploadFolders) {
+          resolveConflicts([...rootFolders], existingDirNames, (resolved) => {
+            const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
+            if (skipSet.size === rootFolders.size) return
+            const overwriteSet = new Set(resolved.filter((r) => r.action === "overwrite").map((r) => r.name))
+            const renameMap = new Map(resolved.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
+            const mergeSet = new Set(resolved.filter((r) => r.action === "merge").map((r) => r.name))
+            const overwriteNames: string[] = []
+            const processed: File[] = []
+            for (const f of files) {
+              const slash = f.name.indexOf("/")
+              const root = slash > 0 ? f.name.slice(0, slash) : f.name
+              if (skipSet.has(root)) continue
+              if (mergeSet.has(root)) { processed.push(f); continue }
+              if (renameMap.has(root)) {
+                const rest = slash > 0 ? f.name.slice(slash) : ""
+                processed.push(new File([f], renameMap.get(root)! + rest, { type: f.type, lastModified: f.lastModified }))
+                overwriteNames.push(renameMap.get(root)!)
+              } else if (overwriteSet.has(root)) {
+                processed.push(f)
+                overwriteNames.push(root)
+              } else {
+                processed.push(f)
+              }
+            }
+            if (processed.length === 0) return
+            const merged = mergeSet.size > 0
+            uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : merged ? { overwrite: ["__merge__"] } : undefined)
+          })
+          return
+        }
+      }
+      const names = files.map((f) => f.name)
+      resolveConflicts(names, new Set(), (resolved) => {
+        if (!resolved.length) {
+          uploads.start(path, files)
+          return
+        }
+        const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
+        const overwriteNames = resolved.filter((r) => r.action === "overwrite").map((r) => r.name)
+        const renameMap = new Map(resolved.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
+
+        const processed: File[] = []
+        for (const file of files) {
+          if (skipSet.has(file.name)) continue
+          if (renameMap.has(file.name)) {
+            processed.push(new File([file], renameMap.get(file.name)!, { type: file.type, lastModified: file.lastModified }))
+          } else {
+            processed.push(file)
+          }
+        }
+        if (processed.length === 0) return
+        uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : undefined)
+      })
+    },
+    [path, me.perms.upload, resolveConflicts, uploads]
+  )
+
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     if (!me.perms.upload) return noPermToast()
-    const files = Array.from(e.dataTransfer.files || [])
-    if (files.length) uploads.start(path, files)
+    const items = e.dataTransfer.items
+    if (items && items.length) {
+      const files: File[] = []
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.kind === "file") {
+          const entry = item.webkitGetAsEntry?.()
+          if (entry) {
+            const entryFiles = await readEntry(entry)
+            files.push(...entryFiles)
+          } else {
+            const f = item.getAsFile()
+            if (f) files.push(f)
+          }
+        }
+      }
+      if (files.length) handleUpload(files)
+    } else {
+      const fileList = e.dataTransfer.files
+      if (fileList.length) handleUpload(Array.from(fileList))
+    }
   }
 
   const submitSearch = () => {
@@ -198,7 +414,10 @@ export function BrowserPage() {
       }
       if (key === "enter" && selected.size === 1) {
         const entry = sorted.find((en) => selected.has(en.name))
-        if (entry) openEntry(entry)
+        if (entry) {
+          if (entry.type === "dir") openEntry(entry)
+          else handleOpenFile(entry)
+        }
       }
     }
     window.addEventListener("keydown", handler)
@@ -223,11 +442,49 @@ export function BrowserPage() {
     )
     if (single && entry.type === "file" && previewType(entry.name)) {
       items.push(
-        <ContextMenuItem key="preview" disabled={!me.perms.download} onClick={() => { if (!me.perms.download) noPermToast(); else openDialog("preview", entry) }}>
+        <ContextMenuItem key="preview" disabled={!me.perms.download} onClick={() => { if (!me.perms.download) noPermToast(); else handleOpenFile(entry) }}>
           <Icon name="eye" /> 预览
         </ContextMenuItem>
       )
     }
+    {const ext = (entry.name.split(".").pop() || "").toLowerCase()
+    if (single && entry.type === "file" && (ext === "html" || ext === "htm")) {
+      items.push(
+        <ContextMenuItem key="htmlpreview" disabled={!me.perms.htmlPreview} onClick={() => { if (!me.perms.htmlPreview) noPermToast(); else doHtmlPreview(entry) }}>
+          <Icon name="globe" /> HTML 预览
+        </ContextMenuItem>
+      )
+    }}
+    {const ext = (entry.name.split(".").pop() || "").toLowerCase()
+    const EDITABLE = ["txt", "md", "mdx", "py", "cpp", "log", "html", "htm", "js", "ts", "css", "json", "xml", "yml", "yaml", "ini", "conf", "sh", "java", "c", "rs", "go"]
+    if (single && entry.type === "file" && EDITABLE.includes(ext)) {
+      items.push(
+        <ContextMenuItem key="edit" disabled={!me.perms.editFiles} onClick={() => { if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
+          <Icon name="pencil-line" /> 在线编辑
+        </ContextMenuItem>
+      )
+    }}
+    {single && entry.type === "file" && (entry.name.toLowerCase().endsWith(".zip")) && (
+      items.push(
+        <ContextMenuItem key="extract" disabled={!me.perms.extractZip} onClick={() => { if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
+          <Icon name="folder-open" /> 解压到当前目录
+        </ContextMenuItem>
+      )
+    )}
+    {single && entry.type === "dir" && (
+      items.push(
+        <ContextMenuItem key="compressDir" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress([entry]) }}>
+          <Icon name="folder-archive" /> 压缩为 Zip
+        </ContextMenuItem>
+      )
+    )}
+    {!single && (
+      items.push(
+        <ContextMenuItem key="compress" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress(targets) }}>
+          <Icon name="folder-archive" /> 压缩所选为 Zip
+        </ContextMenuItem>
+      )
+    )}
     items.push(<ContextMenuSeparator key="s1" />)
     items.push(
       <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
@@ -408,6 +665,9 @@ export function BrowserPage() {
             <Button size="sm" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else fileInputRef.current?.click() }}>
               <Icon name="upload" /> 上传
             </Button>
+            <Button size="sm" variant="outline" disabled={!canUpload || !me.perms.uploadFolders} onClick={() => { if (!canUpload) noPermToast(); else folderInputRef.current?.click() }}>
+              <Icon name="folder-up" /> 上传文件夹
+            </Button>
             <Button size="sm" variant="outline" disabled={!canMkdir} onClick={() => { if (!canMkdir) noPermToast(); else openDialog("newFolder") }}>
               <Icon name="folder-plus" /> 新建文件夹
             </Button>
@@ -529,7 +789,10 @@ export function BrowserPage() {
       </div>
 
       <input ref={fileInputRef} type="file" multiple className="hidden"
-        onChange={(e) => { const files = Array.from(e.target.files || []); if (files.length) uploads.start(path, files); e.target.value = "" }}
+        onChange={(e) => { const rawFiles = Array.from(e.target.files || []); const files = rawFiles.map((f) => { const wp = (f as any).webkitRelativePath as string | undefined; return wp ? new File([f], wp, { type: f.type, lastModified: f.lastModified }) : f }); if (files.length) handleUpload(files); e.target.value = "" }}
+      />
+      <input ref={folderInputRef} type="file" {...{ webkitdirectory: "" } as Record<string, string>} multiple className="hidden"
+        onChange={(e) => { const rawFiles = Array.from(e.target.files || []); const files = rawFiles.map((f) => { const wp = (f as any).webkitRelativePath as string | undefined; return wp ? new File([f], wp, { type: f.type, lastModified: f.lastModified }) : f }); if (files.length) handleUpload(files); e.target.value = "" }}
       />
       <UploadPanel />
       <NewFolderDialog open={dialog === "newFolder"} onOpenChange={(o) => !o && setDialog(null)} path={path} onDone={refresh} />
@@ -540,9 +803,16 @@ export function BrowserPage() {
         path={path} onDone={refresh}
       />
       <DetailsDialog open={dialog === "details"} onOpenChange={(o) => !o && setDialog(null)} entryPath={dialogEntry ? joinPath(path, dialogEntry.name) : null} />
-      <PreviewDialog open={dialog === "preview"} onOpenChange={(o) => !o && setDialog(null)} entryPath={dialogEntry ? joinPath(path, dialogEntry.name) : null} name={dialogEntry?.name || ""} />
       <DestPickerDialog open={picker !== null} onOpenChange={(o) => !o && setPicker(null)} title={picker === "copy" ? "复制到…" : "移动到…"}
         sourcePaths={selectedEntries.map((e) => joinPath(path, e.name))} mode={picker || "copy"} onDone={refresh}
+      />
+      <ConflictDialog
+        open={conflictOpen}
+        onOpenChange={(o) => { setConflictOpen(o); if (!o) conflictResolveRef.current?.([]) }}
+        conflicts={conflictNames}
+        existingNames={existingNames}
+        directoryNames={conflictDirs}
+        onResolved={(items) => { conflictResolveRef.current?.(items); conflictResolveRef.current = null }}
       />
     </AppShell>
   )

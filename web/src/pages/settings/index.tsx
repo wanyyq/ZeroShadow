@@ -460,8 +460,10 @@ function MembersSection() {
 
 /* ==================== 权限 ==================== */
 const MEMBER_PERM_LABELS: [keyof AdminConfig["memberPerms"], string][] = [
-  ["upload", "上传文件"], ["download", "下载文件"], ["mkdir", "新建文件夹"], ["copy", "复制文件"],
-  ["move", "移动文件"], ["rename", "重命名"], ["delete", "删除"], ["manageGuestVisibility", "设置访客可见性"],
+  ["upload", "上传文件"], ["uploadFolders", "上传文件夹"], ["download", "下载文件"], ["mkdir", "新建文件夹"],
+  ["copy", "复制文件"], ["move", "移动文件"], ["rename", "重命名"], ["delete", "删除"],
+  ["manageGuestVisibility", "设置访客可见性"], ["htmlPreview", "HTML 全屏预览"], ["editFiles", "在线编辑文件"],
+  ["compressZip", "压缩为 Zip"], ["extractZip", "解压 Zip"],
 ]
 
 function PermsSection() {
@@ -530,6 +532,22 @@ function PermsSection() {
           <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
             <span className="text-sm">允许打包下载（Zip）</span>
             <Switch checked={config.guestPerms.zip} onCheckedChange={(v) => patch({ guestPerms: { zip: !!v } })} />
+          </div>
+          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
+            <span className="text-sm">HTML 全屏预览</span>
+            <Switch checked={config.guestPerms.htmlPreview} onCheckedChange={(v) => patch({ guestPerms: { htmlPreview: !!v } })} />
+          </div>
+          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
+            <span className="text-sm">在线编辑文件</span>
+            <Switch checked={config.guestPerms.editFiles} onCheckedChange={(v) => patch({ guestPerms: { editFiles: !!v } })} />
+          </div>
+          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
+            <span className="text-sm">压缩为 Zip</span>
+            <Switch checked={config.guestPerms.compressZip} onCheckedChange={(v) => patch({ guestPerms: { compressZip: !!v } })} />
+          </div>
+          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
+            <span className="text-sm">解压 Zip</span>
+            <Switch checked={config.guestPerms.extractZip} onCheckedChange={(v) => patch({ guestPerms: { extractZip: !!v } })} />
           </div>
         </div>
         <Separator className="my-3" />

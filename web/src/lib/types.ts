@@ -2,6 +2,7 @@ export type Role = "superadmin" | "member" | "guest"
 
 export interface Perms {
   upload: boolean
+  uploadFolders: boolean
   download: boolean
   copy: boolean
   move: boolean
@@ -11,6 +12,10 @@ export interface Perms {
   manageGuestVisibility: boolean
   details: boolean
   zip: boolean
+  htmlPreview: boolean
+  editFiles: boolean
+  compressZip: boolean
+  extractZip: boolean
 }
 
 export interface Me {
@@ -58,6 +63,7 @@ export interface AdminConfig {
   memberUploadLimitMB: number
   memberPerms: {
     upload: boolean
+    uploadFolders: boolean
     download: boolean
     copy: boolean
     move: boolean
@@ -65,10 +71,18 @@ export interface AdminConfig {
     delete: boolean
     mkdir: boolean
     manageGuestVisibility: boolean
+    htmlPreview: boolean
+    editFiles: boolean
+    compressZip: boolean
+    extractZip: boolean
   }
   guestPerms: {
     download: boolean
     zip: boolean
+    htmlPreview: boolean
+    editFiles: boolean
+    compressZip: boolean
+    extractZip: boolean
   }
   guestHiddenPaths: string[]
   tunnel: TunnelConfig

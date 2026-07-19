@@ -8,6 +8,7 @@ const GUEST: Me = {
   username: null,
   perms: {
     upload: false,
+    uploadFolders: false,
     download: true,
     copy: false,
     move: false,
@@ -17,6 +18,10 @@ const GUEST: Me = {
     manageGuestVisibility: false,
     details: false,
     zip: true,
+    htmlPreview: false,
+    editFiles: false,
+    compressZip: false,
+    extractZip: false,
   },
   uploadLimitMB: 0,
 }
