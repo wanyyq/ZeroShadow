@@ -15590,7 +15590,7 @@ var require_get_intrinsic = __commonJS({
     var $SyntaxError = require_syntax();
     var $TypeError = require_type();
     var $URIError = require_uri();
-    var abs2 = require_abs();
+    var abs = require_abs();
     var floor = require_floor();
     var max = require_max();
     var min = require_min();
@@ -15704,7 +15704,7 @@ var require_get_intrinsic = __commonJS({
       "%Function.prototype.apply%": $apply,
       "%Object.defineProperty%": $defineProperty,
       "%Object.getPrototypeOf%": $ObjectGPO,
-      "%Math.abs%": abs2,
+      "%Math.abs%": abs,
       "%Math.floor%": floor,
       "%Math.max%": max,
       "%Math.min%": min,
@@ -48990,14 +48990,14 @@ var require_commonjs4 = __commonJS({
         let prev = this.root;
         let len = split.length - 1;
         const joinSep = pathImpl.sep;
-        let abs2 = this.rootPath;
+        let abs = this.rootPath;
         let sawFirst = false;
         for (const part of split) {
           const l = len--;
           prev = prev.child(part, {
             relative: new Array(l).fill("..").join(joinSep),
             relativePosix: new Array(l).fill("..").join("/"),
-            fullpath: abs2 += (sawFirst ? "" : joinSep) + part
+            fullpath: abs += (sawFirst ? "" : joinSep) + part
           });
           sawFirst = true;
         }
@@ -50207,14 +50207,14 @@ var require_walker = __commonJS({
           const ign = `${e.relativePosix()}/**`;
           this.#ignore.add(ign);
         }
-        const abs2 = this.opts.absolute === void 0 ? absolute : this.opts.absolute;
+        const abs = this.opts.absolute === void 0 ? absolute : this.opts.absolute;
         this.seen.add(e);
         const mark = this.opts.mark && e.isDirectory() ? this.#sep : "";
         if (this.opts.withFileTypes) {
           this.matchEmit(e);
-        } else if (abs2) {
-          const abs3 = this.opts.posix ? e.fullpathPosix() : e.fullpath();
-          this.matchEmit(abs3 + mark);
+        } else if (abs) {
+          const abs2 = this.opts.posix ? e.fullpathPosix() : e.fullpath();
+          this.matchEmit(abs2 + mark);
         } else {
           const rel = this.opts.posix ? e.relativePosix() : e.relative();
           const pre = this.opts.dotRelative && !rel.startsWith(".." + this.#sep) ? "." + this.#sep : "";
@@ -66257,8 +66257,8 @@ function resolveAny(rel) {
     if (!resolved2.startsWith(softDirAbs) && resolved2 !== softDirAbs) throw badPath();
     return { abs: resolved2, rel, isSoft: true, softName: first, softBase: softDirAbs };
   }
-  const abs2 = rel ? import_node_path6.default.join(FILES_DIR, ...rel.split("/")) : FILES_DIR;
-  const resolved = import_node_path6.default.resolve(abs2);
+  const abs = rel ? import_node_path6.default.join(FILES_DIR, ...rel.split("/")) : FILES_DIR;
+  const resolved = import_node_path6.default.resolve(abs);
   const root = import_node_path6.default.resolve(FILES_DIR);
   if (resolved !== root && !resolved.startsWith(root + import_node_path6.default.sep)) throw badPath();
   return { abs: resolved, rel, isSoft: false };
@@ -66273,7 +66273,8 @@ function getSoftDirEntries() {
         type: "dir",
         size: 0,
         mtime: stat?.mtimeMs ?? 0,
-        softReadOnly: true
+        softReadOnly: true,
+        hiddenFromGuest: isHiddenFromGuest(name)
       });
     } catch {
       entries.push({
@@ -66281,7 +66282,8 @@ function getSoftDirEntries() {
         type: "dir",
         size: 0,
         mtime: 0,
-        softReadOnly: true
+        softReadOnly: true,
+        hiddenFromGuest: isHiddenFromGuest(name)
       });
     }
   }
@@ -66333,9 +66335,9 @@ function joinRel(rel, name) {
 
 // src/files.js
 async function entryInfo(dirAbs, dirent) {
-  const abs2 = import_node_path7.default.join(dirAbs, dirent.name);
+  const abs = import_node_path7.default.join(dirAbs, dirent.name);
   try {
-    const stat = await import_node_fs5.default.promises.lstat(abs2);
+    const stat = await import_node_fs5.default.promises.lstat(abs);
     if (stat.isSymbolicLink()) return null;
     if (stat.isDirectory()) {
       return { name: dirent.name, type: "dir", size: 0, mtime: stat.mtimeMs };
@@ -66348,36 +66350,36 @@ async function entryInfo(dirAbs, dirent) {
     return null;
   }
 }
-async function listDir(abs2, rel, { forGuest = false } = {}) {
-  const dirents = await import_node_fs5.default.promises.readdir(abs2, { withFileTypes: true });
+async function listDir(abs, rel, { forGuest = false } = {}) {
+  const dirents = await import_node_fs5.default.promises.readdir(abs, { withFileTypes: true });
   const entries = [];
   for (const dirent of dirents) {
     const entryRel = joinRel(rel, dirent.name);
     const hidden = isHiddenFromGuest(entryRel);
     if (forGuest && hidden) continue;
-    const info2 = await entryInfo(abs2, dirent);
+    const info2 = await entryInfo(abs, dirent);
     if (!info2) continue;
     entries.push(forGuest ? info2 : { ...info2, hiddenFromGuest: hidden });
   }
   return entries;
 }
-async function statSafe(abs2) {
+async function statSafe(abs) {
   try {
-    return await import_node_fs5.default.promises.lstat(abs2);
+    return await import_node_fs5.default.promises.lstat(abs);
   } catch {
     return null;
   }
 }
-async function assertDir(abs2) {
-  const stat = await statSafe(abs2);
+async function assertDir(abs) {
+  const stat = await statSafe(abs);
   if (!stat || !stat.isDirectory()) {
     const err = new Error("\u76EE\u5F55\u4E0D\u5B58\u5728");
     err.status = 404;
     throw err;
   }
 }
-async function assertExists(abs2) {
-  const stat = await statSafe(abs2);
+async function assertExists(abs) {
+  const stat = await statSafe(abs);
   if (!stat || stat.isSymbolicLink()) {
     const err = new Error("\u6587\u4EF6\u6216\u76EE\u5F55\u4E0D\u5B58\u5728");
     err.status = 404;
@@ -66396,12 +66398,12 @@ async function uniqueName(dirAbs, name) {
   }
   throw new Error("\u65E0\u6CD5\u751F\u6210\u4E0D\u91CD\u590D\u7684\u540D\u79F0");
 }
-async function dirStats(abs2, { maxEntries = 2e5 } = {}) {
+async function dirStats(abs, { maxEntries = 2e5 } = {}) {
   let files = 0;
   let dirs = 0;
   let bytes = 0;
   let partial = false;
-  const stack = [abs2];
+  const stack = [abs];
   while (stack.length) {
     if (files + dirs > maxEntries) {
       partial = true;
@@ -66460,10 +66462,10 @@ async function searchFiles(rootAbs, rootRel, query, { forGuest = false, limit = 
   let visited = 0;
   const stack = [{ abs: rootAbs, rel: rootRel }];
   while (stack.length && results.length < limit && visited < 3e4 && Date.now() < deadline) {
-    const { abs: abs2, rel } = stack.pop();
+    const { abs, rel } = stack.pop();
     let dirents = [];
     try {
-      dirents = await import_node_fs5.default.promises.readdir(abs2, { withFileTypes: true });
+      dirents = await import_node_fs5.default.promises.readdir(abs, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -66471,7 +66473,7 @@ async function searchFiles(rootAbs, rootRel, query, { forGuest = false, limit = 
       visited += 1;
       const entryRel = joinRel(rel, dirent.name);
       if (forGuest && isHiddenFromGuest(entryRel)) continue;
-      const info2 = await entryInfo(abs2, dirent);
+      const info2 = await entryInfo(abs, dirent);
       if (!info2) continue;
       if (dirent.name.toLowerCase().includes(needle)) {
         results.push({
@@ -66482,7 +66484,7 @@ async function searchFiles(rootAbs, rootRel, query, { forGuest = false, limit = 
         });
         if (results.length >= limit) break;
       }
-      if (info2.type === "dir") stack.push({ abs: import_node_path7.default.join(abs2, dirent.name), rel: entryRel });
+      if (info2.type === "dir") stack.push({ abs: import_node_path7.default.join(abs, dirent.name), rel: entryRel });
     }
   }
   return results;
@@ -66699,17 +66701,18 @@ function contentDisposition(type, filename) {
 }
 router2.get("/list", async (req, res, next) => {
   try {
-    const { abs: abs2, rel, isSoft } = resolveSafe(req.query.path);
+    const { abs, rel, isSoft } = resolveSafe(req.query.path);
     if (!isSoft && guestBlocked(req, rel)) throw httpError2(404, "\u76EE\u5F55\u4E0D\u5B58\u5728");
     if (isSoft) {
+      if (guestBlocked(req, rel)) throw httpError2(404, "\u76EE\u5F55\u4E0D\u5B58\u5728");
       const resolved = resolveAny(rel);
       await assertDir(resolved.abs);
       const entries = await listDir(resolved.abs, rel, { forGuest: req.auth.role === "guest" });
       const marked = entries.map((e) => ({ ...e, softReadOnly: true }));
       res.json({ path: rel, entries: marked });
     } else {
-      await assertDir(abs2);
-      const entries = await listDir(abs2, rel, { forGuest: req.auth.role === "guest" });
+      await assertDir(abs);
+      const entries = await listDir(abs, rel, { forGuest: req.auth.role === "guest" });
       let all = entries;
       if (!rel) {
         let softs = getSoftDirEntries();
@@ -66753,13 +66756,13 @@ async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
   for (const dirent of dirents) {
     const entryRel = joinRel(dirRel, dirent.name);
     if (forGuest && isHiddenFromGuest(entryRel)) continue;
-    const abs2 = import_node_path8.default.join(dirAbs, dirent.name);
-    const stat = await statSafe(abs2);
+    const abs = import_node_path8.default.join(dirAbs, dirent.name);
+    const stat = await statSafe(abs);
     if (!stat || stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) {
-      await addDirToArchive(archive, abs2, entryRel, `${zipBase}/${dirent.name}`, forGuest);
+      await addDirToArchive(archive, abs, entryRel, `${zipBase}/${dirent.name}`, forGuest);
     } else if (stat.isFile()) {
-      archive.file(abs2, { name: `${zipBase}/${dirent.name}` });
+      archive.file(abs, { name: `${zipBase}/${dirent.name}` });
     }
   }
 }
@@ -66817,14 +66820,14 @@ router2.get("/zip", requirePerm("zip"), async (req, res, next) => {
 });
 router2.post("/mkdir", requirePerm("mkdir"), async (req, res, next) => {
   try {
-    const { abs: abs2, rel } = resolveSafe(req.body?.path);
+    const { abs, rel } = resolveSafe(req.body?.path);
     blockSoft(rel);
-    await assertDir(abs2);
+    await assertDir(abs);
     const name = String(req.body?.name || "").trim();
     const invalid = validateName(name);
     if (invalid) throw httpError2(400, invalid);
-    const finalName = await uniqueName(abs2, name);
-    await import_node_fs7.default.promises.mkdir(import_node_path8.default.join(abs2, finalName));
+    const finalName = await uniqueName(abs, name);
+    await import_node_fs7.default.promises.mkdir(import_node_path8.default.join(abs, finalName));
     info("mkdir", { msg: joinRel(rel, finalName), ...actor(req) });
     res.json({ name: finalName });
   } catch (err) {
@@ -66954,21 +66957,21 @@ router2.post("/upload", requirePerm("upload"), async (req, res, next) => {
 });
 router2.post("/rename", requirePerm("rename"), async (req, res, next) => {
   try {
-    const { abs: abs2, rel } = resolveSafe(req.body?.path);
+    const { abs, rel } = resolveSafe(req.body?.path);
     blockSoft(rel);
     if (!rel) throw httpError2(400, "\u975E\u6CD5\u8DEF\u5F84");
-    await assertExists(abs2);
+    await assertExists(abs);
     const newName = String(req.body?.newName || "").trim();
     const invalid = validateName(newName);
     if (invalid) throw httpError2(400, invalid);
-    const parentAbs = import_node_path8.default.dirname(abs2);
+    const parentAbs = import_node_path8.default.dirname(abs);
     const target = import_node_path8.default.join(parentAbs, newName);
     const existing = await statSafe(target);
     let merged = false;
-    if (existing && import_node_path8.default.basename(abs2).toLowerCase() !== newName.toLowerCase()) {
-      const sourceStat = await statSafe(abs2);
+    if (existing && import_node_path8.default.basename(abs).toLowerCase() !== newName.toLowerCase()) {
+      const sourceStat = await statSafe(abs);
       if (req.body?.merge && sourceStat?.isDirectory() && existing.isDirectory()) {
-        await mergeFolder(abs2, target, "move");
+        await mergeFolder(abs, target, "move");
         merged = true;
       } else if (req.body?.overwrite) {
         await import_node_fs7.default.promises.rm(target, { recursive: true, force: true });
@@ -66977,7 +66980,7 @@ router2.post("/rename", requirePerm("rename"), async (req, res, next) => {
       }
     }
     if (!merged) {
-      await import_node_fs7.default.promises.rename(abs2, target);
+      await import_node_fs7.default.promises.rename(abs, target);
     }
     const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
     if (isExactHidden(rel)) {
@@ -67001,10 +67004,10 @@ router2.post("/delete", requirePerm("delete"), async (req, res, next) => {
     }
     const deleted = [];
     for (const p of paths) {
-      const { abs: abs2, rel } = resolveSafe(p);
+      const { abs, rel } = resolveSafe(p);
       blockSoft(rel);
       if (!rel) throw httpError2(400, "\u4E0D\u80FD\u5220\u9664\u6839\u76EE\u5F55");
-      await import_node_fs7.default.promises.rm(abs2, { recursive: true, force: true });
+      await import_node_fs7.default.promises.rm(abs, { recursive: true, force: true });
       deleted.push(rel);
     }
     await saveConfig((draft) => {
@@ -67110,10 +67113,10 @@ router2.get("/stat", requirePerm("details"), async (req, res, next) => {
       size: stat.isFile() ? stat.size : 0,
       mtime: stat.mtimeMs,
       created: stat.birthtimeMs,
-      hiddenFromGuest: resolved.rel && !resolved.isSoft ? isHiddenFromGuest(resolved.rel) : false
+      hiddenFromGuest: resolved.rel ? isHiddenFromGuest(resolved.rel) : false
     };
     if (stat.isDirectory()) {
-      const usage = await dirStats(abs);
+      const usage = await dirStats(resolved.abs);
       base.size = usage.bytes;
       base.files = usage.files;
       base.dirs = usage.dirs;
@@ -67148,9 +67151,9 @@ router2.post(
   requirePerm("manageGuestVisibility"),
   async (req, res, next) => {
     try {
-      const { abs: abs2, rel } = resolveSafe(req.body?.path);
+      const { abs, rel } = resolveSafe(req.body?.path);
       if (!rel) throw httpError2(400, "\u4E0D\u80FD\u9690\u85CF\u6839\u76EE\u5F55");
-      const stat = await assertExists(abs2);
+      const stat = await assertExists(abs);
       if (!stat.isDirectory()) throw httpError2(400, "\u53EA\u80FD\u5BF9\u6587\u4EF6\u5939\u8BBE\u7F6E\u8BBF\u5BA2\u53EF\u89C1\u6027");
       const hidden = !!req.body?.hidden;
       await saveConfig((draft) => {
@@ -67226,18 +67229,18 @@ router2.post("/compress", requirePerm("compressZip"), async (req, res, next) => 
 });
 router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
   try {
-    const { abs: abs2, rel } = resolveSafe(req.body?.path);
+    const { abs, rel } = resolveSafe(req.body?.path);
     blockSoft(rel);
     if (!rel) throw httpError2(400, "\u975E\u6CD5\u8DEF\u5F84");
-    const destAbs = req.body?.dest ? resolveSafe(req.body.dest).abs : import_node_path8.default.dirname(abs2);
+    const destAbs = req.body?.dest ? resolveSafe(req.body.dest).abs : import_node_path8.default.dirname(abs);
     blockSoft(req.body?.dest || rel);
     await assertDir(destAbs);
-    const stat = await assertExists(abs2);
+    const stat = await assertExists(abs);
     if (!stat.isFile() || !rel.toLowerCase().endsWith(".zip")) {
       throw httpError2(400, "\u53EA\u80FD\u89E3\u538B zip \u6587\u4EF6");
     }
     const unzipper = await Promise.resolve().then(() => __toESM(require_unzip2(), 1));
-    const directory = await unzipper.Open.file(abs2);
+    const directory = await unzipper.Open.file(abs);
     let count = 0;
     for (const file of directory.files) {
       const entryPath = file.path;
@@ -67265,11 +67268,11 @@ router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
 });
 router2.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
   try {
-    const { abs: abs2, rel } = resolveSafe(req.body?.path);
+    const { abs, rel } = resolveSafe(req.body?.path);
     blockSoft(rel);
     if (!rel) throw httpError2(400, "\u975E\u6CD5\u8DEF\u5F84");
     const content = String(req.body?.content || "");
-    await import_node_fs7.default.promises.writeFile(abs2, content, "utf8");
+    await import_node_fs7.default.promises.writeFile(abs, content, "utf8");
     info("save_file", { msg: rel, ...actor(req) });
     res.json({ ok: true });
   } catch (err) {

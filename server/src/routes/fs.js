@@ -102,6 +102,7 @@ router.get("/list", async (req, res, next) => {
     const { abs, rel, isSoft } = resolveSafe(req.query.path)
     if (!isSoft && guestBlocked(req, rel)) throw httpError(404, "目录不存在")
     if (isSoft) {
+      if (guestBlocked(req, rel)) throw httpError(404, "目录不存在")
       const resolved = resolveAny(rel)
       await assertDir(resolved.abs)
       const entries = await listDir(resolved.abs, rel, { forGuest: req.auth.role === "guest" })
@@ -532,10 +533,10 @@ router.get("/stat", requirePerm("details"), async (req, res, next) => {
       size: stat.isFile() ? stat.size : 0,
       mtime: stat.mtimeMs,
       created: stat.birthtimeMs,
-      hiddenFromGuest: resolved.rel && !resolved.isSoft ? isHiddenFromGuest(resolved.rel) : false,
+      hiddenFromGuest: resolved.rel ? isHiddenFromGuest(resolved.rel) : false,
     }
     if (stat.isDirectory()) {
-      const usage = await dirStats(abs)
+      const usage = await dirStats(resolved.abs)
       base.size = usage.bytes
       base.files = usage.files
       base.dirs = usage.dirs

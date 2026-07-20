@@ -55,6 +55,7 @@ export function getSoftDirEntries() {
         size: 0,
         mtime: stat?.mtimeMs ?? 0,
         softReadOnly: true,
+        hiddenFromGuest: isHiddenFromGuest(name),
       })
     } catch {
       entries.push({
@@ -63,6 +64,7 @@ export function getSoftDirEntries() {
         size: 0,
         mtime: 0,
         softReadOnly: true,
+        hiddenFromGuest: isHiddenFromGuest(name),
       })
     }
   }

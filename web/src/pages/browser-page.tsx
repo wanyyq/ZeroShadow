@@ -290,7 +290,7 @@ export function BrowserPage() {
   const handleUpload = React.useCallback(
     (files: File[]) => {
       if (!files.length || !me.perms.upload) return
-      if (sorted.some((en) => en.softReadOnly)) { noPermSoftToast(); return }
+      if (sorted.length > 0 && sorted.every((en) => en.softReadOnly)) { noPermSoftToast(); return }
       const hasPaths = files.some((f) => f.name.includes("/"))
       if (hasPaths) {
         const rootFolders = new Set<string>()
@@ -359,7 +359,7 @@ export function BrowserPage() {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     if (!me.perms.upload) return noPermToast()
-    if (sorted.some((en) => en.softReadOnly)) return noPermSoftToast()
+    if (sorted.length > 0 && sorted.every((en) => en.softReadOnly)) return noPermSoftToast()
     const items = e.dataTransfer.items
     if (items && items.length) {
       const files: File[] = []
@@ -664,7 +664,7 @@ export function BrowserPage() {
     )
   }
 
-  const isCurrentSoft = sorted.some((e) => e.softReadOnly)
+  const isCurrentSoft = sorted.length > 0 && sorted.every((e) => e.softReadOnly)
   const canUpload = me.perms.upload && !isCurrentSoft
   const canMkdir = me.perms.mkdir && !isCurrentSoft
 
