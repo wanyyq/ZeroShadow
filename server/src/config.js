@@ -7,6 +7,10 @@ const CONFIG_FILE = path.join(DATA_DIR, "config.json")
 const DEFAULTS = {
   superUploadLimitMB: 2048,
   memberUploadLimitMB: 512,
+  zipMaxFiles: 100,
+  zipMaxSingleMB: 50,
+  zipMaxTotalMB: 128,
+  extractMaxZipMB: 128,
   memberPerms: {
     fileWrite: true,
     upload: true,
@@ -168,4 +172,13 @@ export function uploadLimitMB(role) {
   if (role === "superadmin") return config.superUploadLimitMB
   if (role === "member") return config.memberUploadLimitMB
   return 0
+}
+
+export function zipLimits() {
+  return {
+    maxFiles: config.zipMaxFiles ?? 100,
+    maxSingleBytes: (config.zipMaxSingleMB ?? 50) * 1024 * 1024,
+    maxTotalBytes: (config.zipMaxTotalMB ?? 128) * 1024 * 1024,
+    extractMaxBytes: (config.extractMaxZipMB ?? 128) * 1024 * 1024,
+  }
 }

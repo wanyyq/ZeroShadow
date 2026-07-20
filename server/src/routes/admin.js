@@ -29,7 +29,7 @@ router.patch("/config", async (req, res, next) => {
   try {
     const body = req.body || {}
     const updates = {}
-    for (const key of ["superUploadLimitMB", "memberUploadLimitMB"]) {
+    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB"]) {
       if (body[key] !== undefined) {
         const n = Number(body[key])
         if (!Number.isInteger(n) || n < 1 || n > 1048576) {
@@ -52,6 +52,10 @@ router.patch("/config", async (req, res, next) => {
     const config = await saveConfig((draft) => {
       if (updates.superUploadLimitMB) draft.superUploadLimitMB = updates.superUploadLimitMB
       if (updates.memberUploadLimitMB) draft.memberUploadLimitMB = updates.memberUploadLimitMB
+      if (updates.zipMaxFiles) draft.zipMaxFiles = updates.zipMaxFiles
+      if (updates.zipMaxSingleMB) draft.zipMaxSingleMB = updates.zipMaxSingleMB
+      if (updates.zipMaxTotalMB) draft.zipMaxTotalMB = updates.zipMaxTotalMB
+      if (updates.extractMaxZipMB) draft.extractMaxZipMB = updates.extractMaxZipMB
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms)
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms)
     })

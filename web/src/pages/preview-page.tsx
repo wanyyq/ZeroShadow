@@ -15,6 +15,11 @@ const EXT_KIND: Record<string, "image" | "video" | "audio" | "pdf" | "text" | "h
   html: "html", htm: "html",
 }
 
+function escapeHtml(str: string): string {
+  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" }
+  return str.replace(/[&<>"']/g, (m) => map[m])
+}
+
 export default function PreviewPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
@@ -45,7 +50,7 @@ export default function PreviewPage() {
   React.useEffect(() => {
     if (kind === "text" && url) {
       fetch(url, { credentials: "same-origin" })
-        .then(async (r) => { if (r.ok) setText(await r.text()); else setText("加载失败") })
+        .then(async (r) => { if (r.ok) setText(escapeHtml(await r.text())); else setText("加载失败") })
         .catch(() => setText("加载失败"))
     }
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") navigate(-1) }

@@ -65,6 +65,10 @@ export interface Member {
 export interface AdminConfig {
   superUploadLimitMB: number
   memberUploadLimitMB: number
+  zipMaxFiles: number
+  zipMaxSingleMB: number
+  zipMaxTotalMB: number
+  extractMaxZipMB: number
   memberPerms: {
     fileWrite: boolean
     upload: boolean

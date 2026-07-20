@@ -6,7 +6,7 @@ import Busboy from "busboy"
 import archiver from "archiver"
 import { TMP_DIR } from "../env.js"
 import { requirePerm, requireRole } from "../auth.js"
-import { effectivePerms, saveConfig, uploadLimitBytes, uploadLimitMB } from "../config.js"
+import { effectivePerms, saveConfig, uploadLimitBytes, uploadLimitMB, zipLimits } from "../config.js"
 import {
   getSoftDirEntries,
   guestBlocked,
@@ -162,6 +162,80 @@ router.get("/download", async (req, res, next) => {
   }
 })
 
+async function collectZipItems(rels, forGuest) {
+  const items = []
+  for (const rel of rels) {
+    if (!rel) continue
+    if (!isSoftPath(rel) && forGuest && isHiddenFromGuest(rel)) continue
+    const resolved = resolveAny(rel)
+    const stat = await statSafe(resolved.abs)
+    if (!stat || stat.isSymbolicLink()) continue
+    items.push({ abs: resolved.abs, rel, name: path.basename(resolved.abs), isDir: stat.isDirectory(), size: stat.isFile() ? stat.size : 0 })
+  }
+  return items
+}
+
+async function countZipFilesAndSize(items, forGuest) {
+  let fileCount = 0
+  let totalSize = 0
+  for (const item of items) {
+    if (item.isDir) {
+      const scan = await scanDirForZip(item.abs, forGuest)
+      fileCount += scan.count
+      totalSize += scan.bytes
+    } else {
+      fileCount += 1
+      totalSize += item.size
+    }
+  }
+  return { fileCount, totalSize }
+}
+
+async function scanDirForZip(dirAbs, _forGuest) {
+  let count = 0
+  let bytes = 0
+  const stack = [dirAbs]
+  while (stack.length) {
+    const cur = stack.pop()
+    let dirents
+    try {
+      dirents = await fs.promises.readdir(cur, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const d of dirents) {
+      const abs = path.join(cur, d.name)
+      if (d.isDirectory()) {
+        stack.push(abs)
+        count += 1
+      } else if (d.isFile()) {
+        count += 1
+        try {
+          const st = await statSafe(abs)
+          if (st) bytes += st.size
+        } catch { /* skip */ }
+      }
+    }
+  }
+  return { count, bytes }
+}
+
+async function validateZipLimits(items, forGuest) {
+  const limits = zipLimits()
+  const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest)
+  if (fileCount > limits.maxFiles) {
+    throw httpError(400, `打包文件数 (${fileCount}) 超出限制 (最多 ${limits.maxFiles} 个)`)
+  }
+  if (totalSize > limits.maxTotalBytes) {
+    throw httpError(400, `打包总大小 (${Math.round(totalSize / 1024 / 1024)}MB) 超出限制 (${Math.round(limits.maxTotalBytes / 1024 / 1024)}MB)`)
+  }
+  for (const item of items) {
+    if (!item.isDir && item.size > limits.maxSingleBytes) {
+      throw httpError(400, `文件 "${item.name}" 大小 (${Math.round(item.size / 1024 / 1024)}MB) 超出单文件限制 (${Math.round(limits.maxSingleBytes / 1024 / 1024)}MB)`)
+    }
+  }
+}
+
 async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
   const dirents = await fs.promises.readdir(dirAbs, { withFileTypes: true })
   if (!dirents.length) archive.append(Buffer.alloc(0), { name: `${zipBase}/.keep` })
@@ -198,16 +272,9 @@ router.get("/zip", requirePerm("downloadFolder"), async (req, res, next) => {
     }
 
     const forGuest = req.auth.role === "guest"
-    const items = []
-    for (const rel of rels) {
-      if (!rel) throw httpError(400, "不能打包根目录")
-      if (!isSoftPath(rel) && forGuest && isHiddenFromGuest(rel)) continue
-      const resolved = resolveAny(rel)
-      const stat = await statSafe(resolved.abs)
-      if (!stat || stat.isSymbolicLink()) continue
-      items.push({ abs: resolved.abs, rel, name: path.basename(resolved.abs), isDir: stat.isDirectory() })
-    }
+    const items = await collectZipItems(rels, forGuest)
     if (!items.length) throw httpError(404, "没有可下载的内容")
+    await validateZipLimits(items, forGuest)
 
     const zipName =
       items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
@@ -606,6 +673,10 @@ router.post(
 
 async function compressCommon(req, res, paths) {
   const forGuest = req.auth.role === "guest"
+  const items = await collectZipItems(paths.map((p) => normRel(p)), forGuest)
+  if (!items.length) throw httpError(404, "没有可压缩的内容")
+  await validateZipLimits(items, forGuest)
+
   const archive = archiver("zip", { zlib: { level: 5 } })
   archive.on("error", () => { if (!res.headersSent) res.status(500).end(); else res.destroy() })
   const zipName = `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
@@ -613,16 +684,11 @@ async function compressCommon(req, res, paths) {
   res.setHeader("Content-Disposition", contentDisposition("attachment", zipName))
   res.setHeader("Cache-Control", "no-store")
   archive.pipe(res)
-  for (const p of paths) {
-    const resolved = resolveAny(normRel(p))
-    if (!resolved.rel) continue
-    if (!resolved.isSoft && forGuest && isHiddenFromGuest(resolved.rel)) continue
-    const stat = await statSafe(resolved.abs)
-    if (!stat || stat.isSymbolicLink()) continue
-    if (stat.isDirectory()) {
-      await addDirToArchive(archive, resolved.abs, resolved.rel, path.basename(resolved.abs), forGuest)
-    } else if (stat.isFile()) {
-      archive.file(resolved.abs, { name: path.basename(resolved.abs) })
+  for (const item of items) {
+    if (item.isDir) {
+      await addDirToArchive(archive, item.abs, item.rel, item.name, forGuest)
+    } else {
+      archive.file(item.abs, { name: item.name })
     }
   }
   info("compress", { msg: paths.join(", "), ...actor(req) })
@@ -665,16 +731,30 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     if (!stat.isFile() || !rel.toLowerCase().endsWith(".zip")) {
       throw httpError(400, "只能解压 zip 文件")
     }
+    const limits = zipLimits()
+    if (stat.size > limits.extractMaxBytes) {
+      throw httpError(400, `ZIP 文件超出解压大小限制 (${Math.round(limits.extractMaxBytes / 1024 / 1024)}MB)`)
+    }
     const unzipper = await import("unzipper")
     const directory = await unzipper.Open.file(abs)
+    if (directory.files.length > limits.maxFiles) {
+      throw httpError(400, `ZIP 内文件数超出限制 (最多 ${limits.maxFiles} 个)`)
+    }
     const destResolved = path.resolve(destAbs)
     let count = 0
     for (const file of directory.files) {
       const entryPath = file.path
+      if (entryPath.length > 2048) continue
+      const segments = entryPath.replace(/\\/g, "/").split("/")
+      if (segments.some((s) => s.length > 200 || s === "..")) continue
       const outPath = path.resolve(destAbs, entryPath)
-      if (!outPath.startsWith(destResolved + path.sep) && outPath !== destResolved) continue
+      const relOut = path.relative(destResolved, outPath)
+      if (!relOut || relOut.startsWith("..") || path.isAbsolute(relOut)) continue
       if (file.type === "Directory") {
         fs.mkdirSync(outPath, { recursive: true })
+        continue
+      }
+      if (file.uncompressedSize > limits.maxSingleBytes) {
         continue
       }
       const dirName = path.dirname(outPath)
@@ -682,6 +762,7 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
         fs.mkdirSync(dirName, { recursive: true })
       }
       const buf = await file.buffer()
+      if (buf.length > limits.maxSingleBytes) continue
       await fs.promises.writeFile(outPath, buf)
       count += 1
     }

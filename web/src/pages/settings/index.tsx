@@ -463,15 +463,36 @@ function PermsSection() {
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [superLimit, setSuperLimit] = React.useState("")
   const [memberLimit, setMemberLimit] = React.useState("")
+  const [zipMaxFiles, setZipMaxFiles] = React.useState("")
+  const [zipMaxSingle, setZipMaxSingle] = React.useState("")
+  const [zipMaxTotal, setZipMaxTotal] = React.useState("")
+  const [extractMax, setExtractMax] = React.useState("")
 
   const load = React.useCallback(() => {
-    api.get<AdminConfig>("/admin/config").then((c) => { setConfig(c); setSuperLimit(String(c.superUploadLimitMB ?? 2048)); setMemberLimit(String(c.memberUploadLimitMB ?? 512)) }).catch((e) => toast.error((e as Error).message))
+    api.get<AdminConfig>("/admin/config").then((c) => {
+      setConfig(c)
+      setSuperLimit(String(c.superUploadLimitMB ?? 2048))
+      setMemberLimit(String(c.memberUploadLimitMB ?? 512))
+      setZipMaxFiles(String(c.zipMaxFiles ?? 100))
+      setZipMaxSingle(String(c.zipMaxSingleMB ?? 50))
+      setZipMaxTotal(String(c.zipMaxTotalMB ?? 128))
+      setExtractMax(String(c.extractMaxZipMB ?? 128))
+    }).catch((e) => toast.error((e as Error).message))
   }, [])
   React.useEffect(load, [load])
 
   const patch = async (body: Record<string, unknown>, msg?: string) => {
-    try { const next = await api.patch<AdminConfig>("/admin/config", body); setConfig(next); setSuperLimit(String(next.superUploadLimitMB ?? 2048)); setMemberLimit(String(next.memberUploadLimitMB ?? 512)); if (msg) toast.success(msg) }
-    catch (e) { toast.error((e as Error).message) }
+    try {
+      const next = await api.patch<AdminConfig>("/admin/config", body)
+      setConfig(next)
+      setSuperLimit(String(next.superUploadLimitMB ?? 2048))
+      setMemberLimit(String(next.memberUploadLimitMB ?? 512))
+      setZipMaxFiles(String(next.zipMaxFiles ?? 100))
+      setZipMaxSingle(String(next.zipMaxSingleMB ?? 50))
+      setZipMaxTotal(String(next.zipMaxTotalMB ?? 128))
+      setExtractMax(String(next.extractMaxZipMB ?? 128))
+      if (msg) toast.success(msg)
+    } catch (e) { toast.error((e as Error).message) }
   }
 
   const unhide = async (p: string) => {
@@ -501,6 +522,34 @@ function PermsSection() {
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
         <Button size="sm" onClick={() => patch({ superUploadLimitMB: Number(superLimit), memberUploadLimitMB: Number(memberLimit) }, "上传限制已更新")}>保存</Button>
+      </div>
+
+      <Separator className="mb-5" />
+
+      {/* ===== ZIP 打包/解压限制 ===== */}
+      <h3 className="mb-3 text-sm font-medium">ZIP 打包 / 解压限制</h3>
+      <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:flex-wrap sm:gap-4">
+        <div className="flex items-center gap-2">
+          <span className="w-20 shrink-0 text-sm text-muted-foreground">最大文件数</span>
+          <Input className="w-20 text-right" inputMode="numeric" value={zipMaxFiles} onChange={(e) => setZipMaxFiles(e.target.value)} />
+          <span className="text-xs text-muted-foreground">个</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-28 shrink-0 text-sm text-muted-foreground">单文件最大</span>
+          <Input className="w-20 text-right" inputMode="numeric" value={zipMaxSingle} onChange={(e) => setZipMaxSingle(e.target.value)} />
+          <span className="text-xs text-muted-foreground">MB</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-24 shrink-0 text-sm text-muted-foreground">总大小最大</span>
+          <Input className="w-20 text-right" inputMode="numeric" value={zipMaxTotal} onChange={(e) => setZipMaxTotal(e.target.value)} />
+          <span className="text-xs text-muted-foreground">MB</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-28 shrink-0 text-sm text-muted-foreground">解压ZIP最大</span>
+          <Input className="w-20 text-right" inputMode="numeric" value={extractMax} onChange={(e) => setExtractMax(e.target.value)} />
+          <span className="text-xs text-muted-foreground">MB</span>
+        </div>
+        <Button size="sm" onClick={() => patch({ zipMaxFiles: Number(zipMaxFiles), zipMaxSingleMB: Number(zipMaxSingle), zipMaxTotalMB: Number(zipMaxTotal), extractMaxZipMB: Number(extractMax) }, "ZIP 限制已更新")}>保存</Button>
       </div>
 
       <Separator className="mb-5" />
