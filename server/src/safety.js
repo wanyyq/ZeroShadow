@@ -1,5 +1,6 @@
 import path from "node:path"
-import { FILES_DIR } from "./env.js"
+import fs from "node:fs"
+import { FILES_DIR, SOFT_DIRS } from "./env.js"
 import { getConfig } from "./config.js"
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin"
@@ -22,11 +23,56 @@ function badPath() {
 
 export function resolveSafe(input = "") {
   const rel = normRel(input)
+  if (!rel) return { abs: FILES_DIR, rel: "", isSoft: false }
+  return resolveAny(rel)
+}
+
+export function resolveAny(rel) {
+  const first = rel.split("/")[0]
+  const softDirAbs = SOFT_DIRS[first]
+  if (softDirAbs) {
+    const sub = rel.slice(first.length)
+    const subRel = sub.startsWith("/") ? sub.slice(1) : sub
+    const resolved = subRel ? path.resolve(softDirAbs, subRel) : softDirAbs
+    if (!resolved.startsWith(softDirAbs) && resolved !== softDirAbs) throw badPath()
+    return { abs: resolved, rel, isSoft: true, softName: first, softBase: softDirAbs }
+  }
   const abs = rel ? path.join(FILES_DIR, ...rel.split("/")) : FILES_DIR
   const resolved = path.resolve(abs)
   const root = path.resolve(FILES_DIR)
   if (resolved !== root && !resolved.startsWith(root + path.sep)) throw badPath()
-  return { abs: resolved, rel }
+  return { abs: resolved, rel, isSoft: false }
+}
+
+export function getSoftDirEntries() {
+  const entries = []
+  for (const [name, absPath] of Object.entries(SOFT_DIRS)) {
+    try {
+      const stat = fs.statSync(absPath, { throwIfNoEntry: false })
+      entries.push({
+        name,
+        type: "dir",
+        size: 0,
+        mtime: stat?.mtimeMs ?? 0,
+        softReadOnly: true,
+      })
+    } catch {
+      entries.push({
+        name,
+        type: "dir",
+        size: 0,
+        mtime: 0,
+        softReadOnly: true,
+      })
+    }
+  }
+  return entries.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
+}
+
+export function isSoftPath(rel) {
+  if (!rel) return false
+  const first = rel.split("/")[0]
+  return first in SOFT_DIRS
 }
 
 const INVALID_NAME_CHARS = /[\\/:*?"<>|\u0000-\u001f]/

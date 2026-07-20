@@ -33,6 +33,7 @@ export interface Entry {
   size: number
   mtime: number
   hiddenFromGuest?: boolean
+  softReadOnly?: boolean
 }
 
 export interface SearchResult extends Entry {

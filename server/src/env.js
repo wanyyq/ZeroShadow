@@ -26,6 +26,9 @@ function envTemplate(password) {
     "# 网盘文件根目录（留空则使用 ./data/files）",
     "# FILES_DIR=D:\\ZeroShadowFiles",
     "",
+    "# 外部映射目录（只读虚拟文件夹）JSON 格式：将服务器其他路径映射为网盘根目录只读文件夹",
+    '# FILES_SOFT_DIR={"软件文件夹":"./","工作目录":"D:/Program/xxx/xxx"}',
+    "",
   ].join("\n")
 }
 
@@ -90,6 +93,29 @@ export const DATA_DIR = path.join(ROOT_DIR, "data")
 export const FILES_DIR = process.env.FILES_DIR?.trim()
   ? path.resolve(process.env.FILES_DIR.trim())
   : path.join(DATA_DIR, "files")
+
+let softDirs = {}
+try {
+  const raw = (process.env.FILES_SOFT_DIR || "").trim()
+  if (raw) {
+    const safe = raw.replace(/\\/g, "/")
+    softDirs = JSON.parse(safe)
+    if (typeof softDirs !== "object" || softDirs === null || Array.isArray(softDirs)) {
+      softDirs = {}
+    }
+    for (const [name, target] of Object.entries(softDirs)) {
+      if (typeof target !== "string") { softDirs = {}; break }
+      if (!/^[\w\u4e00-\u9fff\u3400-\u4dbf.-]{1,100}$/.test(name)) { softDirs = {}; break }
+      if (name === "." || name === "..") { softDirs = {}; break }
+      softDirs[name] = path.resolve(target)
+    }
+  }
+} catch {
+  softDirs = {}
+}
+export const SOFT_DIRS = softDirs
+export const SOFT_DIR_NAMES = Object.keys(softDirs)
+
 export const TMP_DIR = path.join(DATA_DIR, "tmp")
 export const LOGS_DIR = path.join(DATA_DIR, "logs")
 export const WEB_DIST = path.join(ROOT_DIR, "web", "dist")
@@ -112,6 +138,6 @@ function loadSecret() {
   return secret
 }
 
-export const NOLOG = process.argv.includes("-nolog")
+export const NOLOG = process.argv.includes("-nolog") || /^(true|1|yes)$/i.test(String(process.env.NOLOG || ""))
 
 export const JWT_SECRET = loadSecret()

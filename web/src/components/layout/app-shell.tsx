@@ -10,6 +10,7 @@ import { useAuth } from "@/state/auth"
 import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
+import type { Me } from "@/lib/types"
 
 const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", member: "团队成员", guest: "访客" }
 
@@ -27,7 +28,7 @@ const ShellContext = React.createContext<ShellContextValue>({ searchText: "", se
 export function useShellSearch() { return React.useContext(ShellContext) }
 
 function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTheme }: {
-  open: boolean; onOpenChange: (o: boolean) => void; me: { role: string; username: string | null };
+  open: boolean; onOpenChange: (o: boolean) => void; me: Me;
   logout: () => Promise<void>; navigate: (p: string) => void; themeIcon: string; cycleTheme: () => void;
 }) {
   const [showPwd, setShowPwd] = React.useState(false)

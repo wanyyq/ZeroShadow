@@ -31,6 +31,14 @@ const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", memb
 type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 
 function noPermToast() { toast.warning("此功能您没权限") }
+function noPermSoftToast() { toast.warning("外部映射目录仅支持只读操作") }
+
+function anySoftReadOnly(entries: Entry[]) {
+  return entries.some((e) => e.softReadOnly)
+}
+function isInSoftDir(entry?: Entry) {
+  return entry?.softReadOnly === true
+}
 
 export function BrowserPage() {
   const [params, setParams] = useSearchParams()
@@ -142,12 +150,14 @@ export function BrowserPage() {
 
   const doClipboard = (mode: "copy" | "cut", targets: Entry[]) => {
     if (!me.perms[mode === "copy" ? "copy" : "move"]) return noPermToast()
+    if (mode === "cut" && anySoftReadOnly(targets)) return noPermSoftToast()
     clipboard.set(mode, targets.map((t) => ({ path: joinPath(path, t.name), name: t.name, type: t.type })))
     toast.info(`已${mode === "copy" ? "复制" : "剪切"} ${targets.length} 项`)
   }
 
   const doPaste = async () => {
     if (!clipboard.mode || !clipboard.items.length) return
+    if (isCurrentSoft) return noPermSoftToast()
     if (!me.perms[clipboard.mode === "copy" ? "copy" : "move"]) return noPermToast()
     const names = clipboard.items.map((i) => i.name)
     const dirNames = new Set(clipboard.items.filter((i) => i.type === "dir").map((i) => i.name))
@@ -208,6 +218,7 @@ export function BrowserPage() {
 
   const doExtract = async (entry: Entry) => {
     if (!me.perms.extractZip) return noPermToast()
+    if (isInSoftDir(entry)) return noPermSoftToast()
     try {
       const data = await api.post<{ count: number }>("/fs/extract", { path: joinPath(path, entry.name), dest: path })
       toast.success(`已解压 ${data.count} 个文件`)
@@ -279,6 +290,7 @@ export function BrowserPage() {
   const handleUpload = React.useCallback(
     (files: File[]) => {
       if (!files.length || !me.perms.upload) return
+      if (sorted.some((en) => en.softReadOnly)) { noPermSoftToast(); return }
       const hasPaths = files.some((f) => f.name.includes("/"))
       if (hasPaths) {
         const rootFolders = new Set<string>()
@@ -347,6 +359,7 @@ export function BrowserPage() {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     if (!me.perms.upload) return noPermToast()
+    if (sorted.some((en) => en.softReadOnly)) return noPermSoftToast()
     const items = e.dataTransfer.items
     if (items && items.length) {
       const files: File[] = []
@@ -386,12 +399,14 @@ export function BrowserPage() {
       if (key === "f2" && selected.size === 1) {
         e.preventDefault()
         const entry = sorted.find((en) => selected.has(en.name))
-        if (entry && me.perms.rename) openDialog("rename", entry)
+        if (entry && me.perms.rename && !entry.softReadOnly) openDialog("rename", entry)
+        else if (entry?.softReadOnly) noPermSoftToast()
         else if (entry) noPermToast()
       }
       if (key === "delete" && selected.size > 0) {
         e.preventDefault()
-        if (me.perms.delete) openDialog("delete")
+        if (me.perms.delete && !anySoftReadOnly(selectedEntries)) openDialog("delete")
+        else if (anySoftReadOnly(selectedEntries)) noPermSoftToast()
         else noPermToast()
       }
       if (mod && key === "a") {
@@ -406,7 +421,8 @@ export function BrowserPage() {
       }
       if (mod && key === "x" && selected.size > 0) {
         e.preventDefault()
-        if (me.perms.move) doClipboard("cut", selectedEntries)
+        if (me.perms.move && !anySoftReadOnly(selectedEntries)) doClipboard("cut", selectedEntries)
+        else if (anySoftReadOnly(selectedEntries)) noPermSoftToast()
         else noPermToast()
       }
       if (mod && key === "v") {
@@ -459,14 +475,14 @@ export function BrowserPage() {
     const EDITABLE = ["txt", "md", "mdx", "py", "cpp", "log", "html", "htm", "js", "ts", "css", "json", "xml", "yml", "yaml", "ini", "conf", "sh", "java", "c", "rs", "go"]
     if (single && entry.type === "file" && EDITABLE.includes(ext)) {
       items.push(
-        <ContextMenuItem key="edit" disabled={!me.perms.editFiles} onClick={() => { if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
+        <ContextMenuItem key="edit" disabled={!me.perms.editFiles || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
           <Icon name="pencil-line" /> 在线编辑
         </ContextMenuItem>
       )
     }}
     {single && entry.type === "file" && (entry.name.toLowerCase().endsWith(".zip")) && (
       items.push(
-        <ContextMenuItem key="extract" disabled={!me.perms.extractZip} onClick={() => { if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
+        <ContextMenuItem key="extract" disabled={!me.perms.extractZip || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
           <Icon name="folder-open" /> 解压到当前目录
         </ContextMenuItem>
       )
@@ -492,7 +508,7 @@ export function BrowserPage() {
       </ContextMenuItem>
     )
     items.push(
-      <ContextMenuItem key="cut" disabled={!me.perms.move} onClick={() => { if (!me.perms.move) noPermToast(); else doClipboard("cut", targets) }}>
+      <ContextMenuItem key="cut" disabled={!me.perms.move || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.move) noPermToast(); else doClipboard("cut", targets) }}>
         <Icon name="scissors" /> 剪切
       </ContextMenuItem>
     )
@@ -501,14 +517,14 @@ export function BrowserPage() {
     } else {
       items.push(<ContextMenuItem key="copyto-d" disabled onClick={noPermToast}><Icon name="copy-plus" /> 复制到…</ContextMenuItem>)
     }
-    if (me.perms.move) {
+    if (me.perms.move && !anySoftReadOnly(targets)) {
       items.push(<ContextMenuItem key="moveto" onClick={() => { setSelected(new Set(targets.map((t) => t.name))); setPicker("move") }}><Icon name="folder-input" /> 移动到…</ContextMenuItem>)
     } else {
-      items.push(<ContextMenuItem key="moveto-d" disabled onClick={noPermToast}><Icon name="folder-input" /> 移动到…</ContextMenuItem>)
+      items.push(<ContextMenuItem key="moveto-d" disabled onClick={anySoftReadOnly(targets) ? noPermSoftToast : noPermToast}><Icon name="folder-input" /> 移动到…</ContextMenuItem>)
     }
     if (single) {
       items.push(
-        <ContextMenuItem key="rename" disabled={!me.perms.rename} onClick={() => { if (!me.perms.rename) noPermToast(); else openDialog("rename", entry) }}>
+        <ContextMenuItem key="rename" disabled={!me.perms.rename || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.rename) noPermToast(); else openDialog("rename", entry) }}>
           <Icon name="pencil-line" /> 重命名
         </ContextMenuItem>
       )
@@ -530,7 +546,7 @@ export function BrowserPage() {
     }
     items.push(<ContextMenuSeparator key="s3" />)
     items.push(
-      <ContextMenuItem key="delete" variant="destructive" disabled={!me.perms.delete} onClick={() => { if (!me.perms.delete) noPermToast(); else { setSelected(new Set(targets.map((t) => t.name))); openDialog("delete", entry) } }}>
+      <ContextMenuItem key="delete" variant="destructive" disabled={!me.perms.delete || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.delete) noPermToast(); else { setSelected(new Set(targets.map((t) => t.name))); openDialog("delete", entry) } }}>
         <Icon name="trash-2" /> 删除
       </ContextMenuItem>
     )
@@ -577,7 +593,7 @@ export function BrowserPage() {
 
   const renderRow = (entry: Entry, index: number) => {
     const isSelected = selected.has(entry.name)
-    const kind = fileKind(entry.name, entry.type)
+    const kind = fileKind(entry.name, entry.type, entry.softReadOnly)
     return (
       <ContextMenu key={entry.name}>
         <ContextMenuTrigger render={<div />}>
@@ -615,7 +631,7 @@ export function BrowserPage() {
   }
 
   const renderCard = (entry: Entry, index: number) => {
-    const kind = fileKind(entry.name, entry.type)
+    const kind = fileKind(entry.name, entry.type, entry.softReadOnly)
     const isSelected = selected.has(entry.name)
     return (
       <ContextMenu key={entry.name}>
@@ -648,8 +664,9 @@ export function BrowserPage() {
     )
   }
 
-  const canUpload = me.perms.upload
-  const canMkdir = me.perms.mkdir
+  const isCurrentSoft = sorted.some((e) => e.softReadOnly)
+  const canUpload = me.perms.upload && !isCurrentSoft
+  const canMkdir = me.perms.mkdir && !isCurrentSoft
 
   return (
     <AppShell>
@@ -682,7 +699,7 @@ export function BrowserPage() {
                 onKeyDown={(e) => { if (e.key === "Enter") submitSearch() }}
               />
             </div>
-            {clipboard.mode && clipboard.items.length > 0 && (
+            {clipboard.mode && clipboard.items.length > 0 && !isCurrentSoft && (
               <Button size="sm" variant="secondary" onClick={doPaste}>
                 <Icon name="clipboard-paste" /> 粘贴 {clipboard.items.length} 项
               </Button>
@@ -751,7 +768,7 @@ export function BrowserPage() {
                   {results.map((r) => (
                     <div key={r.path} className="flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/70"
                       onDoubleClick={() => r.type === "dir" ? goto(r.path) : me.perms.download && triggerDownload(downloadUrl(r.path)).catch(() => {})}>
-                      <Icon name={fileKind(r.name, r.type).icon} className="size-4 shrink-0 text-muted-foreground" />
+                      <Icon name={fileKind(r.name, r.type, r.softReadOnly).icon} className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{r.name}</p>
                         <button className="block max-w-full truncate text-xs text-muted-foreground hover:underline" onClick={() => goto(r.parent)}>/{r.parent || "根目录"}</button>

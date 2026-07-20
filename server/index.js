@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import express from "express"
 import cookieParser from "cookie-parser"
-import { env, FILES_DIR, NOLOG, TMP_DIR, WEB_DIST } from "./src/env.js"
+import { env, FILES_DIR, NOLOG, SOFT_DIR_NAMES, TMP_DIR, WEB_DIST } from "./src/env.js"
 import { attachAuth, csrfGuard } from "./src/auth.js"
 import { getConfig } from "./src/config.js"
 import { error as logError, info } from "./src/logger.js"
@@ -116,6 +116,9 @@ const server = app.listen(env.port, env.host, () => {
       console.log(`  局域网访问: http://${addr}:${env.port}`)
     }
     console.log(`  文件目录:   ${FILES_DIR}`)
+    if (SOFT_DIR_NAMES.length) {
+      console.log(`  外部映射:   ${SOFT_DIR_NAMES.join(", ")}（只读）`)
+    }
     if (env.generatedPassword) {
       console.log("")
       console.log(`  [重要] 已自动生成超级管理员密码并写入 .env：`)

@@ -90,8 +90,8 @@ export function ext(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : ""
 }
 
-export function fileKind(name: string, type: "dir" | "file") {
-  if (type === "dir") return { icon: "folder", label: "文件夹" }
+export function fileKind(name: string, type: "dir" | "file", softReadOnly?: boolean) {
+  if (type === "dir") return { icon: softReadOnly ? "folder-lock" : "folder", label: softReadOnly ? "外部文件夹（只读）" : "文件夹" }
   return EXT_KIND[ext(name)] || { icon: "file", label: "文件" }
 }
 
