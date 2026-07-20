@@ -667,18 +667,20 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     }
     const unzipper = await import("unzipper")
     const directory = await unzipper.Open.file(abs)
+    const destResolved = path.resolve(destAbs)
     let count = 0
     for (const file of directory.files) {
       const entryPath = file.path
+      const outPath = path.resolve(destAbs, entryPath)
+      if (!outPath.startsWith(destResolved + path.sep) && outPath !== destResolved) continue
       if (file.type === "Directory") {
-        fs.mkdirSync(path.join(destAbs, entryPath), { recursive: true })
+        fs.mkdirSync(outPath, { recursive: true })
         continue
       }
-      const dirName = path.dirname(entryPath)
+      const dirName = path.dirname(outPath)
       if (dirName && dirName !== ".") {
-        fs.mkdirSync(path.join(destAbs, dirName), { recursive: true })
+        fs.mkdirSync(dirName, { recursive: true })
       }
-      const outPath = path.join(destAbs, entryPath)
       const buf = await file.buffer()
       await fs.promises.writeFile(outPath, buf)
       count += 1

@@ -62,7 +62,7 @@ router.post("/login", async (req, res) => {
   }
 
   recordLoginSuccess(req.ip, username)
-  res.cookie(COOKIE_NAME, signToken(auth), cookieOptions())
+  res.cookie(COOKIE_NAME, signToken(auth), cookieOptions(req))
   info("login_success", { user: auth.username, role: auth.role, ip: req.ip })
   res.json({ role: auth.role, username: auth.username })
 })

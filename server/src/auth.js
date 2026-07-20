@@ -13,10 +13,11 @@ const superPasswordVersion = crypto
   .digest("hex")
   .slice(0, 16)
 
-export function cookieOptions() {
+export function cookieOptions(req) {
   return {
     httpOnly: true,
     sameSite: "lax",
+    secure: req ? (req.secure || req.get("x-forwarded-proto") === "https") : false,
     path: "/",
     maxAge: env.sessionHours * 3600 * 1000,
   }
