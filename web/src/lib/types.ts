@@ -4,7 +4,9 @@ export interface Perms {
   fileWrite: boolean
   upload: boolean
   uploadFolders: boolean
-  download: boolean
+  downloadFile: boolean
+  downloadFolder: boolean
+  preview: boolean
   copy: boolean
   move: boolean
   rename: boolean
@@ -12,7 +14,6 @@ export interface Perms {
   mkdir: boolean
   manageGuestVisibility: boolean
   details: boolean
-  zip: boolean
   htmlPreview: boolean
   editFiles: boolean
   compressZip: boolean
@@ -68,7 +69,9 @@ export interface AdminConfig {
     fileWrite: boolean
     upload: boolean
     uploadFolders: boolean
-    download: boolean
+    downloadFile: boolean
+    downloadFolder: boolean
+    preview: boolean
     copy: boolean
     move: boolean
     rename: boolean
@@ -82,7 +85,9 @@ export interface AdminConfig {
     changePassword: boolean
   }
   guestPerms: {
-    download: boolean
+    downloadFile: boolean
+    downloadFolder: boolean
+    preview: boolean
     htmlPreview: boolean
     editFiles: boolean
     compressZip: boolean

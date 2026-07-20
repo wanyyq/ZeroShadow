@@ -6,7 +6,7 @@ import Busboy from "busboy"
 import archiver from "archiver"
 import { TMP_DIR } from "../env.js"
 import { requirePerm, requireRole } from "../auth.js"
-import { saveConfig, uploadLimitBytes, uploadLimitMB } from "../config.js"
+import { effectivePerms, saveConfig, uploadLimitBytes, uploadLimitMB } from "../config.js"
 import {
   getSoftDirEntries,
   guestBlocked,
@@ -128,7 +128,7 @@ router.get("/list", async (req, res, next) => {
   }
 })
 
-router.get("/download", requirePerm("download"), async (req, res, next) => {
+router.get("/download", async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path))
     if (!resolved.rel) throw httpError(400, "非法路径")
@@ -138,11 +138,22 @@ router.get("/download", requirePerm("download"), async (req, res, next) => {
 
     const name = path.basename(resolved.abs)
     const ext = path.extname(name).slice(1).toLowerCase()
+    const perms = effectivePerms(req.auth.role)
+
+    if (!perms.downloadFile) {
+      if (!perms.preview || !INLINE_TYPES.has(ext)) {
+        if (req.auth.role === "guest") return res.status(401).json({ error: "请先登录" })
+        return res.status(403).json({ error: "没有权限下载文件" })
+      }
+    }
+
     const inline = req.query.inline === "1" && INLINE_TYPES.has(ext)
-    res.setHeader("Content-Type", inline ? INLINE_TYPES.get(ext) : "application/octet-stream")
-    res.setHeader("Content-Disposition", contentDisposition(inline ? "inline" : "attachment", name))
+    const forceInline = !perms.downloadFile && perms.preview
+    const useInline = inline || forceInline
+    res.setHeader("Content-Type", useInline ? INLINE_TYPES.get(ext) : "application/octet-stream")
+    res.setHeader("Content-Disposition", contentDisposition(useInline ? "inline" : "attachment", name))
     res.setHeader("Cache-Control", "no-store")
-    if (!inline) info("download", { msg: resolved.rel, ...actor(req) })
+    if (!useInline) info("download", { msg: resolved.rel, ...actor(req) })
     res.sendFile(resolved.abs, { dotfiles: "allow", cacheControl: false }, (err) => {
       if (err && !res.headersSent) next(err)
     })
@@ -168,7 +179,7 @@ async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
   }
 }
 
-router.get("/zip", requirePerm("zip"), async (req, res, next) => {
+router.get("/zip", requirePerm("downloadFolder"), async (req, res, next) => {
   try {
     let rels = []
     if (req.query.paths) {

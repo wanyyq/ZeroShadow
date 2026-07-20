@@ -11,7 +11,9 @@ const DEFAULTS = {
     fileWrite: true,
     upload: true,
     uploadFolders: true,
-    download: true,
+    downloadFile: true,
+    downloadFolder: true,
+    preview: true,
     copy: true,
     move: true,
     rename: true,
@@ -25,7 +27,9 @@ const DEFAULTS = {
     changePassword: true,
   },
   guestPerms: {
-    download: true,
+    downloadFile: true,
+    downloadFolder: true,
+    preview: true,
     htmlPreview: false,
     editFiles: false,
     compressZip: false,
@@ -69,13 +73,30 @@ export async function saveConfig(mutator) {
   })
 }
 
+function legacyDownload(p) {
+  if (p.download !== undefined) return !!p.download
+  return !!(p.downloadFile ?? true)
+}
+
+function legacyDownloadFolder(p) {
+  if (p.downloadFolder !== undefined) return !!p.downloadFolder
+  return !!(p.download ?? true)
+}
+
+function legacyPreview(p) {
+  if (p.preview !== undefined) return !!p.preview
+  return !!(p.download ?? true)
+}
+
 export function effectivePerms(role) {
   if (role === "superadmin") {
     return {
       fileWrite: true,
       upload: true,
       uploadFolders: true,
-      download: true,
+      downloadFile: true,
+      downloadFolder: true,
+      preview: true,
       copy: true,
       move: true,
       rename: true,
@@ -83,7 +104,6 @@ export function effectivePerms(role) {
       mkdir: true,
       manageGuestVisibility: true,
       details: true,
-      zip: true,
       htmlPreview: true,
       editFiles: true,
       compressZip: true,
@@ -98,7 +118,9 @@ export function effectivePerms(role) {
       fileWrite: fw,
       upload: fw && !!p.upload,
       uploadFolders: fw && !!p.uploadFolders,
-      download: !!p.download,
+      downloadFile: legacyDownload(p),
+      downloadFolder: legacyDownloadFolder(p),
+      preview: legacyPreview(p),
       copy: fw && !!p.copy,
       move: fw && !!p.move,
       rename: fw && !!p.rename,
@@ -106,7 +128,6 @@ export function effectivePerms(role) {
       mkdir: fw && !!p.mkdir,
       manageGuestVisibility: !!p.manageGuestVisibility,
       details: true,
-      zip: !!p.download,
       htmlPreview: !!p.htmlPreview,
       editFiles: !!p.editFiles,
       compressZip: !!p.compressZip,
@@ -119,7 +140,9 @@ export function effectivePerms(role) {
     fileWrite: false,
     upload: false,
     uploadFolders: false,
-    download: !!g.download,
+    downloadFile: legacyDownload(g),
+    downloadFolder: legacyDownloadFolder(g),
+    preview: legacyPreview(g),
     copy: false,
     move: false,
     rename: false,
@@ -127,7 +150,6 @@ export function effectivePerms(role) {
     mkdir: false,
     manageGuestVisibility: false,
     details: false,
-    zip: !!g.download,
     htmlPreview: !!g.htmlPreview,
     editFiles: !!g.editFiles,
     compressZip: !!g.compressZip,

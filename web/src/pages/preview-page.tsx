@@ -1,9 +1,11 @@
 import * as React from "react"
 import { useSearchParams, useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/icon"
 import { downloadUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/state/auth"
 
 const EXT_KIND: Record<string, "image" | "video" | "audio" | "pdf" | "text" | "html"> = {
   jpg: "image", jpeg: "image", png: "image", gif: "image", webp: "image", bmp: "image", avif: "image", svg: "image",
@@ -16,6 +18,7 @@ const EXT_KIND: Record<string, "image" | "video" | "audio" | "pdf" | "text" | "h
 export default function PreviewPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
+  const { me } = useAuth()
   const entryPath = params.get("path") || ""
   const name = entryPath.split("/").pop() || ""
   const ext = (name.split(".").pop() || "").toLowerCase()
@@ -31,6 +34,13 @@ export default function PreviewPage() {
   const lastMouse = React.useRef({ x: 0, y: 0 })
 
   const displayScale = scale || fitScale
+
+  React.useEffect(() => {
+    if (!me.perms.preview) {
+      toast.warning("此功能您没权限")
+      navigate(-1)
+    }
+  }, [me.perms.preview, navigate])
 
   React.useEffect(() => {
     if (kind === "text" && url) {

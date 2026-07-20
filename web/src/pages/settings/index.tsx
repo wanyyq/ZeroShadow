@@ -527,14 +527,13 @@ function PermsSection() {
 
       <Separator className="mb-4" />
 
-      {/* 下载 */}
+      {/* 下载与预览 */}
       <div className="mb-4">
-        <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/30">
-          <div>
-            <span className="text-sm">下载文件</span>
-            <span className="ml-2 text-xs text-muted-foreground">Zip 打包下载自动跟随</span>
-          </div>
-          <Switch checked={m.download} onCheckedChange={(v) => patch({ memberPerms: { download: !!v } })} />
+        <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">下载与预览</h4>
+        <div className="grid gap-px sm:grid-cols-2">
+          {permItem("下载文件", m.downloadFile, (v) => patch({ memberPerms: { downloadFile: !!v } }))}
+          {permItem("下载文件夹", m.downloadFolder, (v) => patch({ memberPerms: { downloadFolder: !!v } }))}
+          {permItem("允许预览", m.preview, (v) => patch({ memberPerms: { preview: !!v } }))}
         </div>
       </div>
 
@@ -563,13 +562,9 @@ function PermsSection() {
       {/* ===== 访客权限 ===== */}
       <h3 className="mb-4 text-sm font-medium">访客权限</h3>
       <div className="mb-4 grid gap-px sm:grid-cols-2">
-        <div className="flex items-center justify-between rounded-md px-3 py-1.5 col-span-full">
-          <div>
-            <span className="text-sm">下载文件</span>
-            <span className="ml-2 text-xs text-muted-foreground">打包下载自动跟随</span>
-          </div>
-          <Switch checked={g.download} onCheckedChange={(v) => patch({ guestPerms: { download: !!v } })} />
-        </div>
+        {permItem("下载文件", g.downloadFile, (v) => patch({ guestPerms: { downloadFile: !!v } }))}
+        {permItem("下载文件夹", g.downloadFolder, (v) => patch({ guestPerms: { downloadFolder: !!v } }))}
+        {permItem("允许预览", g.preview, (v) => patch({ guestPerms: { preview: !!v } }))}
         {permItem("压缩为 Zip", g.compressZip, (v) => patch({ guestPerms: { compressZip: !!v } }))}
         {permItem("解压 Zip", g.extractZip, (v) => patch({ guestPerms: { extractZip: !!v } }))}
         {permItem("HTML 全屏预览", g.htmlPreview, (v) => patch({ guestPerms: { htmlPreview: !!v } }))}

@@ -105,14 +105,14 @@ export function BrowserPage() {
   const handleOpenFile = (entry: Entry) => {
     const rel = joinPath(path, entry.name)
     const ext = (entry.name.split(".").pop() || "").toLowerCase()
-    if (previewType(entry.name) && me.perms.download) {
+    if (previewType(entry.name) && me.perms.preview) {
       if (ext === "html" || ext === "htm") {
         if (me.perms.htmlPreview) navigate(`/html-preview?path=${encodeURIComponent(rel)}`)
         else navigate(`/preview?path=${encodeURIComponent(rel)}`)
       } else {
         navigate(`/preview?path=${encodeURIComponent(rel)}`)
       }
-    } else if (me.perms.download) {
+    } else if (me.perms.downloadFile) {
       triggerDownload(downloadUrl(rel)).catch(() => {})
     }
   }
@@ -143,9 +143,13 @@ export function BrowserPage() {
     entry && !selected.has(entry.name) ? [entry] : selectedEntries.length ? selectedEntries : entry ? [entry] : []
 
   const doDownload = (targets: Entry[]) => {
-    if (!me.perms.download) return noPermToast()
-    if (targets.length === 1 && targets[0].type === "file") triggerDownload(downloadUrl(joinPath(path, targets[0].name))).catch(() => {})
-    else if (targets.length) triggerDownload(zipUrl(targets.map((t) => joinPath(path, t.name)))).catch(() => {})
+    if (targets.length === 1 && targets[0].type === "file") {
+      if (!me.perms.downloadFile) return noPermToast()
+      triggerDownload(downloadUrl(joinPath(path, targets[0].name))).catch(() => {})
+    } else if (targets.length) {
+      if (!me.perms.downloadFolder) return noPermToast()
+      triggerDownload(zipUrl(targets.map((t) => joinPath(path, t.name)))).catch(() => {})
+    }
   }
 
   const doClipboard = (mode: "copy" | "cut", targets: Entry[]) => {
@@ -452,13 +456,13 @@ export function BrowserPage() {
       items.push(<ContextMenuItem key="open" onClick={() => openEntry(entry)}><Icon name="folder-open" /> 打开</ContextMenuItem>)
     }
     items.push(
-      <ContextMenuItem key="download" disabled={!me.perms.download} onClick={() => { if (!me.perms.download) noPermToast(); else doDownload(targets) }}>
+      <ContextMenuItem key="download" disabled={single && entry.type === "file" ? !me.perms.downloadFile : !me.perms.downloadFolder} onClick={() => { doDownload(targets) }}>
         <Icon name="download" /> 下载{!single || entry.type === "dir" ? " (Zip)" : ""}
       </ContextMenuItem>
     )
     if (single && entry.type === "file" && previewType(entry.name)) {
       items.push(
-        <ContextMenuItem key="preview" disabled={!me.perms.download} onClick={() => { if (!me.perms.download) noPermToast(); else handleOpenFile(entry) }}>
+        <ContextMenuItem key="preview" disabled={!me.perms.preview} onClick={() => { if (!me.perms.preview) noPermToast(); else handleOpenFile(entry) }}>
           <Icon name="eye" /> 预览
         </ContextMenuItem>
       )
@@ -767,7 +771,7 @@ export function BrowserPage() {
                 <div className="flex-1 overflow-auto p-2">
                   {results.map((r) => (
                     <div key={r.path} className="flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/70"
-                      onDoubleClick={() => r.type === "dir" ? goto(r.path) : me.perms.download && triggerDownload(downloadUrl(r.path)).catch(() => {})}>
+                      onDoubleClick={() => r.type === "dir" ? goto(r.path) : (me.perms.downloadFile || me.perms.preview) && triggerDownload(downloadUrl(r.path)).catch(() => {})}>
                       <Icon name={fileKind(r.name, r.type, r.softReadOnly).icon} className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{r.name}</p>
