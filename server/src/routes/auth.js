@@ -6,6 +6,7 @@ import {
   loginLocked,
   recordLoginFail,
   recordLoginSuccess,
+  requirePerm,
   requireRole,
   signToken,
   verifySuperPassword,
@@ -66,7 +67,7 @@ router.post("/login", async (req, res) => {
   res.json({ role: auth.role, username: auth.username })
 })
 
-router.post("/change-password", requireRole("superadmin", "member"), async (req, res, next) => {
+router.post("/change-password", requireRole("superadmin", "member"), requirePerm("changePassword"), async (req, res, next) => {
   try {
     const oldPwd = String(req.body?.oldPassword || "")
     const newPwd = String(req.body?.newPassword || "")

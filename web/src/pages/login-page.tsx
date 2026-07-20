@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Icon } from "@/components/icon"
 import { useAuth } from "@/state/auth"
+import { ApiError } from "@/lib/api"
 import { animatePageIn } from "@/lib/lucide"
 
 export function LoginPage() {
@@ -35,7 +36,13 @@ export function LoginPage() {
       toast.success(`欢迎回来，${next.username}`)
       navigate("/", { replace: true })
     } catch (err) {
-      toast.error((err as Error).message)
+      if (err instanceof ApiError && err.status === 403) {
+        toast.error("您的账户已被禁用", {
+          description: "您的用户已被管理员禁用，请联系管理员寻求帮助",
+        })
+      } else {
+        toast.error((err as Error).message)
+      }
     } finally {
       setBusy(false)
     }

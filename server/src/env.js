@@ -13,7 +13,7 @@ function randomPassword() {
 function envTemplate(password) {
   return [
     "# ===== ZeroShadow 服务配置 =====",
-    "PORT=5170",
+    "PORT=12345",
     "HOST=0.0.0.0",
     "",
     "# ===== 超级管理员（唯一，修改密码只能在此处，改后需重启服务）=====",
@@ -78,7 +78,7 @@ if (!superPassword || superPassword === "change-me") {
 }
 
 export const env = {
-  port: clamp(toInt(process.env.PORT, 5170), 1, 65535),
+  port: clamp(toInt(process.env.PORT, 12345), 1, 65535),
   host: (process.env.HOST || "0.0.0.0").trim(),
   superUser: (process.env.SUPER_ADMIN_USER || "admin").trim(),
   superPassword,
@@ -111,5 +111,7 @@ function loadSecret() {
   fs.writeFileSync(SECRET_FILE, secret, "utf8")
   return secret
 }
+
+export const NOLOG = process.argv.includes("-nolog")
 
 export const JWT_SECRET = loadSecret()

@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import express from "express"
 import cookieParser from "cookie-parser"
-import { env, FILES_DIR, TMP_DIR, WEB_DIST } from "./src/env.js"
+import { env, FILES_DIR, NOLOG, TMP_DIR, WEB_DIST } from "./src/env.js"
 import { attachAuth, csrfGuard } from "./src/auth.js"
 import { getConfig } from "./src/config.js"
 import { error as logError, info } from "./src/logger.js"
@@ -29,9 +29,9 @@ app.get("/ping", (_req, res) => {
   res.end("pong")
 })
 
-// 请求日志：诊断隧道请求
+// 请求日志：诊断隧道请求（-nolog 时只写文件不打印到控制台）
 app.use((req, _res, next) => {
-  if (req.path !== "/favicon.ico" && req.path !== "/resources/lucide.min.js") {
+  if (!NOLOG && req.path !== "/favicon.ico" && req.path !== "/resources/lucide.min.js") {
     console.log(`[REQ] ${req.method} ${req.path} host=${req.headers.host} ua=${(req.headers["user-agent"] || "").slice(0, 40)}`)
   }
   next()
@@ -108,20 +108,22 @@ app.use((err, req, res, _next) => {
 
 const server = app.listen(env.port, env.host, () => {
   info("server_start", { msg: `ZeroShadow 已启动，端口 ${env.port}` })
-  console.log("")
-  console.log("  ZeroShadow 网盘已启动")
-  console.log(`  本机访问:   http://localhost:${env.port}`)
-  for (const addr of lanAddresses()) {
-    console.log(`  局域网访问: http://${addr}:${env.port}`)
-  }
-  console.log(`  文件目录:   ${FILES_DIR}`)
-  if (env.generatedPassword) {
+  if (!NOLOG) {
     console.log("")
-    console.log(`  [重要] 已自动生成超级管理员密码并写入 .env：`)
-    console.log(`         用户名: ${env.superUser}`)
-    console.log(`         密码:   ${env.generatedPassword}`)
+    console.log("  ZeroShadow 网盘已启动")
+    console.log(`  本机访问:   http://localhost:${env.port}`)
+    for (const addr of lanAddresses()) {
+      console.log(`  局域网访问: http://${addr}:${env.port}`)
+    }
+    console.log(`  文件目录:   ${FILES_DIR}`)
+    if (env.generatedPassword) {
+      console.log("")
+      console.log(`  [重要] 已自动生成超级管理员密码并写入 .env：`)
+      console.log(`         用户名: ${env.superUser}`)
+      console.log(`         密码:   ${env.generatedPassword}`)
+    }
+    console.log("")
   }
-  console.log("")
   const tunnel = getConfig().tunnel
   if (tunnel.enabled) applyTunnelConfig(tunnel)
 })

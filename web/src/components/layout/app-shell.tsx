@@ -86,12 +86,20 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
               </div>
             </div>
             <div className="mt-4 grid gap-1">
-              {me.role === "member" && (
+              {me.role === "member" && me.perms.changePassword && (
                 <button
                   onClick={() => { if (me.role === "superadmin") { toast.info("超级管理员密码请编辑 .env 文件中的 SUPER_ADMIN_PASSWORD，改后重启"); return }; setShowPwd(true); setOldPwd(""); setNewPwd("") }}
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <Icon name="key" className="size-[18px]" /> 修改密码
+                </button>
+              )}
+              {me.role === "member" && !me.perms.changePassword && (
+                <button
+                  disabled
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground/40"
+                >
+                  <Icon name="key" className="size-[18px]" /> 修改密码（无权限）
                 </button>
               )}
               {me.role === "superadmin" && (

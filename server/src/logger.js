@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import { LOGS_DIR } from "./env.js"
+import { LOGS_DIR, NOLOG } from "./env.js"
 
 function dateKey(d = new Date()) {
   const y = d.getFullYear()
@@ -31,6 +31,7 @@ export function log(level, event, details = {}) {
   } catch {
     /* logging must never crash the app */
   }
+  if (NOLOG) return
   const line = `[${entry.t}] ${level.toUpperCase()} ${event}${entry.user ? ` user=${entry.user}` : ""}${entry.ip ? ` ip=${entry.ip}` : ""}${entry.msg ? ` ${entry.msg}` : ""}`
   if (level === "error") console.error(line)
   else console.log(line)

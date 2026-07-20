@@ -1,6 +1,7 @@
 export type Role = "superadmin" | "member" | "guest"
 
 export interface Perms {
+  fileWrite: boolean
   upload: boolean
   uploadFolders: boolean
   download: boolean
@@ -16,6 +17,7 @@ export interface Perms {
   editFiles: boolean
   compressZip: boolean
   extractZip: boolean
+  changePassword: boolean
 }
 
 export interface Me {
@@ -62,6 +64,7 @@ export interface AdminConfig {
   superUploadLimitMB: number
   memberUploadLimitMB: number
   memberPerms: {
+    fileWrite: boolean
     upload: boolean
     uploadFolders: boolean
     download: boolean
@@ -75,10 +78,10 @@ export interface AdminConfig {
     editFiles: boolean
     compressZip: boolean
     extractZip: boolean
+    changePassword: boolean
   }
   guestPerms: {
     download: boolean
-    zip: boolean
     htmlPreview: boolean
     editFiles: boolean
     compressZip: boolean

@@ -459,13 +459,6 @@ function MembersSection() {
 }
 
 /* ==================== 权限 ==================== */
-const MEMBER_PERM_LABELS: [keyof AdminConfig["memberPerms"], string][] = [
-  ["upload", "上传文件"], ["uploadFolders", "上传文件夹"], ["download", "下载文件"], ["mkdir", "新建文件夹"],
-  ["copy", "复制文件"], ["move", "移动文件"], ["rename", "重命名"], ["delete", "删除"],
-  ["manageGuestVisibility", "设置访客可见性"], ["htmlPreview", "HTML 全屏预览"], ["editFiles", "在线编辑文件"],
-  ["compressZip", "压缩为 Zip"], ["extractZip", "解压 Zip"],
-]
-
 function PermsSection() {
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [superLimit, setSuperLimit] = React.useState("")
@@ -476,8 +469,8 @@ function PermsSection() {
   }, [])
   React.useEffect(load, [load])
 
-  const patch = async (body: Record<string, unknown>, msg = "已保存") => {
-    try { const next = await api.patch<AdminConfig>("/admin/config", body); setConfig(next); setSuperLimit(String(next.superUploadLimitMB ?? 2048)); setMemberLimit(String(next.memberUploadLimitMB ?? 512)); toast.success(msg) }
+  const patch = async (body: Record<string, unknown>, msg?: string) => {
+    try { const next = await api.patch<AdminConfig>("/admin/config", body); setConfig(next); setSuperLimit(String(next.superUploadLimitMB ?? 2048)); setMemberLimit(String(next.memberUploadLimitMB ?? 512)); if (msg) toast.success(msg) }
     catch (e) { toast.error((e as Error).message) }
   }
 
@@ -488,85 +481,127 @@ function PermsSection() {
 
   if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
 
+  const m = config.memberPerms
+  const g = config.guestPerms
+  const fw = m.fileWrite
+
   return (
-    <div className="grid gap-5">
-      {/* 上传限制：横向三行 */}
-      <div className="edge-highlight rounded-xl border border-border p-4">
-        <h3 className="mb-3 text-sm font-medium">上传大小限制（单文件 MB）</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex items-center gap-3">
-            <span className="w-28 text-sm text-muted-foreground">超级管理员</span>
-            <Input className="w-24 text-right" inputMode="numeric" value={superLimit} onChange={(e) => setSuperLimit(e.target.value)} />
-            <span className="text-xs text-muted-foreground">MB</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="w-28 text-sm text-muted-foreground">团队成员</span>
-            <Input className="w-24 text-right" inputMode="numeric" value={memberLimit} onChange={(e) => setMemberLimit(e.target.value)} />
-            <span className="text-xs text-muted-foreground">MB</span>
-          </div>
+    <div className="edge-highlight rounded-xl border border-border p-5">
+      {/* ===== 上传大小限制 ===== */}
+      <h3 className="mb-3 text-sm font-medium">上传大小限制（单文件 MB）</h3>
+      <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:gap-4">
+        <div className="flex items-center gap-2">
+          <span className="w-24 shrink-0 text-sm text-muted-foreground">超级管理员</span>
+          <Input className="w-24 text-right" inputMode="numeric" value={superLimit} onChange={(e) => setSuperLimit(e.target.value)} />
+          <span className="text-xs text-muted-foreground">MB</span>
         </div>
-        <Button size="sm" className="mt-3" onClick={() => patch({ superUploadLimitMB: Number(superLimit), memberUploadLimitMB: Number(memberLimit) }, "限制已更新")}>保存</Button>
+        <div className="flex items-center gap-2">
+          <span className="w-24 shrink-0 text-sm text-muted-foreground">团队成员</span>
+          <Input className="w-24 text-right" inputMode="numeric" value={memberLimit} onChange={(e) => setMemberLimit(e.target.value)} />
+          <span className="text-xs text-muted-foreground">MB</span>
+        </div>
+        <Button size="sm" onClick={() => patch({ superUploadLimitMB: Number(superLimit), memberUploadLimitMB: Number(memberLimit) }, "上传限制已更新")}>保存</Button>
       </div>
 
-      {/* 成员权限：网格开关 */}
-      <div className="edge-highlight rounded-xl border border-border p-4">
-        <h3 className="mb-3 text-sm font-medium">团队成员权限</h3>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {MEMBER_PERM_LABELS.map(([key, label]) => (
-            <div key={key} className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-              <span className="text-sm">{label}</span>
-              <Switch checked={config.memberPerms[key]} onCheckedChange={(v) => patch({ memberPerms: { [key]: !!v } })} />
-            </div>
-          ))}
+      <Separator className="mb-5" />
+
+      {/* ===== 团队成员权限 ===== */}
+      <h3 className="mb-4 text-sm font-medium">团队成员权限</h3>
+
+      {/* 文件操作（主开关 + 子项） */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+          <span className="text-sm font-medium">文件操作</span>
+          <Switch checked={fw} onCheckedChange={(v) => patch({ memberPerms: { fileWrite: !!v } })} />
+        </div>
+        <div className={cn("mt-1 ml-1 grid gap-px sm:grid-cols-2", !fw && "pointer-events-none opacity-30")}>
+          {permItem("上传文件", fw && m.upload, (v) => patch({ memberPerms: { upload: !!v } }))}
+          {permItem("上传文件夹", fw && m.uploadFolders, (v) => patch({ memberPerms: { uploadFolders: !!v } }))}
+          {permItem("新建文件夹", fw && m.mkdir, (v) => patch({ memberPerms: { mkdir: !!v } }))}
+          {permItem("复制", fw && m.copy, (v) => patch({ memberPerms: { copy: !!v } }))}
+          {permItem("移动", fw && m.move, (v) => patch({ memberPerms: { move: !!v } }))}
+          {permItem("重命名", fw && m.rename, (v) => patch({ memberPerms: { rename: !!v } }))}
+          {permItem("删除", fw && m.delete, (v) => patch({ memberPerms: { delete: !!v } }))}
         </div>
       </div>
 
-      {/* 访客权限 + 隐藏文件夹 */}
-      <div className="edge-highlight rounded-xl border border-border p-4">
-        <h3 className="mb-3 text-sm font-medium">访客权限</h3>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-            <span className="text-sm">允许下载文件</span>
-            <Switch checked={config.guestPerms.download} onCheckedChange={(v) => patch({ guestPerms: { download: !!v } })} />
+      <Separator className="mb-4" />
+
+      {/* 下载 */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/30">
+          <div>
+            <span className="text-sm">下载文件</span>
+            <span className="ml-2 text-xs text-muted-foreground">Zip 打包下载自动跟随</span>
           </div>
-          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-            <span className="text-sm">允许打包下载（Zip）</span>
-            <Switch checked={config.guestPerms.zip} onCheckedChange={(v) => patch({ guestPerms: { zip: !!v } })} />
-          </div>
-          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-            <span className="text-sm">HTML 全屏预览</span>
-            <Switch checked={config.guestPerms.htmlPreview} onCheckedChange={(v) => patch({ guestPerms: { htmlPreview: !!v } })} />
-          </div>
-          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-            <span className="text-sm">在线编辑文件</span>
-            <Switch checked={config.guestPerms.editFiles} onCheckedChange={(v) => patch({ guestPerms: { editFiles: !!v } })} />
-          </div>
-          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-            <span className="text-sm">压缩为 Zip</span>
-            <Switch checked={config.guestPerms.compressZip} onCheckedChange={(v) => patch({ guestPerms: { compressZip: !!v } })} />
-          </div>
-          <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/50">
-            <span className="text-sm">解压 Zip</span>
-            <Switch checked={config.guestPerms.extractZip} onCheckedChange={(v) => patch({ guestPerms: { extractZip: !!v } })} />
-          </div>
-        </div>
-        <Separator className="my-3" />
-        <div>
-          <p className="mb-2 text-sm font-medium">对访客隐藏的文件夹</p>
-          {config.guestHiddenPaths.length === 0 ? (
-            <p className="text-xs text-muted-foreground">暂无。可在文件列表右键文件夹 → "对访客隐藏"</p>
-          ) : (
-            <div className="grid gap-1.5">
-              {config.guestHiddenPaths.map((p) => (
-                <div key={p} className="flex items-center justify-between rounded-md border border-border px-3 py-1.5">
-                  <span className="flex items-center gap-2 font-mono text-xs"><Icon name="eye-off" className="size-3.5 text-muted-foreground" /> /{p}</span>
-                  <Button size="xs" variant="ghost" onClick={() => unhide(p)}>恢复可见</Button>
-                </div>
-              ))}
-            </div>
-          )}
+          <Switch checked={m.download} onCheckedChange={(v) => patch({ memberPerms: { download: !!v } })} />
         </div>
       </div>
+
+      <Separator className="mb-4" />
+
+      {/* 高级功能 */}
+      <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">高级功能</h4>
+      <div className="mb-4 grid gap-px sm:grid-cols-2">
+        {permItem("压缩为 Zip", m.compressZip, (v) => patch({ memberPerms: { compressZip: !!v } }))}
+        {permItem("解压 Zip", m.extractZip, (v) => patch({ memberPerms: { extractZip: !!v } }))}
+        {permItem("HTML 全屏预览", m.htmlPreview, (v) => patch({ memberPerms: { htmlPreview: !!v } }))}
+        {permItem("在线编辑文件", m.editFiles, (v) => patch({ memberPerms: { editFiles: !!v } }))}
+      </div>
+
+      <Separator className="mb-4" />
+
+      {/* 管理与账户 */}
+      <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">管理与账户</h4>
+      <div className="mb-4 grid gap-px sm:grid-cols-2">
+        {permItem("管理访客可见性", m.manageGuestVisibility, (v) => patch({ memberPerms: { manageGuestVisibility: !!v } }))}
+        {permItem("修改密码", m.changePassword, (v) => patch({ memberPerms: { changePassword: !!v } }))}
+      </div>
+
+      <Separator className="mb-5" />
+
+      {/* ===== 访客权限 ===== */}
+      <h3 className="mb-4 text-sm font-medium">访客权限</h3>
+      <div className="mb-4 grid gap-px sm:grid-cols-2">
+        <div className="flex items-center justify-between rounded-md px-3 py-1.5 col-span-full">
+          <div>
+            <span className="text-sm">下载文件</span>
+            <span className="ml-2 text-xs text-muted-foreground">打包下载自动跟随</span>
+          </div>
+          <Switch checked={g.download} onCheckedChange={(v) => patch({ guestPerms: { download: !!v } })} />
+        </div>
+        {permItem("压缩为 Zip", g.compressZip, (v) => patch({ guestPerms: { compressZip: !!v } }))}
+        {permItem("解压 Zip", g.extractZip, (v) => patch({ guestPerms: { extractZip: !!v } }))}
+        {permItem("HTML 全屏预览", g.htmlPreview, (v) => patch({ guestPerms: { htmlPreview: !!v } }))}
+        {permItem("在线编辑文件", g.editFiles, (v) => patch({ guestPerms: { editFiles: !!v } }))}
+      </div>
+
+      {/* 隐藏文件夹 */}
+      <Separator className="mb-3" />
+      <div>
+        <p className="mb-2 text-sm font-medium">对访客隐藏的文件夹</p>
+        {config.guestHiddenPaths.length === 0 ? (
+          <p className="text-xs text-muted-foreground">暂无。在文件列表中右键文件夹可设为隐藏</p>
+        ) : (
+          <div className="grid gap-1.5">
+            {config.guestHiddenPaths.map((p) => (
+              <div key={p} className="flex items-center justify-between rounded-md border border-border px-3 py-1.5">
+                <span className="flex items-center gap-2 font-mono text-xs"><Icon name="eye-off" className="size-3.5 text-muted-foreground" /> /{p}</span>
+                <Button size="xs" variant="ghost" onClick={() => unhide(p)}>恢复可见</Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function permItem(label: string, checked: boolean, onChange: (v: boolean) => void) {
+  return (
+    <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/30">
+      <span className="text-sm">{label}</span>
+      <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   )
 }

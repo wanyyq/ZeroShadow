@@ -8,6 +8,7 @@ const GUEST: Me = {
   role: "guest",
   username: null,
   perms: {
+    fileWrite: false,
     upload: false,
     uploadFolders: false,
     download: true,
@@ -23,6 +24,7 @@ const GUEST: Me = {
     editFiles: false,
     compressZip: false,
     extractZip: false,
+    changePassword: false,
   },
   uploadLimitMB: 0,
 }

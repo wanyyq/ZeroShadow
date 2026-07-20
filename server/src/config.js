@@ -8,6 +8,7 @@ const DEFAULTS = {
   superUploadLimitMB: 2048,
   memberUploadLimitMB: 512,
   memberPerms: {
+    fileWrite: true,
     upload: true,
     uploadFolders: true,
     download: true,
@@ -21,10 +22,10 @@ const DEFAULTS = {
     editFiles: true,
     compressZip: true,
     extractZip: true,
+    changePassword: true,
   },
   guestPerms: {
     download: true,
-    zip: true,
     htmlPreview: false,
     editFiles: false,
     compressZip: false,
@@ -71,6 +72,7 @@ export async function saveConfig(mutator) {
 export function effectivePerms(role) {
   if (role === "superadmin") {
     return {
+      fileWrite: true,
       upload: true,
       uploadFolders: true,
       download: true,
@@ -86,19 +88,22 @@ export function effectivePerms(role) {
       editFiles: true,
       compressZip: true,
       extractZip: true,
+      changePassword: true,
     }
   }
   if (role === "member") {
     const p = config.memberPerms
+    const fw = !!p.fileWrite
     return {
-      upload: !!p.upload,
-      uploadFolders: !!p.uploadFolders,
+      fileWrite: fw,
+      upload: fw && !!p.upload,
+      uploadFolders: fw && !!p.uploadFolders,
       download: !!p.download,
-      copy: !!p.copy,
-      move: !!p.move,
-      rename: !!p.rename,
-      delete: !!p.delete,
-      mkdir: !!p.mkdir,
+      copy: fw && !!p.copy,
+      move: fw && !!p.move,
+      rename: fw && !!p.rename,
+      delete: fw && !!p.delete,
+      mkdir: fw && !!p.mkdir,
       manageGuestVisibility: !!p.manageGuestVisibility,
       details: true,
       zip: !!p.download,
@@ -106,12 +111,15 @@ export function effectivePerms(role) {
       editFiles: !!p.editFiles,
       compressZip: !!p.compressZip,
       extractZip: !!p.extractZip,
+      changePassword: !!p.changePassword,
     }
   }
+  const g = config.guestPerms
   return {
+    fileWrite: false,
     upload: false,
     uploadFolders: false,
-    download: !!config.guestPerms.download,
+    download: !!g.download,
     copy: false,
     move: false,
     rename: false,
@@ -119,11 +127,12 @@ export function effectivePerms(role) {
     mkdir: false,
     manageGuestVisibility: false,
     details: false,
-    zip: !!config.guestPerms.download && !!config.guestPerms.zip,
-    htmlPreview: !!config.guestPerms.htmlPreview,
-    editFiles: !!config.guestPerms.editFiles,
-    compressZip: !!config.guestPerms.compressZip,
-    extractZip: !!config.guestPerms.extractZip,
+    zip: !!g.download,
+    htmlPreview: !!g.htmlPreview,
+    editFiles: !!g.editFiles,
+    compressZip: !!g.compressZip,
+    extractZip: !!g.extractZip,
+    changePassword: false,
   }
 }
 
