@@ -30,7 +30,7 @@ const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", memb
 
 type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 
-function noPermToast() { toast.warning("您没有权限执行此操作") }
+function noPermToast() { toast.warning("此功能您没权限") }
 
 export function BrowserPage() {
   const [params, setParams] = useSearchParams()
@@ -105,7 +105,7 @@ export function BrowserPage() {
         navigate(`/preview?path=${encodeURIComponent(rel)}`)
       }
     } else if (me.perms.download) {
-      triggerDownload(downloadUrl(rel))
+      triggerDownload(downloadUrl(rel)).catch(() => {})
     }
   }
 
@@ -136,8 +136,8 @@ export function BrowserPage() {
 
   const doDownload = (targets: Entry[]) => {
     if (!me.perms.download) return noPermToast()
-    if (targets.length === 1 && targets[0].type === "file") triggerDownload(downloadUrl(joinPath(path, targets[0].name)))
-    else if (targets.length) triggerDownload(zipUrl(targets.map((t) => joinPath(path, t.name))))
+    if (targets.length === 1 && targets[0].type === "file") triggerDownload(downloadUrl(joinPath(path, targets[0].name))).catch(() => {})
+    else if (targets.length) triggerDownload(zipUrl(targets.map((t) => joinPath(path, t.name)))).catch(() => {})
   }
 
   const doClipboard = (mode: "copy" | "cut", targets: Entry[]) => {
@@ -201,7 +201,7 @@ export function BrowserPage() {
   const doCompress = async (targets: Entry[]) => {
     if (!me.perms.compressZip) return noPermToast()
     try {
-      triggerDownload(`/api/fs/compress?paths=${encodeURIComponent(JSON.stringify(targets.map((t) => joinPath(path, t.name))))}`)
+      triggerDownload(`/api/fs/compress?paths=${encodeURIComponent(JSON.stringify(targets.map((t) => joinPath(path, t.name))))}`).catch(() => {})
       toast.success("开始压缩下载")
     } catch (err) { toast.error((err as Error).message) }
   }
@@ -750,7 +750,7 @@ export function BrowserPage() {
                 <div className="flex-1 overflow-auto p-2">
                   {results.map((r) => (
                     <div key={r.path} className="flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/70"
-                      onDoubleClick={() => r.type === "dir" ? goto(r.path) : me.perms.download && triggerDownload(downloadUrl(r.path))}>
+                      onDoubleClick={() => r.type === "dir" ? goto(r.path) : me.perms.download && triggerDownload(downloadUrl(r.path)).catch(() => {})}>
                       <Icon name={fileKind(r.name, r.type).icon} className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{r.name}</p>

@@ -45,6 +45,9 @@ async function request<T>(
     /* non-json response */
   }
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      onPermissionDenied?.()
+    }
     const message =
       data && typeof data === "object" && "error" in data
         ? String((data as { error: string }).error)
@@ -62,6 +65,12 @@ export const api = {
   del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, { body }),
 }
 
+let onPermissionDenied: (() => void) | null = null
+
+export function setOnPermissionDenied(cb: (() => void) | null) {
+  onPermissionDenied = cb
+}
+
 export function downloadUrl(path: string, inline = false) {
   return `/api/fs/download?path=${encodeURIComponent(path)}${inline ? "&inline=1" : ""}`
 }
@@ -70,13 +79,36 @@ export function zipUrl(paths: string[]) {
   return `/api/fs/zip?paths=${encodeURIComponent(JSON.stringify(paths))}`
 }
 
-export function triggerDownload(url: string) {
+export async function triggerDownload(url: string): Promise<void> {
+  const res = await fetch(url, { credentials: "same-origin" })
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      onPermissionDenied?.()
+    }
+    let message = `下载失败 (${res.status})`
+    try {
+      const data = await res.json()
+      if (data && typeof data === "object" && "error" in data) {
+        message = String((data as { error: string }).error)
+      }
+    } catch { /* ignore parse errors */ }
+    throw new ApiError(res.status, message)
+  }
+  const blob = await res.blob()
+  const objUrl = URL.createObjectURL(blob)
   const a = document.createElement("a")
-  a.href = url
-  a.rel = "noopener"
+  a.href = objUrl
+  const disposition = res.headers.get("Content-Disposition")
+  if (disposition) {
+    const match = disposition.match(/filename[^;=\n]*=["']?([^"';\n]*)["']?/)
+    if (match && match[1]) a.download = decodeURIComponent(match[1])
+  }
   document.body.appendChild(a)
   a.click()
-  requestAnimationFrame(() => a.remove())
+  requestAnimationFrame(() => {
+    a.remove()
+    URL.revokeObjectURL(objUrl)
+  })
 }
 
 export interface UploadTask {

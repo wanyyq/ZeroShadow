@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
-import { api } from "@/lib/api"
+import { toast } from "sonner"
+import { api, setOnPermissionDenied } from "@/lib/api"
 import type { Me } from "@/lib/types"
 
 const GUEST: Me = {
@@ -50,6 +51,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     refresh().finally(() => setReady(true))
+  }, [refresh])
+
+  React.useEffect(() => {
+    setOnPermissionDenied(() => {
+      toast.warning("此功能您没权限")
+      refresh()
+    })
+    return () => setOnPermissionDenied(null)
+  }, [refresh])
+
+  React.useEffect(() => {
+    const interval = setInterval(refresh, 30000)
+    return () => clearInterval(interval)
   }, [refresh])
 
   const login = React.useCallback(
