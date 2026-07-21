@@ -62,9 +62,19 @@ const INLINE_TYPES = new Map(
     webp: "image/webp",
     bmp: "image/bmp",
     avif: "image/avif",
+    tiff: "image/tiff",
+    tif: "image/tiff",
+    heic: "image/heic",
+    ico: "image/x-icon",
+    svg: "image/svg+xml",
     mp4: "video/mp4",
     webm: "video/webm",
     mov: "video/quicktime",
+    mkv: "video/x-matroska",
+    wmv: "video/x-ms-wmv",
+    flv: "video/x-flv",
+    "3gp": "video/3gpp",
+    m4v: "video/mp4",
     mp3: "audio/mpeg",
     wav: "audio/wav",
     ogg: "audio/ogg",
@@ -88,6 +98,28 @@ const INLINE_TYPES = new Map(
     conf: "text/plain; charset=utf-8",
     htm: "text/html; charset=utf-8",
     html: "text/html; charset=utf-8",
+    rst: "text/plain; charset=utf-8",
+    adoc: "text/plain; charset=utf-8",
+    tex: "text/plain; charset=utf-8",
+    bat: "text/plain; charset=utf-8",
+    ps1: "text/plain; charset=utf-8",
+    vbs: "text/plain; charset=utf-8",
+    lua: "text/plain; charset=utf-8",
+    rb: "text/plain; charset=utf-8",
+    php: "text/plain; charset=utf-8",
+    pl: "text/plain; charset=utf-8",
+    sql: "text/plain; charset=utf-8",
+    toml: "text/plain; charset=utf-8",
+    properties: "text/plain; charset=utf-8",
+    graphql: "text/plain; charset=utf-8",
+    rtf: "text/plain; charset=utf-8",
+    org: "text/plain; charset=utf-8",
+    cmake: "text/plain; charset=utf-8",
+    gradle: "text/plain; charset=utf-8",
+    dockerfile: "text/plain; charset=utf-8",
+    makefile: "text/plain; charset=utf-8",
+    ".gitignore": "text/plain; charset=utf-8",
+    ".env": "text/plain; charset=utf-8",
   })
 )
 
@@ -138,19 +170,20 @@ router.get("/download", async (req, res, next) => {
 
     const name = path.basename(resolved.abs)
     const ext = path.extname(name).slice(1).toLowerCase()
+    const extKey = ext || name.toLowerCase()
     const perms = effectivePerms(req.auth.role)
 
     if (!perms.downloadFile) {
-      if (!perms.preview || !INLINE_TYPES.has(ext)) {
+      if (!perms.preview || !INLINE_TYPES.has(extKey)) {
         if (req.auth.role === "guest") return res.status(401).json({ error: "请先登录" })
         return res.status(403).json({ error: "没有权限下载文件" })
       }
     }
 
-    const inline = req.query.inline === "1" && INLINE_TYPES.has(ext)
+    const inline = req.query.inline === "1" && INLINE_TYPES.has(extKey)
     const forceInline = !perms.downloadFile && perms.preview
     const useInline = inline || forceInline
-    res.setHeader("Content-Type", useInline ? INLINE_TYPES.get(ext) : "application/octet-stream")
+    res.setHeader("Content-Type", useInline ? INLINE_TYPES.get(extKey) : "application/octet-stream")
     res.setHeader("Content-Disposition", contentDisposition(useInline ? "inline" : "attachment", name))
     res.setHeader("Cache-Control", "no-store")
     if (!useInline) info("download", { msg: resolved.rel, ...actor(req) })

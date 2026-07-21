@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/state/auth"
 
 const EXT_KIND: Record<string, "image" | "video" | "audio" | "pdf" | "text" | "html"> = {
-  jpg: "image", jpeg: "image", png: "image", gif: "image", webp: "image", bmp: "image", avif: "image", svg: "image",
-  mp4: "video", webm: "video", mov: "video", mkv: "video",
+  jpg: "image", jpeg: "image", png: "image", gif: "image", webp: "image", bmp: "image", avif: "image", svg: "image", tiff: "image", tif: "image", heic: "image", ico: "image",
+  mp4: "video", webm: "video", mov: "video", mkv: "video", wmv: "video", flv: "video", "3gp": "video", m4v: "video",
   mp3: "audio", wav: "audio", flac: "audio", m4a: "audio", ogg: "audio", aac: "audio",
   pdf: "pdf",
   html: "html", htm: "html",

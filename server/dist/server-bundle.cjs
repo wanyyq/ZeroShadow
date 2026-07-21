@@ -63849,11 +63849,17 @@ var CONFIG_FILE = import_node_path3.default.join(DATA_DIR, "config.json");
 var DEFAULTS = {
   superUploadLimitMB: 2048,
   memberUploadLimitMB: 512,
+  zipMaxFiles: 100,
+  zipMaxSingleMB: 50,
+  zipMaxTotalMB: 128,
+  extractMaxZipMB: 128,
   memberPerms: {
     fileWrite: true,
     upload: true,
     uploadFolders: true,
-    download: true,
+    downloadFile: true,
+    downloadFolder: true,
+    preview: true,
     copy: true,
     move: true,
     rename: true,
@@ -63867,7 +63873,9 @@ var DEFAULTS = {
     changePassword: true
   },
   guestPerms: {
-    download: true,
+    downloadFile: true,
+    downloadFolder: true,
+    preview: true,
     htmlPreview: false,
     editFiles: false,
     compressZip: false,
@@ -63906,13 +63914,27 @@ async function saveConfig(mutator) {
     return config;
   });
 }
+function legacyDownload(p) {
+  if (p.download !== void 0) return !!p.download;
+  return !!(p.downloadFile ?? true);
+}
+function legacyDownloadFolder(p) {
+  if (p.downloadFolder !== void 0) return !!p.downloadFolder;
+  return !!(p.download ?? true);
+}
+function legacyPreview(p) {
+  if (p.preview !== void 0) return !!p.preview;
+  return !!(p.download ?? true);
+}
 function effectivePerms(role) {
   if (role === "superadmin") {
     return {
       fileWrite: true,
       upload: true,
       uploadFolders: true,
-      download: true,
+      downloadFile: true,
+      downloadFolder: true,
+      preview: true,
       copy: true,
       move: true,
       rename: true,
@@ -63920,7 +63942,6 @@ function effectivePerms(role) {
       mkdir: true,
       manageGuestVisibility: true,
       details: true,
-      zip: true,
       htmlPreview: true,
       editFiles: true,
       compressZip: true,
@@ -63935,7 +63956,9 @@ function effectivePerms(role) {
       fileWrite: fw,
       upload: fw && !!p.upload,
       uploadFolders: fw && !!p.uploadFolders,
-      download: !!p.download,
+      downloadFile: legacyDownload(p),
+      downloadFolder: legacyDownloadFolder(p),
+      preview: legacyPreview(p),
       copy: fw && !!p.copy,
       move: fw && !!p.move,
       rename: fw && !!p.rename,
@@ -63943,7 +63966,6 @@ function effectivePerms(role) {
       mkdir: fw && !!p.mkdir,
       manageGuestVisibility: !!p.manageGuestVisibility,
       details: true,
-      zip: !!p.download,
       htmlPreview: !!p.htmlPreview,
       editFiles: !!p.editFiles,
       compressZip: !!p.compressZip,
@@ -63956,7 +63978,9 @@ function effectivePerms(role) {
     fileWrite: false,
     upload: false,
     uploadFolders: false,
-    download: !!g.download,
+    downloadFile: legacyDownload(g),
+    downloadFolder: legacyDownloadFolder(g),
+    preview: legacyPreview(g),
     copy: false,
     move: false,
     rename: false,
@@ -63964,7 +63988,6 @@ function effectivePerms(role) {
     mkdir: false,
     manageGuestVisibility: false,
     details: false,
-    zip: !!g.download,
     htmlPreview: !!g.htmlPreview,
     editFiles: !!g.editFiles,
     compressZip: !!g.compressZip,
@@ -63981,6 +64004,14 @@ function uploadLimitMB(role) {
   if (role === "superadmin") return config.superUploadLimitMB;
   if (role === "member") return config.memberUploadLimitMB;
   return 0;
+}
+function zipLimits() {
+  return {
+    maxFiles: config.zipMaxFiles ?? 100,
+    maxSingleBytes: (config.zipMaxSingleMB ?? 50) * 1024 * 1024,
+    maxTotalBytes: (config.zipMaxTotalMB ?? 128) * 1024 * 1024,
+    extractMaxBytes: (config.extractMaxZipMB ?? 128) * 1024 * 1024
+  };
 }
 
 // src/users.js
@@ -65905,10 +65936,11 @@ async function clearLogs() {
 // src/auth.js
 var COOKIE_NAME = "zs_token";
 var superPasswordVersion = import_node_crypto3.default.createHash("sha256").update(env2.superPassword).digest("hex").slice(0, 16);
-function cookieOptions() {
+function cookieOptions(req) {
   return {
     httpOnly: true,
     sameSite: "lax",
+    secure: req ? req.secure || req.get("x-forwarded-proto") === "https" : false,
     path: "/",
     maxAge: env2.sessionHours * 3600 * 1e3
   };
@@ -66592,7 +66624,7 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: "\u7528\u6237\u540D\u6216\u5BC6\u7801\u9519\u8BEF" });
   }
   recordLoginSuccess(req.ip, username);
-  res.cookie(COOKIE_NAME, signToken(auth), cookieOptions());
+  res.cookie(COOKIE_NAME, signToken(auth), cookieOptions(req));
   info("login_success", { user: auth.username, role: auth.role, ip: req.ip });
   res.json({ role: auth.role, username: auth.username });
 });
@@ -66729,7 +66761,7 @@ router2.get("/list", async (req, res, next) => {
     next(err);
   }
 });
-router2.get("/download", requirePerm("download"), async (req, res, next) => {
+router2.get("/download", async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path));
     if (!resolved.rel) throw httpError2(400, "\u975E\u6CD5\u8DEF\u5F84");
@@ -66738,11 +66770,20 @@ router2.get("/download", requirePerm("download"), async (req, res, next) => {
     if (!stat.isFile()) throw httpError2(400, "\u53EA\u80FD\u4E0B\u8F7D\u6587\u4EF6\uFF0C\u6587\u4EF6\u5939\u8BF7\u4F7F\u7528\u6253\u5305\u4E0B\u8F7D");
     const name = import_node_path8.default.basename(resolved.abs);
     const ext = import_node_path8.default.extname(name).slice(1).toLowerCase();
+    const perms = effectivePerms(req.auth.role);
+    if (!perms.downloadFile) {
+      if (!perms.preview || !INLINE_TYPES.has(ext)) {
+        if (req.auth.role === "guest") return res.status(401).json({ error: "\u8BF7\u5148\u767B\u5F55" });
+        return res.status(403).json({ error: "\u6CA1\u6709\u6743\u9650\u4E0B\u8F7D\u6587\u4EF6" });
+      }
+    }
     const inline = req.query.inline === "1" && INLINE_TYPES.has(ext);
-    res.setHeader("Content-Type", inline ? INLINE_TYPES.get(ext) : "application/octet-stream");
-    res.setHeader("Content-Disposition", contentDisposition(inline ? "inline" : "attachment", name));
+    const forceInline = !perms.downloadFile && perms.preview;
+    const useInline = inline || forceInline;
+    res.setHeader("Content-Type", useInline ? INLINE_TYPES.get(ext) : "application/octet-stream");
+    res.setHeader("Content-Disposition", contentDisposition(useInline ? "inline" : "attachment", name));
     res.setHeader("Cache-Control", "no-store");
-    if (!inline) info("download", { msg: resolved.rel, ...actor(req) });
+    if (!useInline) info("download", { msg: resolved.rel, ...actor(req) });
     res.sendFile(resolved.abs, { dotfiles: "allow", cacheControl: false }, (err) => {
       if (err && !res.headersSent) next(err);
     });
@@ -66750,6 +66791,77 @@ router2.get("/download", requirePerm("download"), async (req, res, next) => {
     next(err);
   }
 });
+async function collectZipItems(rels, forGuest) {
+  const items = [];
+  for (const rel of rels) {
+    if (!rel) continue;
+    if (!isSoftPath(rel) && forGuest && isHiddenFromGuest(rel)) continue;
+    const resolved = resolveAny(rel);
+    const stat = await statSafe(resolved.abs);
+    if (!stat || stat.isSymbolicLink()) continue;
+    items.push({ abs: resolved.abs, rel, name: import_node_path8.default.basename(resolved.abs), isDir: stat.isDirectory(), size: stat.isFile() ? stat.size : 0 });
+  }
+  return items;
+}
+async function countZipFilesAndSize(items, forGuest) {
+  let fileCount = 0;
+  let totalSize = 0;
+  for (const item of items) {
+    if (item.isDir) {
+      const scan = await scanDirForZip(item.abs, forGuest);
+      fileCount += scan.count;
+      totalSize += scan.bytes;
+    } else {
+      fileCount += 1;
+      totalSize += item.size;
+    }
+  }
+  return { fileCount, totalSize };
+}
+async function scanDirForZip(dirAbs, _forGuest) {
+  let count = 0;
+  let bytes = 0;
+  const stack = [dirAbs];
+  while (stack.length) {
+    const cur = stack.pop();
+    let dirents;
+    try {
+      dirents = await import_node_fs7.default.promises.readdir(cur, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const d of dirents) {
+      const abs = import_node_path8.default.join(cur, d.name);
+      if (d.isDirectory()) {
+        stack.push(abs);
+        count += 1;
+      } else if (d.isFile()) {
+        count += 1;
+        try {
+          const st = await statSafe(abs);
+          if (st) bytes += st.size;
+        } catch {
+        }
+      }
+    }
+  }
+  return { count, bytes };
+}
+async function validateZipLimits(items, forGuest) {
+  const limits = zipLimits();
+  const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest);
+  if (fileCount > limits.maxFiles) {
+    throw httpError2(400, `\u6253\u5305\u6587\u4EF6\u6570 (${fileCount}) \u8D85\u51FA\u9650\u5236 (\u6700\u591A ${limits.maxFiles} \u4E2A)`);
+  }
+  if (totalSize > limits.maxTotalBytes) {
+    throw httpError2(400, `\u6253\u5305\u603B\u5927\u5C0F (${Math.round(totalSize / 1024 / 1024)}MB) \u8D85\u51FA\u9650\u5236 (${Math.round(limits.maxTotalBytes / 1024 / 1024)}MB)`);
+  }
+  for (const item of items) {
+    if (!item.isDir && item.size > limits.maxSingleBytes) {
+      throw httpError2(400, `\u6587\u4EF6 "${item.name}" \u5927\u5C0F (${Math.round(item.size / 1024 / 1024)}MB) \u8D85\u51FA\u5355\u6587\u4EF6\u9650\u5236 (${Math.round(limits.maxSingleBytes / 1024 / 1024)}MB)`);
+    }
+  }
+}
 async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
   const dirents = await import_node_fs7.default.promises.readdir(dirAbs, { withFileTypes: true });
   if (!dirents.length) archive.append(Buffer.alloc(0), { name: `${zipBase}/.keep` });
@@ -66766,7 +66878,7 @@ async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
     }
   }
 }
-router2.get("/zip", requirePerm("zip"), async (req, res, next) => {
+router2.get("/zip", requirePerm("downloadFolder"), async (req, res, next) => {
   try {
     let rels = [];
     if (req.query.paths) {
@@ -66784,16 +66896,9 @@ router2.get("/zip", requirePerm("zip"), async (req, res, next) => {
       rels = [normRel(req.query.path)];
     }
     const forGuest = req.auth.role === "guest";
-    const items = [];
-    for (const rel of rels) {
-      if (!rel) throw httpError2(400, "\u4E0D\u80FD\u6253\u5305\u6839\u76EE\u5F55");
-      if (!isSoftPath(rel) && forGuest && isHiddenFromGuest(rel)) continue;
-      const resolved = resolveAny(rel);
-      const stat = await statSafe(resolved.abs);
-      if (!stat || stat.isSymbolicLink()) continue;
-      items.push({ abs: resolved.abs, rel, name: import_node_path8.default.basename(resolved.abs), isDir: stat.isDirectory() });
-    }
+    const items = await collectZipItems(rels, forGuest);
     if (!items.length) throw httpError2(404, "\u6CA1\u6709\u53EF\u4E0B\u8F7D\u7684\u5185\u5BB9");
+    await validateZipLimits(items, forGuest);
     const zipName = items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.zip`;
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", contentDisposition("attachment", zipName));
@@ -67174,6 +67279,9 @@ router2.post(
 );
 async function compressCommon(req, res, paths) {
   const forGuest = req.auth.role === "guest";
+  const items = await collectZipItems(paths.map((p) => normRel(p)), forGuest);
+  if (!items.length) throw httpError2(404, "\u6CA1\u6709\u53EF\u538B\u7F29\u7684\u5185\u5BB9");
+  await validateZipLimits(items, forGuest);
   const archive = (0, import_archiver.default)("zip", { zlib: { level: 5 } });
   archive.on("error", () => {
     if (!res.headersSent) res.status(500).end();
@@ -67184,16 +67292,11 @@ async function compressCommon(req, res, paths) {
   res.setHeader("Content-Disposition", contentDisposition("attachment", zipName));
   res.setHeader("Cache-Control", "no-store");
   archive.pipe(res);
-  for (const p of paths) {
-    const resolved = resolveAny(normRel(p));
-    if (!resolved.rel) continue;
-    if (!resolved.isSoft && forGuest && isHiddenFromGuest(resolved.rel)) continue;
-    const stat = await statSafe(resolved.abs);
-    if (!stat || stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) {
-      await addDirToArchive(archive, resolved.abs, resolved.rel, import_node_path8.default.basename(resolved.abs), forGuest);
-    } else if (stat.isFile()) {
-      archive.file(resolved.abs, { name: import_node_path8.default.basename(resolved.abs) });
+  for (const item of items) {
+    if (item.isDir) {
+      await addDirToArchive(archive, item.abs, item.rel, item.name, forGuest);
+    } else {
+      archive.file(item.abs, { name: item.name });
     }
   }
   info("compress", { msg: paths.join(", "), ...actor(req) });
@@ -67239,21 +67342,38 @@ router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     if (!stat.isFile() || !rel.toLowerCase().endsWith(".zip")) {
       throw httpError2(400, "\u53EA\u80FD\u89E3\u538B zip \u6587\u4EF6");
     }
+    const limits = zipLimits();
+    if (stat.size > limits.extractMaxBytes) {
+      throw httpError2(400, `ZIP \u6587\u4EF6\u8D85\u51FA\u89E3\u538B\u5927\u5C0F\u9650\u5236 (${Math.round(limits.extractMaxBytes / 1024 / 1024)}MB)`);
+    }
     const unzipper = await Promise.resolve().then(() => __toESM(require_unzip2(), 1));
     const directory = await unzipper.Open.file(abs);
+    if (directory.files.length > limits.maxFiles) {
+      throw httpError2(400, `ZIP \u5185\u6587\u4EF6\u6570\u8D85\u51FA\u9650\u5236 (\u6700\u591A ${limits.maxFiles} \u4E2A)`);
+    }
+    const destResolved = import_node_path8.default.resolve(destAbs);
     let count = 0;
     for (const file of directory.files) {
       const entryPath = file.path;
+      if (entryPath.length > 2048) continue;
+      const segments = entryPath.replace(/\\/g, "/").split("/");
+      if (segments.some((s) => s.length > 200 || s === "..")) continue;
+      const outPath = import_node_path8.default.resolve(destAbs, entryPath);
+      const relOut = import_node_path8.default.relative(destResolved, outPath);
+      if (!relOut || relOut.startsWith("..") || import_node_path8.default.isAbsolute(relOut)) continue;
       if (file.type === "Directory") {
-        import_node_fs7.default.mkdirSync(import_node_path8.default.join(destAbs, entryPath), { recursive: true });
+        import_node_fs7.default.mkdirSync(outPath, { recursive: true });
         continue;
       }
-      const dirName = import_node_path8.default.dirname(entryPath);
-      if (dirName && dirName !== ".") {
-        import_node_fs7.default.mkdirSync(import_node_path8.default.join(destAbs, dirName), { recursive: true });
+      if (file.uncompressedSize > limits.maxSingleBytes) {
+        continue;
       }
-      const outPath = import_node_path8.default.join(destAbs, entryPath);
+      const dirName = import_node_path8.default.dirname(outPath);
+      if (dirName && dirName !== ".") {
+        import_node_fs7.default.mkdirSync(dirName, { recursive: true });
+      }
       const buf = await file.buffer();
+      if (buf.length > limits.maxSingleBytes) continue;
       await import_node_fs7.default.promises.writeFile(outPath, buf);
       count += 1;
     }
@@ -67300,7 +67420,7 @@ router3.patch("/config", async (req, res, next) => {
   try {
     const body = req.body || {};
     const updates = {};
-    for (const key of ["superUploadLimitMB", "memberUploadLimitMB"]) {
+    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB"]) {
       if (body[key] !== void 0) {
         const n = Number(body[key]);
         if (!Number.isInteger(n) || n < 1 || n > 1048576) {
@@ -67323,6 +67443,10 @@ router3.patch("/config", async (req, res, next) => {
     const config2 = await saveConfig((draft) => {
       if (updates.superUploadLimitMB) draft.superUploadLimitMB = updates.superUploadLimitMB;
       if (updates.memberUploadLimitMB) draft.memberUploadLimitMB = updates.memberUploadLimitMB;
+      if (updates.zipMaxFiles) draft.zipMaxFiles = updates.zipMaxFiles;
+      if (updates.zipMaxSingleMB) draft.zipMaxSingleMB = updates.zipMaxSingleMB;
+      if (updates.zipMaxTotalMB) draft.zipMaxTotalMB = updates.zipMaxTotalMB;
+      if (updates.extractMaxZipMB) draft.extractMaxZipMB = updates.extractMaxZipMB;
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms);
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms);
     });

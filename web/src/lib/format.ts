@@ -36,6 +36,9 @@ const EXT_KIND: Record<string, { icon: string; label: string }> = {
   webp: { icon: "image", label: "图片" },
   bmp: { icon: "image", label: "图片" },
   avif: { icon: "image", label: "图片" },
+  tiff: { icon: "image", label: "图片" },
+  tif: { icon: "image", label: "图片" },
+  heic: { icon: "image", label: "图片" },
   svg: { icon: "image", label: "图片" },
   ico: { icon: "image", label: "图片" },
   mp4: { icon: "film", label: "视频" },
@@ -43,6 +46,10 @@ const EXT_KIND: Record<string, { icon: string; label: string }> = {
   mkv: { icon: "film", label: "视频" },
   avi: { icon: "film", label: "视频" },
   mov: { icon: "film", label: "视频" },
+  wmv: { icon: "film", label: "视频" },
+  flv: { icon: "film", label: "视频" },
+  "3gp": { icon: "film", label: "视频" },
+  m4v: { icon: "film", label: "视频" },
   mp3: { icon: "music", label: "音频" },
   wav: { icon: "music", label: "音频" },
   flac: { icon: "music", label: "音频" },
@@ -79,6 +86,28 @@ const EXT_KIND: Record<string, { icon: string; label: string }> = {
   sh: { icon: "file-code", label: "代码" },
   yml: { icon: "file-code", label: "代码" },
   yaml: { icon: "file-code", label: "代码" },
+  rst: { icon: "file-text", label: "文档" },
+  adoc: { icon: "file-text", label: "文档" },
+  tex: { icon: "file-text", label: "文档" },
+  rtf: { icon: "file-text", label: "文档" },
+  org: { icon: "file-text", label: "文档" },
+  bat: { icon: "file-code", label: "脚本" },
+  ps1: { icon: "file-code", label: "脚本" },
+  vbs: { icon: "file-code", label: "脚本" },
+  lua: { icon: "file-code", label: "代码" },
+  rb: { icon: "file-code", label: "代码" },
+  php: { icon: "file-code", label: "代码" },
+  pl: { icon: "file-code", label: "代码" },
+  sql: { icon: "file-code", label: "代码" },
+  toml: { icon: "file-code", label: "配置" },
+  properties: { icon: "file-code", label: "配置" },
+  graphql: { icon: "file-code", label: "代码" },
+  cmake: { icon: "file-code", label: "配置" },
+  gradle: { icon: "file-code", label: "配置" },
+  ".gitignore": { icon: "file-code", label: "配置" },
+  ".env": { icon: "file-text", label: "配置" },
+  dockerfile: { icon: "file-code", label: "配置" },
+  makefile: { icon: "file-code", label: "配置" },
   exe: { icon: "app-window", label: "程序" },
   msi: { icon: "app-window", label: "程序" },
   apk: { icon: "app-window", label: "程序" },
@@ -87,7 +116,7 @@ const EXT_KIND: Record<string, { icon: string; label: string }> = {
 
 export function ext(name: string): string {
   const i = name.lastIndexOf(".")
-  return i > 0 ? name.slice(i + 1).toLowerCase() : ""
+  return i > 0 ? name.slice(i + 1).toLowerCase() : name.toLowerCase()
 }
 
 export function fileKind(name: string, type: "dir" | "file", softReadOnly?: boolean) {
@@ -96,18 +125,21 @@ export function fileKind(name: string, type: "dir" | "file", softReadOnly?: bool
 }
 
 const PREVIEWABLE = new Set([
-  "jpg", "jpeg", "png", "gif", "webp", "bmp", "avif",
-  "mp4", "webm", "mov",
+  "jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "tiff", "tif", "heic", "ico", "svg",
+  "mp4", "webm", "mov", "mkv", "wmv", "flv", "3gp", "m4v",
   "mp3", "wav", "ogg", "flac", "m4a", "aac",
   "pdf",
   "txt", "md", "json", "log", "csv", "js", "ts", "css", "py", "yml", "yaml", "xml", "ini", "conf",
+  "rst", "adoc", "tex", "bat", "ps1", "vbs", "lua", "rb", "php", "pl", "sql",
+  "toml", "properties", "graphql", "rtf", "org", "cmake", "gradle",
+  "dockerfile", "makefile", ".gitignore", ".env",
 ])
 
 export function previewType(name: string): "image" | "video" | "audio" | "pdf" | "text" | null {
   const e = ext(name)
   if (!PREVIEWABLE.has(e)) return null
-  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"].includes(e)) return "image"
-  if (["mp4", "webm", "mov"].includes(e)) return "video"
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "tiff", "tif", "heic", "ico", "svg"].includes(e)) return "image"
+  if (["mp4", "webm", "mov", "mkv", "wmv", "flv", "3gp", "m4v"].includes(e)) return "video"
   if (["mp3", "wav", "ogg", "flac", "m4a", "aac"].includes(e)) return "audio"
   if (e === "pdf") return "pdf"
   return "text"

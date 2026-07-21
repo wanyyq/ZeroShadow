@@ -476,7 +476,7 @@ export function BrowserPage() {
       )
     }}
     {const ext = (entry.name.split(".").pop() || "").toLowerCase()
-    const EDITABLE = ["txt", "md", "mdx", "py", "cpp", "log", "html", "htm", "js", "ts", "css", "json", "xml", "yml", "yaml", "ini", "conf", "sh", "java", "c", "rs", "go"]
+    const EDITABLE = ["txt", "md", "mdx", "py", "cpp", "log", "html", "htm", "js", "ts", "css", "json", "xml", "yml", "yaml", "ini", "conf", "sh", "java", "c", "rs", "go", "rst", "adoc", "tex", "bat", "ps1", "vbs", "lua", "rb", "php", "pl", "sql", "toml", "properties", "graphql", "rtf", "org", "cmake", "gradle", "gitignore", "env", "dockerfile", "makefile"]
     if (single && entry.type === "file" && EDITABLE.includes(ext)) {
       items.push(
         <ContextMenuItem key="edit" disabled={!me.perms.editFiles || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
