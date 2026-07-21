@@ -655,19 +655,53 @@ function TunnelSection() {
   const [config, setConfig] = React.useState<{ enabled: boolean; mode: string; customHost: string } | null>(null)
   const [status, setStatus] = React.useState<TunnelStatus | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const configRef = React.useRef(config)
+  React.useEffect(() => { configRef.current = config }, [config])
 
   const load = React.useCallback(() => {
     api.get<{ config: { enabled: boolean; mode: string; customHost: string }; status: TunnelStatus }>("/admin/tunnel")
-      .then((d) => { setConfig((prev) => prev ?? d.config); setStatus(d.status) }).catch((e) => toast.error((e as Error).message))
+      .then((d) => {
+        setConfig((prev) => {
+          if (!prev) return d.config
+          const cur = configRef.current
+          if (!cur || cur.enabled !== d.config.enabled || cur.mode !== d.config.mode || cur.customHost !== d.config.customHost) {
+            return d.config
+          }
+          return prev
+        })
+        setStatus(d.status)
+      }).catch((e) => toast.error((e as Error).message))
   }, [])
   React.useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [load])
 
   const apply = async (next: { enabled: boolean; mode: string; customHost: string }) => {
     setBusy(true)
-    try { const d = await api.post<{ config: typeof next; status: TunnelStatus }>("/admin/tunnel", next); setConfig(d.config); setStatus(d.status); toast.success(next.enabled ? "已开启" : "已关闭") }
+    try {
+      const d = await api.post<{ config: typeof next; status: TunnelStatus }>("/admin/tunnel", next)
+      setConfig(d.config)
+      setStatus(d.status)
+      if (next.enabled) {
+        if (d.status.running) {
+          toast.success(d.status.url ? "隧道已连接" : "隧道已启动，等待连接…")
+        } else {
+          toast.warning("隧道未能启动，请查看下方日志")
+        }
+      } else {
+        toast.success("已关闭")
+      }
+    }
     catch (e) { toast.error((e as Error).message) }
     finally { setBusy(false) }
   }
+
+  const handleModeChange = React.useCallback((v: string) => {
+    if (!v) return
+    const cur = configRef.current
+    if (!cur) return
+    const next = { ...cur, mode: v }
+    setConfig(next)
+    if (cur.enabled) apply(next)
+  }, [])
 
   if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
 
@@ -684,7 +718,7 @@ function TunnelSection() {
           </div>
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm">隧道服务</span>
-            <Select value={config.mode} onValueChange={(v) => v && setConfig({ ...config, mode: v })}>
+            <Select value={config.mode} onValueChange={handleModeChange}>
               <SelectTrigger className="w-40"><SelectValue render={(_p, s) => <>{s.value}</>}>pinggy.io</SelectValue></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pinggy">pinggy.io（推荐）</SelectItem>

@@ -1,7 +1,10 @@
-import { spawn } from "node:child_process"
+import { spawn, execSync } from "node:child_process"
 import crypto from "node:crypto"
-import { env } from "./env.js"
+import path from "node:path"
+import { env, DATA_DIR } from "./env.js"
 import { info, warn } from "./logger.js"
+
+const KNOWN_HOSTS_TMP = path.join(DATA_DIR, ".ssh-known-hosts-tunnel")
 
 function randomSubdomain() {
   return crypto.randomBytes(4).toString("hex")
@@ -20,6 +23,7 @@ const state = {
   restartTimer: null,
   backoffMs: 5000,
   urlTimer: null,
+  mode: "serveo",
 }
 
 function pushOutput(line) {
@@ -31,7 +35,10 @@ function pushOutput(line) {
   if (m) {
     const url = m[1].replace(/[.,;]+$/, "")
     state.url = url
-    if (!url.includes("dashboard")) info("tunnel_url", { msg: `公网地址: ${url}` })
+    if (!url.includes("dashboard")) {
+      state.backoffMs = 5000
+      info("tunnel_url", { msg: `公网地址: ${url}` })
+    }
   }
 }
 
@@ -45,20 +52,31 @@ export function validateCustomHost(host) {
   return null
 }
 
+let _sshAvailable = null
+function isSshAvailable() {
+  if (_sshAvailable !== null) return _sshAvailable
+  try {
+    execSync("ssh -V", { stdio: "pipe", windowsHide: true, timeout: 5000 })
+    _sshAvailable = true
+  } catch {
+    _sshAvailable = false
+  }
+  return _sshAvailable
+}
+
 function buildArgs(tunnelCfg) {
   const base = [
     "-o", "StrictHostKeyChecking=accept-new",
     "-o", "ServerAliveInterval=60",
     "-o", "ServerAliveCountMax=3",
     "-o", "ConnectTimeout=15",
-    "-o", "UserKnownHostsFile=NUL",
+    "-o", `UserKnownHostsFile=${KNOWN_HOSTS_TMP}`,
   ]
   const args = [...base]
   if (tunnelCfg.mode === "pinggy") {
-    // pinggy 需要输出 banner → 不能用 -N，改用 -T
     args.push("-T", "-p", "443", "-R", `0:127.0.0.1:${env.port}`, "a.pinggy.io")
   } else if (tunnelCfg.mode === "localhostrun") {
-    args.push("-N", "-R", `80:127.0.0.1:${env.port}`, "nokey@localhost.run")
+    args.push("-T", "-R", `80:127.0.0.1:${env.port}`, "nokey@localhost.run")
   } else if (tunnelCfg.mode === "custom") {
     args.push("-N", "-R", `80:127.0.0.1:${env.port}`)
     let target = tunnelCfg.customHost.trim()
@@ -69,8 +87,7 @@ function buildArgs(tunnelCfg) {
     }
     args.push(target)
   } else {
-    // serveo: 标准用法，URL 由 serveo 服务端自然输出
-    args.push("-N", "-R", `80:127.0.0.1:${env.port}`, "serveo.net")
+    args.push("-T", "-R", `80:127.0.0.1:${env.port}`, "serveo.net")
   }
   return args
 }
@@ -94,6 +111,13 @@ function scheduleRestart(tunnelCfg) {
 
 function launch(tunnelCfg) {
   if (!state.desired || state.proc) return
+
+  if (!isSshAvailable()) {
+    pushOutput("错误: 未检测到 SSH 客户端，请先安装 OpenSSH Client")
+    pushOutput("Windows: 设置 → 应用 → 可选功能 → 添加功能 → OpenSSH 客户端")
+    return
+  }
+
   const args = buildArgs(tunnelCfg)
   let proc
   try {
@@ -106,6 +130,7 @@ function launch(tunnelCfg) {
   }
   state.proc = proc
   state.running = true
+  state.mode = tunnelCfg.mode
   state.startedAt = Date.now()
   pushOutput(`ssh ${args.join(" ")}`)
 
@@ -141,6 +166,12 @@ function launch(tunnelCfg) {
   })
 }
 
+function killProcSafe(p) {
+  if (!p || p.killed || p.exitCode !== null) return false
+  try { p.kill() } catch { return false }
+  return true
+}
+
 export function applyTunnelConfig(tunnelCfg) {
   const shouldRun = !!tunnelCfg.enabled
   state.desired = shouldRun
@@ -163,7 +194,10 @@ export function applyTunnelConfig(tunnelCfg) {
     state.proc = null
     p.removeAllListeners("exit")
     p.on("exit", () => { state.running = false; launch(tunnelCfg) })
-    try { p.kill() } catch { state.running = false; launch(tunnelCfg) }
+    if (!killProcSafe(p)) {
+      state.running = false
+      launch(tunnelCfg)
+    }
   } else {
     launch(tunnelCfg)
   }
