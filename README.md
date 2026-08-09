@@ -1,17 +1,13 @@
 <a id="top"></a>
 
-<p align="center">
-  <img src="" width="120" alt="ZeroShadow Logo" />
-</p>
-
 <h1 align="center">ZeroShadow</h1>
 
 <p align="center">
-  <strong>轻量级局域网网盘 · 安全 · 现代 · 开箱即用</strong>
+  <strong>轻量级局域网网盘, 一款极简好用的工作室网盘</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Node.js-22%2B-brightgreen" alt="Node.js" />
+  <img src="https://img.shields.io/badge/Node.js-18%2B-brightgreen" alt="Node.js" />
   <img src="https://img.shields.io/badge/React-19-61dafb" alt="React" />
   <img src="https://img.shields.io/badge/Tailwind-v4-38bdf8" alt="Tailwind" />
   <img src="https://img.shields.io/badge/Shadcn_UI-4.13-black" alt="Shadcn" />
@@ -20,27 +16,23 @@
 
 ---
 
-> **ZeroShadow** 是一款基于 Node.js + React 的轻量网盘应用，支持局域网文件共享与公网穿透访问。内置三级权限体系（超级管理员 / 团队成员 / 访客），确保文件安全可控。
+> **ZeroShadow** 是一款基于 Node.js + React 的轻量工作室文件共享应用, 类似私有网盘, 支持局域网文件共享与公网穿透访问。内置三级权限体系（超级管理员 / 团队成员 / 访客），确保文件安全可控。
 
 ---
 
 ## 截图预览
 
-> 以下为占位图，请自行替换为实际截图。
-
-<!-- TODO: 替换为实际截图 -->
-
 <div align="center">
-  <img src="" width="800" alt="主界面 - 文件浏览" />
+  <img src="./docs/img/file.png" width="800" alt="主界面 - 文件浏览" />
   <p><em>图 1：文件浏览器（列表/网格视图、右键菜单、多选操作）</em></p>
 
-<img src="" width="800" alt="设置 - 公网隧道" />
+<img src="./docs/img/ssh.png" width="800" alt="设置 - 公网隧道" />
   <p><em>图 2：超管设置 —— 权限管理 & SSH 公网隧道</em></p>
 
-<img src="" width="800" alt="文件预览" />
+<img src="./docs/img/vidio.png" width="800" alt="文件预览" />
   <p><em>图 3：文件预览（图片 / 视频 / PDF / 文本）</em></p>
 
-<img src="" width="800" alt="暗色模式" />
+<img src="./docs/img/dark.png" width="800" alt="暗色模式" />
   <p><em>图 4：暗色模式</em></p>
 </div>
 
@@ -50,21 +42,26 @@
 
 ### 文件管理
 
-- **上传** 批量文件 / 文件夹拖拽上传，支持超大文件（超管 2GB，可调）
+- **上传** 批量文件 / 文件夹拖拽上传，支持超大文件(超级管理员可设定限制)
 - **下载** 单文件流式下载 / 文件夹 ZIP 打包下载（可配置大小上限）
 - **预览** 图片缩放拖拽、音视频播放、PDF 内嵌、文本高亮、HTML 渲染
 - **编辑** 在线文本编辑器，支持保存回写
 - **操作** 复制、粘贴、移动、重命名、删除（均支持覆盖/合并策略）
 - **搜索** 递归全目录搜索
+- **软路由** 将其他目录定向到网盘，无需复制
+- **工具** 内置多线程下载工具, 方便后台挂载下载大文件
+- **开箱即用** 无需配置过多内容, 服务器Windows/Linux, 客户端仅需现代浏览器
 - **压缩/解压** 在线 ZIP 压缩与解压
 
 ### 权限体系
 
-| 角色        | 浏览  | 下载  | 上传         | 编辑  | 管理  | 设置    |
-|:--------- |:---:|:---:|:----------:|:---:|:---:|:-----:|
-| **超级管理员** | 全部  | 全部  | 全部（≤2GB）   | 全部  | 全部  | 全部    |
-| **团队成员**  | 全部  | 可配  | 可配（≤512MB） | 可配  | 可配  | 客户端设置 |
-| **访客**    | 可配  | 可配  | 不可         | 不可  | 不可  | 客户端设置 |
+> 提示: 下文"可配"指的是超级管理员可在权限设置自由调整。
+
+| 角色        | 浏览  | 下载  | 上传           | 编辑  | 管理  | 设置    |
+|:--------- |:---:|:---:|:------------:|:---:|:---:|:-----:|
+| **超级管理员** | 全部  | 全部  | 全部（默认≤2GB）   | 全部  | 全部  | 全部    |
+| **团队成员**  | 全部  | 可配  | 可配（默认≤512MB） | 可配  | 可配  | 客户端设置 |
+| **访客**    | 可配  | 可配  | 不可           | 不可  | 不可  | 客户端设置 |
 
 - 超级管理员为全局唯一账户，密码仅通过 `.env` 修改
 - 团队成员由超管批量创建、启/禁用、重置密码
@@ -73,7 +70,7 @@
 ### 公网穿透
 
 - 内置 SSH 反向隧道，一键暴露至公网
-- 支持 **pinggy.io** / **localhost.run** / **serveo.net** 三种免费隧道服务，以及自定义 SSH 服务器
+- 支持 **pinggy.io** / **localhost.run** / **serveo.net** 等免费隧道服务或自定义 SSH 服务器
 - 自动断线重连（指数退避），实时日志展示
 
 ### 安全加固
@@ -87,8 +84,8 @@
 
 ### 跨平台
 
-- Windows / macOS / Linux 均可运行
-- 支持打包为独立 `.exe`（Windows）
+- 服务器端：Windows / macOS / Linux 均可运行
+- 客户端：仅需浏览器, 支持各大系统(包括各安卓)
 
 ---
 
@@ -96,26 +93,24 @@
 
 ### 环境要求
 
-- **Node.js** >= 22
+- **Node.js** >= 18
 - **pnpm** >= 9
 
 ### 安装与启动
 
 ```bash
 # 1. 克隆项目
-git clone <your-repo-url> && cd EPan
+git clone https://github.com/wanyyq/ZeroShadow.git
 
 # 2. 安装依赖
 pnpm setup
 
 # 3. 配置环境变量
-# 首次运行会自动生成 .env 及随机超管密码，亦可手动创建：
-# cp .env.example .env
-# 编辑 .env 中 SUPER_ADMIN_PASSWORD 等配置
+# 首次运行会自动生成 .env 及随机超管密码，亦可手动创建
 
 # 4. 开发模式
 pnpm dev:server   # 终端 1：启动后端（--watch 热重载）
-pnpm dev:web      # 终端 2：启动前端 (http://localhost:5173)
+pnpm dev:web      # 终端 2：启动前端 (http://localhost:12345)
 
 # 5. 生产模式
 pnpm build        # 构建前端
@@ -139,16 +134,13 @@ pnpm start        # 启动服务 (http://localhost:12345)
 | `SESSION_HOURS`        | `72`           | 登录有效期（小时）                        |
 | `FILES_DIR`            | `./data/files` | 文件存储根目录                          |
 | `FILES_SOFT_DIR`       | 无              | 外部只读映射，JSON 格式：`{"显示名":"/真实路径"}` |
-| `NOLOG`                | `false`        | 静默模式（仅写日志文件，不输出控制台）              |
-
-> 启动参数：`node server/index.js -nolog` 可临时关闭控制台日志。
 
 ---
 
 ## 项目结构
 
 ```
-EPan/
+ZeroShadow/
 ├── server/                 # 后端 (Express)
 │   ├── index.js            # 入口，中间件注册
 │   └── src/
@@ -235,7 +227,6 @@ cd server && pnpm bundle
 | **压缩**    | Archiver / Unzipper         |
 | **前端**    | React 19 + TypeScript       |
 | **样式**    | Tailwind CSS v4 + Shadcn UI |
-| **UI 设计** | Fumadocs 风格 (自定义主题令牌)       |
 | **图标**    | Lucide                      |
 | **动画**    | GSAP + CSS Transition       |
 | **构建**    | Vite / esbuild / pkg        |
