@@ -107,13 +107,16 @@ export function RenameDialog({
   const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
 
   React.useEffect(() => {
-    if (open && entry) setName(entry.name)
+    if (open && entry) setName(entry.shortcut?.displayName || entry.name)
   }, [open, entry])
 
   const submit = async () => {
     if (!entry || !name.trim() || busy) return
     setBusy(true)
-    const newName = name.trim()
+    let newName = name.trim()
+    if (entry.type === "shortcut" && !newName.toLowerCase().endsWith(".zeropath")) {
+      newName = newName + ".zeropath"
+    }
     try {
       const parentPath = path
       const listData = await api.get<{ entries: Entry[] }>("/fs/list", { path: parentPath })
@@ -151,7 +154,11 @@ export function RenameDialog({
               onOpenChange(false)
               onDone()
             } else if (item.action === "rename" && item.resolvedName) {
-              await api.post("/fs/rename", { path: joinPath(path, entry.name), newName: item.resolvedName })
+              let resolved = item.resolvedName
+              if (entry.type === "shortcut" && !resolved.toLowerCase().endsWith(".zeropath")) {
+                resolved = resolved + ".zeropath"
+              }
+              await api.post("/fs/rename", { path: joinPath(path, entry.name), newName: resolved })
               toast.success("已重命名")
               onOpenChange(false)
               onDone()

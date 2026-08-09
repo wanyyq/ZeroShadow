@@ -1,3 +1,5 @@
+import type { OperationStatus } from "@/lib/types"
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -79,6 +81,30 @@ export function zipUrl(paths: string[]) {
   return `/api/fs/zip?paths=${encodeURIComponent(JSON.stringify(paths))}`
 }
 
+export function startCompressJob(paths: string[]): Promise<{ jobId: string }> {
+  return api.post("/fs/compress", { paths })
+}
+
+export function compressJobStatus(jobId: string) {
+  return api.get<OperationStatus>("/fs/compress/status", { job: jobId })
+}
+
+export function startExtractJob(path: string, dest?: string): Promise<{ jobId: string }> {
+  return api.post("/fs/extract", { path, dest })
+}
+
+export function extractJobStatus(jobId: string) {
+  return api.get<OperationStatus>("/fs/extract/status", { job: jobId })
+}
+
+export function startDownloadUrlJob(url: string, dest: string, filename?: string): Promise<{ jobId: string }> {
+  return api.post("/fs/download-url", { url, dest, filename })
+}
+
+export function downloadUrlJobStatus(jobId: string) {
+  return api.get<OperationStatus>("/fs/download-url/status", { job: jobId })
+}
+
 export async function triggerDownload(url: string): Promise<void> {
   const res = await fetch(url, { credentials: "same-origin" })
   if (!res.ok) {
@@ -100,8 +126,18 @@ export async function triggerDownload(url: string): Promise<void> {
   a.href = objUrl
   const disposition = res.headers.get("Content-Disposition")
   if (disposition) {
-    const match = disposition.match(/filename[^;=\n]*=["']?([^"';\n]*)["']?/)
-    if (match && match[1]) a.download = decodeURIComponent(match[1])
+    // 优先解析 RFC 5987 的 filename*（UTF-8 编码，支持中文名）
+    const star = disposition.match(/filename\*\s*=\s*UTF-8''([^;\n]*)/i)
+    if (star && star[1]) {
+      try {
+        a.download = decodeURIComponent(star[1])
+      } catch {
+        /* ignore malformed */
+      }
+    } else {
+      const plain = disposition.match(/filename\s*=\s*"([^"]*)"|filename\s*=\s*([^;\s]+)/i)
+      if (plain) a.download = plain[1] || plain[2] || ""
+    }
   }
   document.body.appendChild(a)
   a.click()

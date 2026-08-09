@@ -16,7 +16,9 @@ const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", memb
 
 const NAV = [
   { path: "/", icon: "files", label: "文件" },
+  { path: "/tools", icon: "wrench", label: "工具" },
   { path: "/settings", icon: "settings", label: "设置" },
+  { path: "/about", icon: "info", label: "关于" },
 ]
 
 interface ShellContextValue {

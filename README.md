@@ -29,17 +29,18 @@
 > 以下为占位图，请自行替换为实际截图。
 
 <!-- TODO: 替换为实际截图 -->
+
 <div align="center">
   <img src="" width="800" alt="主界面 - 文件浏览" />
   <p><em>图 1：文件浏览器（列表/网格视图、右键菜单、多选操作）</em></p>
 
-  <img src="" width="800" alt="设置 - 公网隧道" />
+<img src="" width="800" alt="设置 - 公网隧道" />
   <p><em>图 2：超管设置 —— 权限管理 & SSH 公网隧道</em></p>
 
-  <img src="" width="800" alt="文件预览" />
+<img src="" width="800" alt="文件预览" />
   <p><em>图 3：文件预览（图片 / 视频 / PDF / 文本）</em></p>
 
-  <img src="" width="800" alt="暗色模式" />
+<img src="" width="800" alt="暗色模式" />
   <p><em>图 4：暗色模式</em></p>
 </div>
 
@@ -48,6 +49,7 @@
 ## 功能特性
 
 ### 文件管理
+
 - **上传** 批量文件 / 文件夹拖拽上传，支持超大文件（超管 2GB，可调）
 - **下载** 单文件流式下载 / 文件夹 ZIP 打包下载（可配置大小上限）
 - **预览** 图片缩放拖拽、音视频播放、PDF 内嵌、文本高亮、HTML 渲染
@@ -57,22 +59,25 @@
 - **压缩/解压** 在线 ZIP 压缩与解压
 
 ### 权限体系
-| 角色 | 浏览 | 下载 | 上传 | 编辑 | 管理 | 设置 |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **超级管理员** | 全部 | 全部 | 全部（≤2GB） | 全部 | 全部 | 全部 |
-| **团队成员** | 全部 | 可配 | 可配（≤512MB） | 可配 | 可配 | 客户端设置 |
-| **访客** | 可配 | 可配 | 不可 | 不可 | 不可 | 客户端设置 |
+
+| 角色        | 浏览  | 下载  | 上传         | 编辑  | 管理  | 设置    |
+|:--------- |:---:|:---:|:----------:|:---:|:---:|:-----:|
+| **超级管理员** | 全部  | 全部  | 全部（≤2GB）   | 全部  | 全部  | 全部    |
+| **团队成员**  | 全部  | 可配  | 可配（≤512MB） | 可配  | 可配  | 客户端设置 |
+| **访客**    | 可配  | 可配  | 不可         | 不可  | 不可  | 客户端设置 |
 
 - 超级管理员为全局唯一账户，密码仅通过 `.env` 修改
 - 团队成员由超管批量创建、启/禁用、重置密码
 - 访客无需登录即可访问（可设定隐藏文件夹）
 
 ### 公网穿透
+
 - 内置 SSH 反向隧道，一键暴露至公网
 - 支持 **pinggy.io** / **localhost.run** / **serveo.net** 三种免费隧道服务，以及自定义 SSH 服务器
 - 自动断线重连（指数退避），实时日志展示
 
 ### 安全加固
+
 - 前后端双重 JWT 认证，httpOnly + SameSite Cookie
 - CSRF 保护（`X-Requested-With` 校验）
 - 登录暴力破解锁定（IP + 用户名双维度，15 分钟窗口）
@@ -81,6 +86,7 @@
 - 安全响应头（`nosniff`、`SAMEORIGIN`、`no-referrer`）
 
 ### 跨平台
+
 - Windows / macOS / Linux 均可运行
 - 支持打包为独立 `.exe`（Windows）
 
@@ -124,16 +130,16 @@ pnpm start        # 启动服务 (http://localhost:12345)
 
 完整的 `.env` 配置项：
 
-| 变量 | 默认值 | 说明 |
-| :--- | :--- | :--- |
-| `PORT` | `12345` | 服务端口 |
-| `HOST` | `0.0.0.0` | 监听地址（`0.0.0.0` 局域网可访问） |
-| `SUPER_ADMIN_USER` | `admin` | 超管用户名 |
-| `SUPER_ADMIN_PASSWORD` | 自动生成 | 超管密码（修改后需重启） |
-| `SESSION_HOURS` | `72` | 登录有效期（小时） |
-| `FILES_DIR` | `./data/files` | 文件存储根目录 |
-| `FILES_SOFT_DIR` | 无 | 外部只读映射，JSON 格式：`{"显示名":"/真实路径"}` |
-| `NOLOG` | `false` | 静默模式（仅写日志文件，不输出控制台） |
+| 变量                     | 默认值            | 说明                               |
+|:---------------------- |:-------------- |:-------------------------------- |
+| `PORT`                 | `12345`        | 服务端口                             |
+| `HOST`                 | `0.0.0.0`      | 监听地址（`0.0.0.0` 局域网可访问）           |
+| `SUPER_ADMIN_USER`     | `admin`        | 超管用户名                            |
+| `SUPER_ADMIN_PASSWORD` | 自动生成           | 超管密码（修改后需重启）                     |
+| `SESSION_HOURS`        | `72`           | 登录有效期（小时）                        |
+| `FILES_DIR`            | `./data/files` | 文件存储根目录                          |
+| `FILES_SOFT_DIR`       | 无              | 外部只读映射，JSON 格式：`{"显示名":"/真实路径"}` |
+| `NOLOG`                | `false`        | 静默模式（仅写日志文件，不输出控制台）              |
 
 > 启动参数：`node server/index.js -nolog` 可临时关闭控制台日志。
 
@@ -220,19 +226,19 @@ cd server && pnpm bundle
 
 ### 技术栈
 
-| 层级 | 技术 |
-| :--- | :--- |
-| **后端运行时** | Node.js (ESM) |
-| **后端框架** | Express 4 |
-| **认证** | JWT + bcrypt + CSRF |
-| **文件上传** | Busboy |
-| **压缩** | Archiver / Unzipper |
-| **前端** | React 19 + TypeScript |
-| **样式** | Tailwind CSS v4 + Shadcn UI |
-| **UI 设计** | Fumadocs 风格 (自定义主题令牌) |
-| **图标** | Lucide |
-| **动画** | GSAP + CSS Transition |
-| **构建** | Vite / esbuild / pkg |
+| 层级        | 技术                          |
+|:--------- |:--------------------------- |
+| **后端运行时** | Node.js (ESM)               |
+| **后端框架**  | Express 4                   |
+| **认证**    | JWT + bcrypt + CSRF         |
+| **文件上传**  | Busboy                      |
+| **压缩**    | Archiver / Unzipper         |
+| **前端**    | React 19 + TypeScript       |
+| **样式**    | Tailwind CSS v4 + Shadcn UI |
+| **UI 设计** | Fumadocs 风格 (自定义主题令牌)       |
+| **图标**    | Lucide                      |
+| **动画**    | GSAP + CSS Transition       |
+| **构建**    | Vite / esbuild / pkg        |
 
 ---
 
@@ -253,8 +259,4 @@ cd server && pnpm bundle
 
 ---
 
-<p align="center">
-  <sub>Made with ♥ by Wangyq</sub>
-</p>
-
-<p align="right"><a href="#top">↑ 回到顶部</a></p>
+Copyright@Wanyyq(Github账户) 2026

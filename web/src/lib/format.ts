@@ -119,7 +119,8 @@ export function ext(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : name.toLowerCase()
 }
 
-export function fileKind(name: string, type: "dir" | "file", softReadOnly?: boolean) {
+export function fileKind(name: string, type: string, softReadOnly?: boolean, shortcutLogo?: string | null) {
+  if (type === "shortcut") return { icon: shortcutLogo || "external-link", label: "快捷方式" }
   if (type === "dir") return { icon: softReadOnly ? "folder-lock" : "folder", label: softReadOnly ? "外部文件夹（只读）" : "文件夹" }
   return EXT_KIND[ext(name)] || { icon: "file", label: "文件" }
 }

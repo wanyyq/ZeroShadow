@@ -53,8 +53,8 @@ export function LoginPage() {
       <div className="flex flex-1 items-center justify-center px-4">
         <div ref={cardRef} className="w-full max-w-sm">
           <div className="mb-6 text-center">
-            <h1 className="font-heading text-xl font-semibold tracking-tight">Wangyq ZeroShadow</h1>
-            <p className="text-xs text-muted-foreground">轻量 · 安全 · 局域网优先</p>
+            <h1 className="font-heading text-xl font-semibold tracking-tight">ZeroShadow</h1>
+            <p className="text-xs text-muted-foreground">Copyright@Wanyyq 2026</p>
           </div>
           <Card className="edge-highlight">
             <CardHeader>

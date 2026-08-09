@@ -66,7 +66,7 @@ export function SettingsPage() {
         </div>
       </div>
       <div className="border-t border-border/30 px-3 py-2">
-        <div className="text-center text-[11px] text-muted-foreground">Copyright © Wangyq 2026</div>
+        <div className="text-center text-[11px] text-muted-foreground">管理外观、服务器、成员与权限</div>
       </div>
     </AppShell>
   )
@@ -88,7 +88,7 @@ function AppearanceSection() {
       {/* 主题：不用卡，用按钮组 */}
       <div>
         <h3 className="mb-3 text-sm font-medium">主题</h3>
-        <div className="edge-highlight flex gap-2 rounded-xl border border-border p-1">
+        <div className="edge-highlight flex gap-2 rounded-xl border border-border bg-card p-1">
           {themes.map(([value, icon, label]) => (
             <button
               key={value}
@@ -107,7 +107,7 @@ function AppearanceSection() {
       {/* 浏览偏好：行内布局 */}
       <div>
         <h3 className="mb-3 text-sm font-medium">浏览偏好</h3>
-        <div className="edge-highlight rounded-xl border border-border p-3">
+        <div className="edge-highlight rounded-xl border border-border bg-card p-3">
           <div className="grid gap-3">
             <Row label="默认视图">
               <Select value={settings.view} onValueChange={(v) => settings.update({ view: v as "list" | "grid" })}>
@@ -169,14 +169,14 @@ function StatusSection() {
             <Icon name={icon} className="size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
               <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
-              <p className="text-sm font-medium">{value}</p>
+              <p className="truncate text-sm font-medium" title={value}>{value}</p>
             </div>
           </div>
         ))}
       </div>
 
       {/* 访问地址：简洁列表 */}
-      <div className="edge-highlight rounded-xl border border-border p-3">
+      <div className="edge-highlight rounded-xl border border-border bg-card p-3">
         <h3 className="mb-2 text-sm font-medium">局域网访问</h3>
         <div className="grid gap-1.5">
           {[`http://localhost:${status.port}`, ...status.lan.map((ip) => `http://${ip}:${status.port}`)].map((url) => (
@@ -232,7 +232,7 @@ function LogsSection() {
           <Button size="sm" variant="destructive" onClick={() => setConfirmClear(true)}><Icon name="trash-2" /> 清空</Button>
         </div>
         <ScrollArea className="h-96 rounded-md border border-border">
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-40">时间</TableHead>
@@ -247,10 +247,10 @@ function LogsSection() {
               {logs.map((row, i) => (
                 <TableRow key={i}>
                   <TableCell className="font-mono text-xs whitespace-nowrap">{row.t.replace("T", " ").slice(0, 19)}</TableCell>
-                  <TableCell className={cn("text-xs font-medium", row.lvl === "error" ? "text-destructive" : row.lvl === "warn" ? "text-amber-600 dark:text-amber-400" : "")}>{row.ev}</TableCell>
-                  <TableCell className="text-xs">{row.user || "-"}</TableCell>
-                  <TableCell className="font-mono text-xs">{row.ip || "-"}</TableCell>
-                  <TableCell className="max-w-md truncate text-xs" title={row.msg}>{row.msg || "-"}</TableCell>
+                  <TableCell className={cn("truncate text-xs font-medium", row.lvl === "error" ? "text-destructive" : row.lvl === "warn" ? "text-amber-600 dark:text-amber-400" : "")} title={row.ev}>{row.ev}</TableCell>
+                  <TableCell className="truncate text-xs" title={row.user || undefined}>{row.user || "-"}</TableCell>
+                  <TableCell className="truncate font-mono text-xs" title={row.ip || undefined}>{row.ip || "-"}</TableCell>
+                  <TableCell className="truncate text-xs" title={row.msg}>{row.msg || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -507,7 +507,7 @@ function PermsSection() {
   const fw = m.fileWrite
 
   return (
-    <div className="edge-highlight rounded-xl border border-border p-5">
+    <div className="edge-highlight rounded-xl border border-border bg-card p-5">
       {/* ===== 上传大小限制 ===== */}
       <h3 className="mb-3 text-sm font-medium">上传大小限制（单文件 MB）</h3>
       <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:gap-4">
@@ -593,6 +593,7 @@ function PermsSection() {
       <div className="mb-4 grid gap-px sm:grid-cols-2">
         {permItem("压缩为 Zip", m.compressZip, (v) => patch({ memberPerms: { compressZip: !!v } }))}
         {permItem("解压 Zip", m.extractZip, (v) => patch({ memberPerms: { extractZip: !!v } }))}
+        {permItem("多线程下载器", m.downloadUrl, (v) => patch({ memberPerms: { downloadUrl: !!v } }))}
         {permItem("HTML 全屏预览", m.htmlPreview, (v) => patch({ memberPerms: { htmlPreview: !!v } }))}
         {permItem("在线编辑文件", m.editFiles, (v) => patch({ memberPerms: { editFiles: !!v } }))}
       </div>
@@ -694,7 +695,7 @@ function TunnelSection() {
     finally { setBusy(false) }
   }
 
-  const handleModeChange = React.useCallback((v: string) => {
+  const handleModeChange = React.useCallback((v: string | null) => {
     if (!v) return
     const cur = configRef.current
     if (!cur) return
@@ -708,7 +709,7 @@ function TunnelSection() {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       {/* 配置区：行内 */}
-      <div className="edge-highlight rounded-xl border border-border p-4">
+      <div className="edge-highlight rounded-xl border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-medium">SSH 反向隧道</h3>
         <p className="mb-4 text-xs text-muted-foreground">通过 ssh -R 将本服务暴露到公网</p>
         <div className="grid gap-4">
@@ -742,7 +743,7 @@ function TunnelSection() {
       </div>
 
       {/* 状态区：输出 */}
-      <div className="edge-highlight rounded-xl border border-border p-4">
+      <div className="edge-highlight rounded-xl border border-border bg-card p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-medium">
           运行状态
           <Badge variant={status?.running ? "default" : "secondary"}>{status?.running ? "运行中" : "未运行"}</Badge>
@@ -752,7 +753,7 @@ function TunnelSection() {
         )}
         <p className="mb-2 text-xs text-muted-foreground">{status?.restarts ? `已自动重连 ${status.restarts} 次` : "隧道日志"}</p>
         <ScrollArea className="h-56 rounded-md border border-border bg-muted/30 p-2">
-          <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap">{status?.output?.length ? status.output.join("\n") : "（暂无输出）"}</pre>
+          <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">{status?.output?.length ? status.output.join("\n") : "（暂无输出）"}</pre>
         </ScrollArea>
       </div>
     </div>

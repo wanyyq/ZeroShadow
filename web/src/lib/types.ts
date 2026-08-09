@@ -18,6 +18,7 @@ export interface Perms {
   editFiles: boolean
   compressZip: boolean
   extractZip: boolean
+  downloadUrl: boolean
   changePassword: boolean
 }
 
@@ -28,16 +29,29 @@ export interface Me {
   uploadLimitMB: number
 }
 
+export interface ShortcutInfo {
+  targetType: "file" | "path" | "soft_file" | "soft_path"
+  targetUrl: string
+  logo: string | null
+  displayName?: string
+}
+
 export interface Entry {
   name: string
-  type: "dir" | "file"
+  type: "dir" | "file" | "shortcut"
   size: number
   mtime: number
   hiddenFromGuest?: boolean
   softReadOnly?: boolean
+  shortcut?: ShortcutInfo
 }
 
-export interface SearchResult extends Entry {
+export interface SearchResult {
+  name: string
+  type: "dir" | "file"
+  size: number
+  mtime: number
+  softReadOnly?: boolean
   path: string
   parent: string
 }
@@ -86,6 +100,7 @@ export interface AdminConfig {
     editFiles: boolean
     compressZip: boolean
     extractZip: boolean
+    downloadUrl: boolean
     changePassword: boolean
   }
   guestPerms: {
@@ -144,4 +159,20 @@ export interface LogRow {
 export interface UploadResult {
   results: { name: string; ok: boolean; savedAs?: string; error?: string }[]
   limitMB: number
+}
+
+export type OpType = "compress" | "extract" | "download"
+
+export interface OperationStatus {
+  id: string
+  state: "running" | "done" | "error" | "gone"
+  type: OpType
+  label: string
+  percent: number
+  processed: number
+  total: number
+  processedBytes: number
+  totalBytes: number
+  error: string | null
+  count?: number
 }

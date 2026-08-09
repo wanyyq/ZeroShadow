@@ -11,6 +11,34 @@ export async function entryInfo(dirAbs, dirent) {
       return { name: dirent.name, type: "dir", size: 0, mtime: stat.mtimeMs }
     }
     if (stat.isFile()) {
+      // 快捷方式文件 (.zeropath)
+      if (dirent.name.toLowerCase().endsWith(".zeropath")) {
+        try {
+          const raw = await fs.promises.readFile(abs, "utf8")
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === "object") {
+            const rawType = String(parsed.type || "")
+            const targetType = ["file", "path", "soft_file", "soft_path"].includes(rawType) ? rawType
+              : rawType === "dir" ? "path"
+              : rawType === "soft_dir" ? "soft_path"
+              : "path"
+            return {
+              name: dirent.name,
+              type: "shortcut",
+              size: stat.size,
+              mtime: stat.mtimeMs,
+              shortcut: {
+                targetType,
+                targetUrl: String(parsed.url || ""),
+                logo: typeof parsed.logo === "string" ? parsed.logo : null,
+                displayName: parsed.name || dirent.name.replace(/\.zeropath$/i, ""),
+              },
+            }
+          }
+        } catch {
+          /* invalid json, fall through to regular file */
+        }
+      }
       return { name: dirent.name, type: "file", size: stat.size, mtime: stat.mtimeMs }
     }
     return null

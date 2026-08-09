@@ -1,6 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
+import http from "node:http"
+import https from "node:https"
 import { Router } from "express"
 import Busboy from "busboy"
 import archiver from "archiver"
@@ -32,6 +34,7 @@ import {
   uniqueName,
 } from "../files.js"
 import { info } from "../logger.js"
+import { createJob, failJob, finishJob, jobStatus, patchJob } from "../jobs.js"
 
 const router = Router()
 
@@ -322,11 +325,28 @@ router.get("/zip", requirePerm("downloadFolder"), async (req, res, next) => {
     })
     res.on("close", () => archive.destroy())
     archive.pipe(res)
+    // 处理重名
+    const nameCount = new Map()
     for (const item of items) {
+      nameCount.set(item.name, (nameCount.get(item.name) || 0) + 1)
+    }
+    const usedNames = new Map()
+    for (const item of items) {
+      let entryName = item.name
+      if (nameCount.get(item.name) > 1) {
+        entryName = item.rel ? item.rel.replace(/\//g, "_") : item.name
+        const idx = (usedNames.get(entryName) || 0) + 1
+        usedNames.set(entryName, idx)
+        if (idx > 1) {
+          const ext = path.extname(entryName)
+          const base = ext ? entryName.slice(0, -ext.length) : entryName
+          entryName = `${base}_${idx}${ext}`
+        }
+      }
       if (item.isDir) {
-        await addDirToArchive(archive, item.abs, item.rel, item.name, forGuest)
+        await addDirToArchive(archive, item.abs, item.rel, entryName, forGuest)
       } else {
-        archive.file(item.abs, { name: item.name })
+        archive.file(item.abs, { name: entryName })
       }
     }
     info("download_zip", { msg: rels.join(", "), ...actor(req) })
@@ -704,43 +724,60 @@ router.post(
   }
 )
 
-async function compressCommon(req, res, paths) {
-  const forGuest = req.auth.role === "guest"
-  const items = await collectZipItems(paths.map((p) => normRel(p)), forGuest)
-  if (!items.length) throw httpError(404, "没有可压缩的内容")
-  await validateZipLimits(items, forGuest)
-
+async function runCompressJob(job, items, paths, destAbs, req) {
+  const outName = items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
+  const finalName = await uniqueName(destAbs, outName)
+  const outFile = path.join(destAbs, finalName)
+  const ws = fs.createWriteStream(outFile)
   const archive = archiver("zip", { zlib: { level: 5 } })
-  archive.on("error", () => { if (!res.headersSent) res.status(500).end(); else res.destroy() })
-  const zipName = `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
-  res.setHeader("Content-Type", "application/zip")
-  res.setHeader("Content-Disposition", contentDisposition("attachment", zipName))
-  res.setHeader("Cache-Control", "no-store")
-  archive.pipe(res)
+  archive.on("progress", (p) => {
+    patchJob(job.id, {
+      processed: p.entries.processed,
+      processedBytes: p.fs.processedBytes,
+      percent: p.entries.total ? Math.min(99, Math.round((p.entries.processed / p.entries.total) * 100)) : 0,
+    })
+  })
+  archive.on("error", (err) => failJob(job.id, err))
+  ws.on("error", (err) => failJob(job.id, err))
+  const finished = new Promise((resolve) => {
+    ws.on("close", resolve)
+    archive.on("error", resolve)
+    ws.on("error", resolve)
+  })
+  archive.pipe(ws)
+  // 处理同名文件：收集所有条目的名称，为重名项使用路径作为区分
+  const nameCount = new Map()
   for (const item of items) {
+    nameCount.set(item.name, (nameCount.get(item.name) || 0) + 1)
+  }
+  const usedNames = new Map()
+  for (const item of items) {
+    let entryName = item.name
+    if (nameCount.get(item.name) > 1) {
+      entryName = item.rel ? item.rel.replace(/\//g, "_") : item.name
+      const idx = (usedNames.get(entryName) || 0) + 1
+      usedNames.set(entryName, idx)
+      if (idx > 1) {
+        const ext = path.extname(entryName)
+        const base = ext ? entryName.slice(0, -ext.length) : entryName
+        entryName = `${base}_${idx}${ext}`
+      }
+    }
     if (item.isDir) {
-      await addDirToArchive(archive, item.abs, item.rel, item.name, forGuest)
+      await addDirToArchive(archive, item.abs, item.rel, entryName, req.auth.role === "guest")
     } else {
-      archive.file(item.abs, { name: item.name })
+      archive.file(item.abs, { name: entryName })
     }
   }
-  info("compress", { msg: paths.join(", "), ...actor(req) })
-  await archive.finalize()
-}
-
-router.get("/compress", requirePerm("compressZip"), async (req, res, next) => {
+  await archive.finalize().catch((err) => failJob(job.id, err))
+  await finished
   try {
-    let paths = []
-    if (req.query.paths) {
-      try {
-        const parsed = JSON.parse(String(req.query.paths))
-        if (Array.isArray(parsed) && parsed.length && parsed.length <= 200) paths = parsed
-      } catch { throw httpError(400, "参数格式错误") }
-    }
-    if (!paths.length) throw httpError(400, "参数格式错误")
-    await compressCommon(req, res, paths)
-  } catch (err) { next(err) }
-})
+    finishJob(job.id, { state: "done" })
+    info("compress", { msg: `${joinRel(paths[0] ? path.dirname(paths[0]) : "", finalName)}`, ...actor(req) })
+  } catch (err) {
+    failJob(job.id, err)
+  }
+}
 
 router.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
   try {
@@ -748,7 +785,28 @@ router.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
     if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
       throw httpError(400, "参数格式错误")
     }
-    await compressCommon(req, res, paths)
+    const destRel = req.body?.dest || path.dirname(paths[0] || "")
+    const dest = resolveSafe(destRel)
+    blockSoft(dest.rel)
+    await assertDir(dest.abs)
+    const forGuest = req.auth.role === "guest"
+    const items = await collectZipItems(paths.map((p) => normRel(p)), forGuest)
+    if (!items.length) throw httpError(404, "没有可压缩的内容")
+    await validateZipLimits(items, forGuest)
+    const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest)
+    const label = items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
+    const job = createJob("compress", { label, total: fileCount, totalBytes: totalSize })
+    job.createdBy = req.auth.username || "guest"
+    res.json({ jobId: job.id })
+    void runCompressJob(job, items, paths, dest.abs, req).catch((err) => { failJob(job.id, err) })
+  } catch (err) { next(err) }
+})
+
+router.get("/compress/status", requirePerm("compressZip"), (req, res, next) => {
+  try {
+    const status = jobStatus(String(req.query.job || ""))
+    if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
+    res.json(status)
   } catch (err) { next(err) }
 })
 
@@ -773,40 +831,69 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     if (directory.files.length > limits.maxFiles) {
       throw httpError(400, `ZIP 内文件数超出限制 (最多 ${limits.maxFiles} 个)`)
     }
-    const destResolved = path.resolve(destAbs)
-    let count = 0
-    for (const file of directory.files) {
-      const entryPath = file.path
-      if (entryPath.length > 2048) continue
-      const segments = entryPath.replace(/\\/g, "/").split("/")
-      if (segments.some((s) => s.length > 200 || s === "..")) continue
-      const outPath = path.resolve(destAbs, entryPath)
-      const relOut = path.relative(destResolved, outPath)
-      if (!relOut || relOut.startsWith("..") || path.isAbsolute(relOut)) continue
-      if (file.type === "Directory") {
-        fs.mkdirSync(outPath, { recursive: true })
-        continue
+    const job = createJob("extract", { label: path.basename(abs), total: directory.files.length })
+    job.createdBy = req.auth.username || "guest"
+
+    // 使用 zip 文件名（不含 .zip）作为解压目标文件夹
+    const zipBaseName = path.basename(abs).replace(/\.zip$/i, "")
+    const extractRoot = await uniqueName(destAbs, zipBaseName)
+    const extractDestAbs = path.join(destAbs, extractRoot)
+    fs.mkdirSync(extractDestAbs, { recursive: true })
+
+    res.json({ jobId: job.id })
+
+    void (async () => {
+      const destResolved = path.resolve(extractDestAbs)
+      let count = 0
+      for (const file of directory.files) {
+        try {
+          const entryPath = file.path
+          if (entryPath.length > 2048) continue
+          const segments = entryPath.replace(/\\/g, "/").split("/")
+          if (segments.some((s) => s.length > 200 || s === "..")) continue
+          const outPath = path.resolve(extractDestAbs, entryPath)
+          const relOut = path.relative(destResolved, outPath)
+          if (!relOut || relOut.startsWith("..") || path.isAbsolute(relOut)) continue
+          if (file.type === "Directory") {
+            fs.mkdirSync(outPath, { recursive: true })
+            continue
+          }
+          if (file.uncompressedSize > limits.maxSingleBytes) continue
+          const dirName = path.dirname(outPath)
+          if (dirName && dirName !== ".") {
+            fs.mkdirSync(dirName, { recursive: true })
+          }
+          const buf = await file.buffer()
+          if (buf.length > limits.maxSingleBytes) continue
+          await fs.promises.writeFile(outPath, buf)
+          count += 1
+        } catch (err) {
+          failJob(job.id, err)
+          return
+        }
+        patchJob(job.id, {
+          processed: count,
+          percent: Math.min(99, Math.round((count / directory.files.length) * 100)),
+        })
       }
-      if (file.uncompressedSize > limits.maxSingleBytes) {
-        continue
-      }
-      const dirName = path.dirname(outPath)
-      if (dirName && dirName !== ".") {
-        fs.mkdirSync(dirName, { recursive: true })
-      }
-      const buf = await file.buffer()
-      if (buf.length > limits.maxSingleBytes) continue
-      await fs.promises.writeFile(outPath, buf)
-      count += 1
-    }
-    info("extract", { msg: `${rel} → ${count} 文件`, ...actor(req) })
-    res.json({ count })
+      patchJob(job.id, { count })
+      finishJob(job.id, { state: "done" })
+      info("extract", { msg: `${rel} → ${count} 文件`, ...actor(req) })
+    })().catch((err) => failJob(job.id, err))
   } catch (err) {
     if (err.message?.includes("Cannot find module 'unzipper'")) {
       return next(httpError(500, "服务端未安装 unzipper 模块，请联系管理员"))
     }
     next(err)
   }
+})
+
+router.get("/extract/status", requirePerm("extractZip"), (req, res, next) => {
+  try {
+    const status = jobStatus(String(req.query.job || ""))
+    if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
+    res.json(status)
+  } catch (err) { next(err) }
 })
 
 router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
@@ -821,6 +908,109 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
   } catch (err) {
     next(err)
   }
+})
+
+// ============ 多线程下载器 ============
+function validateHttpUrl(urlStr) {
+  try {
+    const u = new URL(urlStr)
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "仅支持 http/https 链接"
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1") return "不允许下载本地地址"
+    const privateRanges = [/^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^169\.254\./]
+    if (privateRanges.some((r) => r.test(u.hostname))) return "不允许下载内网地址"
+    return null
+  } catch {
+    return "URL 格式无效"
+  }
+}
+
+async function downloadFileFromUrl(job, urlStr, destAbs) {
+  const parsed = new URL(urlStr)
+  const transport = parsed.protocol === "https:" ? https : http
+  const tempFile = path.join(TMP_DIR, `dl-${crypto.randomBytes(8).toString("hex")}`)
+
+  return new Promise((resolve) => {
+    const req = transport.get(parsed, { rejectUnauthorized: false }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+        const loc = res.headers.location
+        if (loc) {
+          const err = validateHttpUrl(loc.startsWith("/") ? `${parsed.origin}${loc}` : loc)
+          if (err) return resolve(failJob(job.id, new Error(err)))
+          return resolve(downloadFileFromUrl(job, loc.startsWith("/") ? `${parsed.origin}${loc}` : loc, destAbs))
+        }
+        return resolve(failJob(job.id, new Error(`下载失败: 重定向无目标`)))
+      }
+      if (res.statusCode < 200 || res.statusCode >= 400) {
+        return resolve(failJob(job.id, new Error(`下载失败: HTTP ${res.statusCode}`)))
+      }
+      const total = Number(res.headers["content-length"] || 0)
+      if (total > 0) patchJob(job.id, { totalBytes: total })
+      const ws = fs.createWriteStream(tempFile)
+      let loaded = 0
+      res.on("data", (chunk) => {
+        loaded += chunk.length
+        if (total > 0) {
+          patchJob(job.id, { processedBytes: loaded, percent: Math.min(99, Math.round((loaded / total) * 100)) })
+        }
+      })
+      res.pipe(ws)
+      ws.on("error", (err) => {
+        ws.destroy(); resolve(failJob(job.id, err)); return
+      })
+      ws.on("close", async () => {
+        try {
+          const st = await fs.promises.stat(tempFile)
+          if (total > 0 && st.size < total * 0.95) {
+            await fs.promises.rm(tempFile, { force: true })
+            return resolve(failJob(job.id, new Error("下载未完成（网络中断）")))
+          }
+          await moveEntry(tempFile, destAbs)
+          finishJob(job.id, { state: "done" })
+          resolve()
+        } catch (err) {
+          resolve(failJob(job.id, err))
+        }
+      })
+    })
+    req.on("error", (err) => { resolve(failJob(job.id, err)); return })
+    req.setTimeout(60000, () => { req.destroy(); resolve(failJob(job.id, new Error("连接超时"))); return })
+  })
+}
+
+router.post("/download-url", requirePerm("downloadUrl"), async (req, res, next) => {
+  try {
+    const urlStr = String(req.body?.url || "").trim()
+    if (!urlStr) throw httpError(400, "请输入下载链接")
+    const urlErr = validateHttpUrl(urlStr)
+    if (urlErr) throw httpError(400, urlErr)
+    const parts = typeof urlStr === "string" ? urlStr.split("/").filter(Boolean) : []
+    const rawName = parts.length ? decodeURIComponent(parts[parts.length - 1]) : "downloaded-file"
+    const fallbackName = rawName.split("?")[0].split("#")[0]
+    const inputName = typeof req.body?.filename === "string" ? req.body.filename.trim() : null
+    const finalName = inputName || fallbackName || "downloaded-file"
+    const safeName = sanitizeFileName(finalName)
+    const dest = String(req.body?.dest || "")
+    const destResolved = resolveSafe(dest)
+    blockSoft(destResolved.rel)
+    await assertDir(destResolved.abs)
+    const uniqueOut = await uniqueName(destResolved.abs, safeName)
+    const outPath = path.join(destResolved.abs, uniqueOut)
+
+    const label = uniqueOut
+    const contentLength = 0  // unknown until HEAD
+    const job = createJob("download", { label, total: 100, totalBytes: contentLength })
+    job.createdBy = req.auth.username || "guest"
+    res.json({ jobId: job.id })
+    void downloadFileFromUrl(job, urlStr, outPath)
+  } catch (err) { next(err) }
+})
+
+router.get("/download-url/status", requirePerm("downloadUrl"), (req, res, next) => {
+  try {
+    const status = jobStatus(String(req.query.job || ""))
+    if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
+    res.json(status)
+  } catch (err) { next(err) }
 })
 
 export default router

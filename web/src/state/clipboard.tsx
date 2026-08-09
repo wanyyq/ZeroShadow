@@ -4,7 +4,7 @@ import * as React from "react"
 export interface ClipboardItem {
   path: string
   name: string
-  type: "dir" | "file"
+  type: "dir" | "file" | "shortcut"
 }
 
 interface ClipboardState {

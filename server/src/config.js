@@ -28,6 +28,7 @@ const DEFAULTS = {
     editFiles: true,
     compressZip: true,
     extractZip: true,
+    downloadUrl: true,
     changePassword: true,
   },
   guestPerms: {
@@ -112,6 +113,7 @@ export function effectivePerms(role) {
       editFiles: true,
       compressZip: true,
       extractZip: true,
+      downloadUrl: true,
       changePassword: true,
     }
   }
@@ -136,6 +138,7 @@ export function effectivePerms(role) {
       editFiles: !!p.editFiles,
       compressZip: !!p.compressZip,
       extractZip: !!p.extractZip,
+      downloadUrl: !!p.downloadUrl,
       changePassword: !!p.changePassword,
     }
   }

@@ -3,9 +3,11 @@ import { useSearchParams, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { AppShell } from "@/components/layout/app-shell"
 import { UploadPanel } from "@/components/browser/upload-panel"
+import { OpsPanel } from "@/components/browser/ops-panel"
 import { DeleteDialog, DetailsDialog, NewFolderDialog, RenameDialog } from "@/components/browser/dialogs"
 import { DestPickerDialog } from "@/components/browser/dest-picker"
 import { ConflictDialog } from "@/components/browser/conflict-dialog"
+import { ShortcutEditorDialog } from "@/components/browser/shortcut-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -22,6 +24,7 @@ import { useAuth } from "@/state/auth"
 import { useClientSettings } from "@/state/client-settings"
 import { useClipboard } from "@/state/clipboard"
 import { useUploads } from "@/state/uploads"
+import { useOperations } from "@/state/operations"
 import { cn } from "@/lib/utils"
 import { detectConflicts } from "@/lib/conflict"
 import type { ConflictItem } from "@/lib/conflict"
@@ -49,6 +52,7 @@ export function BrowserPage() {
   const settings = useClientSettings()
   const clipboard = useClipboard()
   const uploads = useUploads()
+  const operations = useOperations()
 
   const [entries, setEntries] = React.useState<Entry[]>([])
   const [results, setResults] = React.useState<SearchResult[]>([])
@@ -69,6 +73,10 @@ export function BrowserPage() {
   const [conflictDirs, setConflictDirs] = React.useState<Set<string>>(new Set())
   const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
 
+  const [shortcutOpen, setShortcutOpen] = React.useState(false)
+  const [shortcutEntry, setShortcutEntry] = React.useState<Entry | null>(null)
+  const [emptyMenuPos, setEmptyMenuPos] = React.useState<{ x: number; y: number } | null>(null)
+
   const refresh = React.useCallback(() => {
     setLoading(true)
     if (query) {
@@ -88,6 +96,7 @@ export function BrowserPage() {
 
   React.useEffect(refresh, [refresh])
   React.useEffect(() => uploads.onCompleted((dest) => dest === path && refresh()), [uploads, path, refresh])
+  React.useEffect(() => operations.onCompleted((job) => job.type === "extract" && job.status === "done" && refresh()), [operations, refresh])
 
   const sorted = React.useMemo(() => {
     const list = [...entries]
@@ -102,7 +111,35 @@ export function BrowserPage() {
   }, [entries, settings.sortBy, settings.sortDir, settings.foldersFirst])
 
   const goto = (p: string) => setParams(p ? { path: p } : {})
+  const displayName = (entry: Entry) => entry.shortcut?.displayName || entry.name
+  const handleShortcut = (entry: Entry) => {
+    if (!entry.shortcut) {
+      toast.error("快捷方式数据损坏")
+      return false
+    }
+    const { targetType, targetUrl } = entry.shortcut
+    if (!targetUrl) {
+      toast.error("快捷方式目标为空")
+      return false
+    }
+    if (targetType === "path" || targetType === "soft_path") {
+      goto(targetUrl)
+    } else if (targetType === "soft_file" || targetType === "file") {
+      if (me.perms.preview) {
+        navigate(`/preview?path=${encodeURIComponent(targetUrl)}`)
+      } else {
+        triggerDownload(downloadUrl(targetUrl)).catch(() => {
+          toast.error("目标文件不存在或无权访问")
+        })
+      }
+    } else {
+      goto(targetUrl)
+    }
+    return true
+  }
+
   const handleOpenFile = (entry: Entry) => {
+    if (entry.type === "shortcut") { handleShortcut(entry); return }
     const rel = joinPath(path, entry.name)
     const ext = (entry.name.split(".").pop() || "").toLowerCase()
     if (previewType(entry.name) && me.perms.preview) {
@@ -118,6 +155,7 @@ export function BrowserPage() {
   }
 
   const openEntry = (entry: Entry) => {
+    if (entry.type === "shortcut") { handleShortcut(entry); return }
     if (entry.type === "dir") return goto(joinPath(path, entry.name))
     handleOpenFile(entry)
   }
@@ -212,22 +250,15 @@ export function BrowserPage() {
     } catch (err) { toast.error((err as Error).message) }
   }
 
-  const doCompress = async (targets: Entry[]) => {
+  const doCompress = (targets: Entry[]) => {
     if (!me.perms.compressZip) return noPermToast()
-    try {
-      triggerDownload(`/api/fs/compress?paths=${encodeURIComponent(JSON.stringify(targets.map((t) => joinPath(path, t.name))))}`).catch(() => {})
-      toast.success("开始压缩下载")
-    } catch (err) { toast.error((err as Error).message) }
+    operations.startCompress(targets.map((t) => joinPath(path, t.name)))
   }
 
-  const doExtract = async (entry: Entry) => {
+  const doExtract = (entry: Entry) => {
     if (!me.perms.extractZip) return noPermToast()
     if (isInSoftDir(entry)) return noPermSoftToast()
-    try {
-      const data = await api.post<{ count: number }>("/fs/extract", { path: joinPath(path, entry.name), dest: path })
-      toast.success(`已解压 ${data.count} 个文件`)
-      refresh()
-    } catch (err) { toast.error((err as Error).message) }
+    operations.startExtract(joinPath(path, entry.name), path)
   }
 
   const doEdit = (entry: Entry) => {
@@ -360,27 +391,31 @@ export function BrowserPage() {
     [path, me.perms.upload, resolveConflicts, uploads]
   )
 
-  const onDrop = async (e: React.DragEvent) => {
+  const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     if (!me.perms.upload) return noPermToast()
     if (sorted.length > 0 && sorted.every((en) => en.softReadOnly)) return noPermSoftToast()
     const items = e.dataTransfer.items
     if (items && items.length) {
-      const files: File[] = []
+      // 注意：必须在 drop 事件同步阶段读取所有条目，异步阶段浏览器会使其失效
+      const pending: Promise<File[]>[] = []
       for (let i = 0; i < items.length; i++) {
         const item = items[i]
-        if (item.kind === "file") {
-          const entry = item.webkitGetAsEntry?.()
-          if (entry) {
-            const entryFiles = await readEntry(entry)
-            files.push(...entryFiles)
-          } else {
-            const f = item.getAsFile()
-            if (f) files.push(f)
-          }
+        if (item.kind !== "file") continue
+        const entry = item.webkitGetAsEntry?.()
+        if (entry) {
+          pending.push(readEntry(entry).catch(() => []))
+        } else {
+          const f = item.getAsFile()
+          if (f) pending.push(Promise.resolve([f]))
         }
       }
-      if (files.length) handleUpload(files)
+      if (pending.length) {
+        void Promise.all(pending).then((groups) => {
+          const files = groups.flat()
+          if (files.length) handleUpload(files)
+        })
+      }
     } else {
       const fileList = e.dataTransfer.files
       if (fileList.length) handleUpload(Array.from(fileList))
@@ -505,6 +540,20 @@ export function BrowserPage() {
         </ContextMenuItem>
       )
     )}
+    {single && entry.type === "shortcut" && (
+      items.push(
+        <ContextMenuItem key="editShortcut" disabled={entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else { setShortcutEntry(entry); setShortcutOpen(true) } }}>
+          <Icon name="pencil-line" /> 编辑快捷方式
+        </ContextMenuItem>
+      )
+    )}
+    {single && entry.type !== "shortcut" && (
+      items.push(
+        <ContextMenuItem key="createShortcut" onClick={() => { setShortcutEntry(entry); setShortcutOpen(true) }}>
+          <Icon name="link" /> 创建快捷方式
+        </ContextMenuItem>
+      )
+    )}
     items.push(<ContextMenuSeparator key="s1" />)
     items.push(
       <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
@@ -563,10 +612,10 @@ export function BrowserPage() {
 
   // 文件悬浮提示
   const HoverInfo = ({ entry }: { entry: Entry }) => {
-    const kind = fileKind(entry.name, entry.type)
+    const kind = fileKind(entry.name, entry.type, undefined, entry.shortcut?.logo)
     return (
       <div className="grid gap-0.5">
-        <p className="text-xs font-medium">{entry.name}</p>
+        <p className="text-xs font-medium">{displayName(entry)}</p>
         <p className="text-[10px] text-muted-foreground">
           {kind.label}{entry.type === "file" ? ` · ${formatBytes(entry.size)}` : ""}
         </p>
@@ -597,7 +646,7 @@ export function BrowserPage() {
 
   const renderRow = (entry: Entry, index: number) => {
     const isSelected = selected.has(entry.name)
-    const kind = fileKind(entry.name, entry.type, entry.softReadOnly)
+    const kind = fileKind(entry.name, entry.type, entry.softReadOnly, entry.shortcut?.logo)
     return (
       <ContextMenu key={entry.name}>
         <ContextMenuTrigger render={<div />}>
@@ -616,7 +665,7 @@ export function BrowserPage() {
               }
             >
               <Icon name={kind.icon} className={cn("size-4 shrink-0", entry.type === "dir" ? "text-foreground" : "text-muted-foreground")} />
-              <div className="min-w-0 flex-1"><span className="block truncate text-sm">{entry.name}</span></div>
+              <div className="min-w-0 flex-1"><span className="block truncate text-sm">{displayName(entry)}</span></div>
               {entry.hiddenFromGuest && me.role !== "guest" && <Icon name="eye-off" className="hidden size-3 shrink-0 text-muted-foreground sm:block" />}
               <span className="hidden w-18 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
                 {entry.type === "dir" ? "文件夹" : formatBytes(entry.size)}
@@ -635,7 +684,7 @@ export function BrowserPage() {
   }
 
   const renderCard = (entry: Entry, index: number) => {
-    const kind = fileKind(entry.name, entry.type, entry.softReadOnly)
+    const kind = fileKind(entry.name, entry.type, entry.softReadOnly, entry.shortcut?.logo)
     const isSelected = selected.has(entry.name)
     return (
       <ContextMenu key={entry.name}>
@@ -655,7 +704,7 @@ export function BrowserPage() {
               }
             >
               <Icon name={kind.icon} className={cn("size-9", entry.type === "dir" ? "text-foreground" : "text-muted-foreground")} strokeWidth={1.5} />
-              <span className="w-full truncate text-center text-xs" title={entry.name}>{entry.name}</span>
+              <span className="w-full truncate text-center text-xs" title={displayName(entry)}>{displayName(entry)}</span>
               <span className="text-[10px] text-muted-foreground">{entry.type === "dir" ? kind.label : formatBytes(entry.size)}</span>
               {entry.hiddenFromGuest && me.role !== "guest" && <Icon name="eye-off" className="absolute top-2 right-2 size-3 text-muted-foreground" />}
               {isSelected && <div className="flex justify-center">{threeDotMenu(entry)}</div>}
@@ -758,6 +807,15 @@ export function BrowserPage() {
             ref={listRef}
             className={cn("edge-highlight relative flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card", dragOver && "border-ring")}
             onClick={(e) => { if (e.target === e.currentTarget) setSelected(new Set()) }}
+            onContextMenu={(e) => {
+              const targetEl = e.target as HTMLElement
+              const isBg = targetEl === e.currentTarget || targetEl.className?.includes?.("flex-1") || targetEl.tagName === "svg"
+              if (isBg) {
+                e.preventDefault()
+                e.stopPropagation()
+                setEmptyMenuPos({ x: e.clientX, y: e.clientY })
+              }
+            }}
           >
             {dragOver && (
               <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/80">
@@ -797,7 +855,7 @@ export function BrowserPage() {
               <div className="flex-1 overflow-auto p-2">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">{sorted.map(renderCard)}</div>
               </div>
-            )}
+              )}
           </div>
         </div>
       </div>
@@ -805,7 +863,7 @@ export function BrowserPage() {
       {/* 底部信息 */}
       <div className="border-t border-border/30 px-3 py-2 sm:px-5">
         <div className="mx-auto w-full max-w-4xl text-center text-[11px] leading-relaxed text-muted-foreground">
-          当前为“{ROLE_LABEL[me.role]}”模式{me.role !== "superadmin" ? "，其他功能需要管理员模式" : ""}<br />Copyright © Wangyq 2026
+          当前为“{ROLE_LABEL[me.role]}”模式{me.role !== "superadmin" ? "，其他功能需要管理员模式" : ""}
         </div>
       </div>
 
@@ -816,6 +874,7 @@ export function BrowserPage() {
         onChange={(e) => { const rawFiles = Array.from(e.target.files || []); const files = rawFiles.map((f) => { const wp = (f as any).webkitRelativePath as string | undefined; return wp ? new File([f], wp, { type: f.type, lastModified: f.lastModified }) : f }); if (files.length) handleUpload(files); e.target.value = "" }}
       />
       <UploadPanel />
+      <OpsPanel />
       <NewFolderDialog open={dialog === "newFolder"} onOpenChange={(o) => !o && setDialog(null)} path={path} onDone={refresh} />
       <RenameDialog open={dialog === "rename"} onOpenChange={(o) => !o && setDialog(null)} entry={dialogEntry} path={path} onDone={refresh} />
       <DeleteDialog
@@ -823,7 +882,7 @@ export function BrowserPage() {
         names={dialog === "delete" ? (selectedEntries.length ? selectedEntries.map((e) => e.name) : dialogEntry ? [dialogEntry.name] : []) : []}
         path={path} onDone={refresh}
       />
-      <DetailsDialog open={dialog === "details"} onOpenChange={(o) => !o && setDialog(null)} entryPath={dialogEntry ? joinPath(path, dialogEntry.name) : null} />
+      <DetailsDialog open={dialog === "details"} onOpenChange={(o) => !o && setDialog(null)} entryPath={dialog === "details" ? (dialogEntry ? joinPath(path, dialogEntry.name) : path) : null} />
       <DestPickerDialog open={picker !== null} onOpenChange={(o) => !o && setPicker(null)} title={picker === "copy" ? "复制到…" : "移动到…"}
         sourcePaths={selectedEntries.map((e) => joinPath(path, e.name))} mode={picker || "copy"} onDone={refresh}
       />
@@ -835,7 +894,101 @@ export function BrowserPage() {
         directoryNames={conflictDirs}
         onResolved={(items) => { conflictResolveRef.current?.(items); conflictResolveRef.current = null }}
       />
+      <ShortcutEditorDialog
+        open={shortcutOpen}
+        onOpenChange={setShortcutOpen}
+        entry={shortcutEntry}
+        currentPath={path}
+        onDone={refresh}
+      />
+      {emptyMenuPos && (
+        <EmptySpaceMenu
+          pos={emptyMenuPos}
+          onClose={() => setEmptyMenuPos(null)}
+          onRefresh={refresh}
+          onCreateShortcut={() => { setShortcutEntry(null); setShortcutOpen(true); setEmptyMenuPos(null) }}
+          onDetails={() => { setDialog("details"); setDialogEntry(null); setEmptyMenuPos(null) }}
+          sortDir={settings.sortDir}
+          foldersFirst={settings.foldersFirst}
+          onSortBy={(by) => { settings.update({ sortBy: by as "name" | "size" | "mtime" }); setEmptyMenuPos(null) }}
+          onSortDirToggle={() => { settings.update({ sortDir: settings.sortDir === "asc" ? "desc" : "asc" }); setEmptyMenuPos(null) }}
+          onFoldersFirstToggle={() => { settings.update({ foldersFirst: !settings.foldersFirst }); setEmptyMenuPos(null) }}
+        />
+      )}
     </AppShell>
+  )
+}
+
+function EmptySpaceMenu({
+  pos, onClose, onRefresh, onCreateShortcut, onDetails,
+  sortDir, foldersFirst, onSortBy, onSortDirToggle, onFoldersFirstToggle,
+}: {
+  pos: { x: number; y: number }
+  onClose: () => void
+  onRefresh: () => void
+  onCreateShortcut: () => void
+  onDetails: () => void
+  sortDir: string
+  foldersFirst: boolean
+  onSortBy: (by: string) => void
+  onSortDirToggle: () => void
+  onFoldersFirstToggle: () => void
+}) {
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const menu = document.querySelector("[data-empty-context-menu]")
+      if (menu && !menu.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [onClose])
+
+  const x = Math.min(pos.x, window.innerWidth - 180)
+  const y = Math.min(pos.y, window.innerHeight - 300)
+
+  return (
+    <div
+      data-empty-context-menu
+      className="fixed z-50 max-h-(--available-height) min-w-36 overflow-x-hidden overflow-y-auto rounded-md bg-popover/70 p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 backdrop-blur-2xl backdrop-saturate-150"
+      style={{ left: x, top: y }}
+    >
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onCreateShortcut(); onClose() }}>
+        <Icon name="link" className="size-4" /> 创建快捷方式
+      </button>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onRefresh(); onClose() }}>
+        <Icon name="refresh-cw" className="size-4" /> 刷新
+      </button>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onDetails(); onClose() }}>
+        <Icon name="info" className="size-4" /> 此目录详情
+      </button>
+      <div className="-mx-1 my-1 h-px bg-foreground/5" />
+      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">排序方式</div>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onSortBy("name"); onClose() }}>
+        <Icon name="arrow-up-a-z" className="size-4" /> 按名称
+      </button>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onSortBy("size"); onClose() }}>
+        <Icon name="arrow-up-1-0" className="size-4" /> 按大小
+      </button>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onSortBy("mtime"); onClose() }}>
+        <Icon name="clock" className="size-4" /> 按修改时间
+      </button>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onSortDirToggle(); onClose() }}>
+        <Icon name={sortDir === "asc" ? "arrow-down" : "arrow-up"} className="size-4" />
+        {sortDir === "asc" ? "改为降序" : "改为升序"}
+      </button>
+      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
+        onClick={() => { onFoldersFirstToggle(); onClose() }}>
+        <Icon name={foldersFirst ? "check" : "minus"} className="size-4" />
+        文件夹置顶
+      </button>
+    </div>
   )
 }
 

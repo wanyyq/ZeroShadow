@@ -25,6 +25,7 @@ const GUEST: Me = {
     editFiles: false,
     compressZip: false,
     extractZip: false,
+    downloadUrl: false,
     changePassword: false,
   },
   uploadLimitMB: 0,

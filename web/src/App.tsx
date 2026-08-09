@@ -6,12 +6,15 @@ import { AuthProvider } from "@/state/auth"
 import { ClientSettingsProvider } from "@/state/client-settings"
 import { ClipboardProvider } from "@/state/clipboard"
 import { UploadsProvider } from "@/state/uploads"
+import { OperationsProvider } from "@/state/operations"
 import { BrowserPage } from "@/pages/browser-page"
 import { LoginPage } from "@/pages/login-page"
 import { SettingsPage } from "@/pages/settings"
 import PreviewPage from "@/pages/preview-page"
 import EditorPage from "@/pages/editor-page"
 import HtmlPage from "@/pages/html-page"
+import { ToolsPage } from "@/pages/tools-page"
+import { AboutPage } from "@/pages/about-page"
 
 export default function App() {
   return (
@@ -20,20 +23,24 @@ export default function App() {
         <ClientSettingsProvider>
           <ClipboardProvider>
             <UploadsProvider>
-              <TooltipProvider delay={300}>
-                <BrowserRouter>
-                  <Routes>
-                    <Route path="/" element={<BrowserPage />} />
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/settings" element={<SettingsPage />} />
-                    <Route path="/preview" element={<PreviewPage />} />
-                    <Route path="/editor" element={<EditorPage />} />
-                    <Route path="/html-preview" element={<HtmlPage />} />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </BrowserRouter>
-                <Toaster position="bottom-center" />
-              </TooltipProvider>
+              <OperationsProvider>
+                <TooltipProvider delay={300}>
+                  <BrowserRouter>
+                    <Routes>
+                      <Route path="/" element={<BrowserPage />} />
+                      <Route path="/login" element={<LoginPage />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/preview" element={<PreviewPage />} />
+                      <Route path="/editor" element={<EditorPage />} />
+                      <Route path="/html-preview" element={<HtmlPage />} />
+                      <Route path="/tools" element={<ToolsPage />} />
+                      <Route path="/about" element={<AboutPage />} />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </BrowserRouter>
+                  <Toaster position="bottom-center" />
+                </TooltipProvider>
+              </OperationsProvider>
             </UploadsProvider>
           </ClipboardProvider>
         </ClientSettingsProvider>
