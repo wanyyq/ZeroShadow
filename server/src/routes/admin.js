@@ -6,6 +6,7 @@ import { batchMembers, createMembers, findById, findByUsername, listMembers, per
 import { getStatus } from "../status.js"
 import { applyTunnelConfig, tunnelStatus, validateCustomHost } from "../tunnel.js"
 import { clearLogs, info, queryLogs } from "../logger.js"
+import { samePath } from "../safety.js"
 
 const router = Router()
 
@@ -29,14 +30,17 @@ router.patch("/config", async (req, res, next) => {
   try {
     const body = req.body || {}
     const updates = {}
-    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB"]) {
+    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB", "extractMaxTotalMB", "downloadUrlMaxMB", "rateLimitPerMin"]) {
       if (body[key] !== undefined) {
         const n = Number(body[key])
         if (!Number.isInteger(n) || n < 1 || n > 1048576) {
-          throw httpError(400, "上传限制需为 1-1048576 之间的整数 (MB)")
+          throw httpError(400, "数值需为 1-1048576 之间的整数")
         }
         updates[key] = n
       }
+    }
+    for (const key of ["rateLimitEnabled", "softDirAllowCopyOut", "jobStatusOwnerOnly", "downloadUrlAllowPrivate", "csrfOriginCheck"]) {
+      if (body[key] !== undefined) updates[key] = !!body[key]
     }
     for (const group of ["memberPerms", "guestPerms"]) {
       if (body[group] !== undefined) {
@@ -56,6 +60,12 @@ router.patch("/config", async (req, res, next) => {
       if (updates.zipMaxSingleMB) draft.zipMaxSingleMB = updates.zipMaxSingleMB
       if (updates.zipMaxTotalMB) draft.zipMaxTotalMB = updates.zipMaxTotalMB
       if (updates.extractMaxZipMB) draft.extractMaxZipMB = updates.extractMaxZipMB
+      if (updates.extractMaxTotalMB) draft.extractMaxTotalMB = updates.extractMaxTotalMB
+      if (updates.downloadUrlMaxMB) draft.downloadUrlMaxMB = updates.downloadUrlMaxMB
+      if (updates.rateLimitPerMin) draft.rateLimitPerMin = updates.rateLimitPerMin
+      for (const key of ["rateLimitEnabled", "softDirAllowCopyOut", "jobStatusOwnerOnly", "downloadUrlAllowPrivate", "csrfOriginCheck"]) {
+        if (updates[key] !== undefined) draft[key] = updates[key]
+      }
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms)
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms)
     })
@@ -70,9 +80,7 @@ router.delete("/hidden-paths", async (req, res, next) => {
   try {
     const target = String(req.body?.path || "")
     const config = await saveConfig((draft) => {
-      draft.guestHiddenPaths = draft.guestHiddenPaths.filter(
-        (h) => h.toLowerCase() !== target.toLowerCase()
-      )
+      draft.guestHiddenPaths = draft.guestHiddenPaths.filter((h) => !samePath(h, target))
     })
     info("guest_visibility", { msg: `${target} 已对访客可见`, ...actor(req) })
     res.json(config)

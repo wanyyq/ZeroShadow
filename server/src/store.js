@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { restrictFileMode } from "./env.js"
 
 const queues = new Map()
 
@@ -30,4 +31,6 @@ export async function writeJsonAtomic(file, value) {
     await fs.promises.rm(file, { force: true })
     await fs.promises.rename(tmp, file)
   }
+  // users.json / config.json 含口令哈希与配置，POSIX 下收紧为仅属主可读写
+  restrictFileMode(file)
 }

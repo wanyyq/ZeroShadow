@@ -83,8 +83,17 @@ export interface AdminConfig {
   zipMaxSingleMB: number
   zipMaxTotalMB: number
   extractMaxZipMB: number
+  extractMaxTotalMB: number
+  downloadUrlMaxMB: number
+  rateLimitEnabled: boolean
+  rateLimitPerMin: number
+  softDirAllowCopyOut: boolean
+  jobStatusOwnerOnly: boolean
+  downloadUrlAllowPrivate: boolean
+  csrfOriginCheck: boolean
   memberPerms: {
     fileWrite: boolean
+    browse: boolean
     upload: boolean
     uploadFolders: boolean
     downloadFile: boolean
@@ -104,6 +113,7 @@ export interface AdminConfig {
     changePassword: boolean
   }
   guestPerms: {
+    browse: boolean
     downloadFile: boolean
     downloadFolder: boolean
     preview: boolean
@@ -139,6 +149,7 @@ export interface ServerStatus {
   hostname: string
   port: number
   host: string
+  trustProxy: boolean | number | string | string[]
   lan: string[]
   memory: { rss: number; heapUsed: number; systemFree: number; systemTotal: number }
   storage: { files: number; dirs: number; bytes: number; partial: boolean; root: string }

@@ -24,7 +24,9 @@ export default function HtmlPage() {
           <Button size="icon-xs" variant="ghost" onClick={() => navigate(-1)}><Icon name="x" /></Button>
         </div>
       </div>
-      <iframe src={url} title={name} className="flex-1 border-none" />
+      {/* 用户上传的 HTML 是不可信内容：sandbox 里绝不能加 allow-same-origin，
+          否则页面拿到网盘源身份，可直接调用 /api 冒充当前登录用户。 */}
+      <iframe src={url} title={name} className="flex-1 border-none" sandbox="allow-scripts" />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 title ZeroShadow Auto-Building
 
 echo ============================================
@@ -99,6 +99,7 @@ echo.
 echo [STEP] Creating release directory...
 cd /d "%~dp0"
 set RELEASE_DIR=ZeroShadow-Release
+set RELEASE_ZIP=ZeroShadow-Release.zip
 
 if exist "%RELEASE_DIR%" rd /s /q "%RELEASE_DIR%"
 mkdir "%RELEASE_DIR%"
@@ -106,17 +107,37 @@ mkdir "%RELEASE_DIR%\data"
 
 copy /y "server\ZeroShadow.exe" "%RELEASE_DIR%\" >nul
 xcopy /E /I /Y "web\dist" "%RELEASE_DIR%\web\dist\" >nul
+copy /y ".env.example" "%RELEASE_DIR%\.env.example" >nul
+
+:: ===== Package + secret gate =====
+:: package-release.ps1 purges runtime secrets (.env, data\.jwt-secret,
+:: data\users.json, data\config.json, logs) from the release directory and
+:: refuses to build the archive if any secret would ship. Never zip the
+:: project root: it contains .env and data\ and would leak credentials.
+echo.
+echo [STEP] Packaging and verifying (secret gate)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-release.ps1" -ReleaseDir "%RELEASE_DIR%" -ZipPath "%RELEASE_ZIP%"
+if %errorlevel% neq 0 (
+    echo [ERROR] Packaging failed or secrets were detected - see output above
+    pause
+    exit /b 1
+)
 
 echo.
 echo ============================================
 echo   Build SUCCESS!
 echo   Output: %~dp0%RELEASE_DIR%
+echo   Zip:    %~dp0%RELEASE_ZIP%
 echo ============================================
 echo.
 echo Release folder:
 echo   %RELEASE_DIR%\
 echo     ZeroShadow.exe     - Backend executable
 echo     web\dist\          - Frontend static files
-echo     data\              - Runtime data folder
+echo     .env.example       - Config template (copy to .env on first run)
+echo     data\              - Empty runtime data folder
+echo.
+echo IMPORTANT: .env is generated automatically on first run, in the same
+echo            folder as ZeroShadow.exe. Never ship a .env file.
 echo.
 pause

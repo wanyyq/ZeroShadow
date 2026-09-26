@@ -46,6 +46,7 @@ export async function getStatus() {
     hostname: os.hostname(),
     port: env.port,
     host: env.host,
+    trustProxy: env.trustProxy,
     lan: lanAddresses(),
     memory: {
       rss: mem.rss,

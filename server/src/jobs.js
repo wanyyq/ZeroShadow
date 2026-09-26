@@ -79,6 +79,12 @@ export function jobStatus(id) {
   return { id, state, type, label, percent, processed, total, processedBytes, totalBytes, error, count }
 }
 
+/** 任务创建者；任务不存在时返回 undefined（用于归属校验） */
+export function jobCreatedBy(id) {
+  const job = jobs.get(id)
+  return job ? job.createdBy : undefined
+}
+
 export async function consumeJobFile(id) {
   const job = jobs.get(id)
   if (!job) return null

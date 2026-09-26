@@ -432,7 +432,9 @@ export function PreviewDialog({
               </div>
             )}
             {kind === "pdf" && <iframe src={url} title={name} className="h-full w-full" />}
-            {isHtmlFile && <iframe src={url} title={name} className="h-full w-full" sandbox="allow-scripts allow-same-origin" />}
+            {/* 预览 HTML 时必须去掉 allow-same-origin：与 allow-scripts 同时出现的
+                组合等同无沙箱，被预览页面可反过来操作父页面与本站接口。 */}
+            {isHtmlFile && <iframe src={url} title={name} className="h-full w-full" sandbox="allow-scripts" />}
             {kind === "text" && (
               <ScrollArea className="h-full w-full bg-muted/30">
                 <pre className="p-4 font-mono text-xs whitespace-pre-wrap">{text ?? "加载中…"}</pre>

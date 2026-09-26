@@ -11,8 +11,24 @@ const DEFAULTS = {
   zipMaxSingleMB: 50,
   zipMaxTotalMB: 128,
   extractMaxZipMB: 128,
+  extractMaxTotalMB: 512,
+  downloadUrlMaxMB: 4096,
+  // ===== 安全开关（后台可调，默认均为较安全的取值）=====
+  // 单 IP 每分钟可执行的"重型操作"次数（打包/解压/搜索/详情/链接下载）
+  rateLimitEnabled: true,
+  rateLimitPerMin: 120,
+  // 只读外部映射目录的内容是否允许复制/压缩进网盘主目录
+  softDirAllowCopyOut: false,
+  // 作业进度是否只有创建者（与超管）可查询
+  jobStatusOwnerOnly: true,
+  // 链接下载是否允许访问内网地址（等效于环境变量 DOWNLOAD_URL_ALLOW_PRIVATE）
+  downloadUrlAllowPrivate: false,
+  // 写操作是否校验来源（Origin / Sec-Fetch-Site）；若反向代理会改写 Host 头
+  // 导致误拦，可在后台关闭（仍保留自定义请求头校验）
+  csrfOriginCheck: true,
   memberPerms: {
     fileWrite: true,
+    browse: true,
     upload: true,
     uploadFolders: true,
     downloadFile: true,
@@ -32,6 +48,7 @@ const DEFAULTS = {
     changePassword: true,
   },
   guestPerms: {
+    browse: true,
     downloadFile: true,
     downloadFolder: true,
     preview: true,
@@ -97,6 +114,7 @@ export function effectivePerms(role) {
   if (role === "superadmin") {
     return {
       fileWrite: true,
+      browse: true,
       upload: true,
       uploadFolders: true,
       downloadFile: true,
@@ -122,6 +140,7 @@ export function effectivePerms(role) {
     const fw = !!p.fileWrite
     return {
       fileWrite: fw,
+      browse: !!p.browse,
       upload: fw && !!p.upload,
       uploadFolders: fw && !!p.uploadFolders,
       downloadFile: legacyDownload(p),
@@ -145,6 +164,7 @@ export function effectivePerms(role) {
   const g = config.guestPerms
   return {
     fileWrite: false,
+    browse: !!g.browse,
     upload: false,
     uploadFolders: false,
     downloadFile: legacyDownload(g),
@@ -183,5 +203,12 @@ export function zipLimits() {
     maxSingleBytes: (config.zipMaxSingleMB ?? 50) * 1024 * 1024,
     maxTotalBytes: (config.zipMaxTotalMB ?? 128) * 1024 * 1024,
     extractMaxBytes: (config.extractMaxZipMB ?? 128) * 1024 * 1024,
+    extractMaxTotalBytes: (config.extractMaxTotalMB ?? 512) * 1024 * 1024,
   }
+}
+
+/** 链接下载工具的单个文件体积上限（默认 4096MB，可在后台调整） */
+export function downloadUrlLimitBytes() {
+  const mb = config.downloadUrlMaxMB ?? 4096
+  return mb > 0 ? mb * 1024 * 1024 : 0
 }

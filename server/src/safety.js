@@ -29,13 +29,17 @@ export function resolveSafe(input = "") {
 
 export function resolveAny(rel) {
   const first = rel.split("/")[0]
-  const softDirAbs = SOFT_DIRS[first]
+  // SOFT_DIRS 是无原型对象（见 env.js），因此这里不会命中 constructor/toString
+  // 之类的继承属性；再做一次类型校验作为双保险
+  const softDirAbs = typeof SOFT_DIRS[first] === "string" ? SOFT_DIRS[first] : null
   if (softDirAbs) {
+    const base = path.resolve(softDirAbs)
     const sub = rel.slice(first.length)
     const subRel = sub.startsWith("/") ? sub.slice(1) : sub
-    const resolved = subRel ? path.resolve(softDirAbs, subRel) : softDirAbs
-    if (!resolved.startsWith(softDirAbs) && resolved !== softDirAbs) throw badPath()
-    return { abs: resolved, rel, isSoft: true, softName: first, softBase: softDirAbs }
+    const resolved = subRel ? path.resolve(base, subRel) : base
+    // 必须按路径分隔符判断边界，否则 "D:\soft" 会误认为 "D:\soft-secret" 在内部
+    if (resolved !== base && !resolved.startsWith(base + path.sep)) throw badPath()
+    return { abs: resolved, rel, isSoft: true, softName: first, softBase: base }
   }
   const abs = rel ? path.join(FILES_DIR, ...rel.split("/")) : FILES_DIR
   const resolved = path.resolve(abs)
@@ -100,19 +104,26 @@ function comparable(rel) {
   return CASE_INSENSITIVE ? rel.toLowerCase() : rel
 }
 
+/** 路径比较：Windows/macOS 下不区分大小写，与访客可见性判定保持一致 */
+export function samePath(a, b) {
+  return comparable(String(a)) === comparable(String(b))
+}
+
+/** target 是否等于 base 或位于 base 之内（用于清理被删除/移动的隐藏项） */
+export function isSameOrInside(target, base) {
+  const t = comparable(String(target))
+  const b = comparable(String(base))
+  return t === b || t.startsWith(b + "/")
+}
+
 export function isHiddenFromGuest(rel) {
   const hidden = getConfig().guestHiddenPaths
   if (!hidden.length) return false
-  const target = comparable(rel)
-  return hidden.some((h) => {
-    const hc = comparable(h)
-    return target === hc || target.startsWith(hc + "/")
-  })
+  return hidden.some((h) => isSameOrInside(rel, h))
 }
 
 export function isExactHidden(rel) {
-  const target = comparable(rel)
-  return getConfig().guestHiddenPaths.some((h) => comparable(h) === target)
+  return getConfig().guestHiddenPaths.some((h) => samePath(h, rel))
 }
 
 export function guestBlocked(req, rel) {

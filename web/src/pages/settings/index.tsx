@@ -47,6 +47,7 @@ export function SettingsPage() {
                     <TabsTrigger value="logs"><Icon name="scroll-text" /> 日志</TabsTrigger>
                     <TabsTrigger value="members"><Icon name="users" /> 成员</TabsTrigger>
                     <TabsTrigger value="perms"><Icon name="shield-check" /> 权限</TabsTrigger>
+                    <TabsTrigger value="security"><Icon name="lock" /> 安全</TabsTrigger>
                     <TabsTrigger value="tunnel"><Icon name="globe" /> 公网</TabsTrigger>
                   </>
                 )}
@@ -58,6 +59,7 @@ export function SettingsPage() {
                   <TabsContent value="logs"><LogsSection /></TabsContent>
                   <TabsContent value="members"><MembersSection /></TabsContent>
                   <TabsContent value="perms"><PermsSection /></TabsContent>
+                  <TabsContent value="security"><SecuritySection /></TabsContent>
                   <TabsContent value="tunnel"><TunnelSection /></TabsContent>
                 </>
               )}
@@ -467,6 +469,7 @@ function PermsSection() {
   const [zipMaxSingle, setZipMaxSingle] = React.useState("")
   const [zipMaxTotal, setZipMaxTotal] = React.useState("")
   const [extractMax, setExtractMax] = React.useState("")
+  const [downloadMax, setDownloadMax] = React.useState("")
 
   const load = React.useCallback(() => {
     api.get<AdminConfig>("/admin/config").then((c) => {
@@ -477,6 +480,7 @@ function PermsSection() {
       setZipMaxSingle(String(c.zipMaxSingleMB ?? 50))
       setZipMaxTotal(String(c.zipMaxTotalMB ?? 128))
       setExtractMax(String(c.extractMaxZipMB ?? 128))
+      setDownloadMax(String(c.downloadUrlMaxMB ?? 4096))
     }).catch((e) => toast.error((e as Error).message))
   }, [])
   React.useEffect(load, [load])
@@ -491,6 +495,7 @@ function PermsSection() {
       setZipMaxSingle(String(next.zipMaxSingleMB ?? 50))
       setZipMaxTotal(String(next.zipMaxTotalMB ?? 128))
       setExtractMax(String(next.extractMaxZipMB ?? 128))
+      setDownloadMax(String(next.downloadUrlMaxMB ?? 4096))
       if (msg) toast.success(msg)
     } catch (e) { toast.error((e as Error).message) }
   }
@@ -554,6 +559,19 @@ function PermsSection() {
 
       <Separator className="mb-5" />
 
+      {/* ===== 链接下载工具（按 URL 抓取）===== */}
+      <h3 className="mb-3 text-sm font-medium">链接下载工具限制（单个文件 MB）</h3>
+      <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:gap-4">
+        <div className="flex items-center gap-2">
+          <span className="w-28 shrink-0 text-sm text-muted-foreground">单个文件最大</span>
+          <Input className="w-24 text-right" inputMode="numeric" value={downloadMax} onChange={(e) => setDownloadMax(e.target.value)} />
+          <span className="text-xs text-muted-foreground">MB</span>
+        </div>
+        <Button size="sm" onClick={() => patch({ downloadUrlMaxMB: Number(downloadMax) }, "下载限制已更新")}>保存</Button>
+      </div>
+
+      <Separator className="mb-5" />
+
       {/* ===== 团队成员权限 ===== */}
       <h3 className="mb-4 text-sm font-medium">团队成员权限</h3>
 
@@ -580,6 +598,7 @@ function PermsSection() {
       <div className="mb-4">
         <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">下载与预览</h4>
         <div className="grid gap-px sm:grid-cols-2">
+          {permItem("浏览目录", m.browse, (v) => patch({ memberPerms: { browse: !!v } }))}
           {permItem("下载文件", m.downloadFile, (v) => patch({ memberPerms: { downloadFile: !!v } }))}
           {permItem("下载文件夹", m.downloadFolder, (v) => patch({ memberPerms: { downloadFolder: !!v } }))}
           {permItem("允许预览", m.preview, (v) => patch({ memberPerms: { preview: !!v } }))}
@@ -612,6 +631,7 @@ function PermsSection() {
       {/* ===== 访客权限 ===== */}
       <h3 className="mb-4 text-sm font-medium">访客权限</h3>
       <div className="mb-4 grid gap-px sm:grid-cols-2">
+        {permItem("浏览目录", g.browse, (v) => patch({ guestPerms: { browse: !!v } }))}
         {permItem("下载文件", g.downloadFile, (v) => patch({ guestPerms: { downloadFile: !!v } }))}
         {permItem("下载文件夹", g.downloadFolder, (v) => patch({ guestPerms: { downloadFolder: !!v } }))}
         {permItem("允许预览", g.preview, (v) => patch({ guestPerms: { preview: !!v } }))}
@@ -647,6 +667,130 @@ function permItem(label: string, checked: boolean, onChange: (v: boolean) => voi
     <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/30">
       <span className="text-sm">{label}</span>
       <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
+/* ==================== 安全 ==================== */
+function SecuritySection() {
+  const [config, setConfig] = React.useState<AdminConfig | null>(null)
+  const [status, setStatus] = React.useState<ServerStatus | null>(null)
+  const [ratePerMin, setRatePerMin] = React.useState("")
+  const [extractTotal, setExtractTotal] = React.useState("")
+
+  const load = React.useCallback(() => {
+    api.get<AdminConfig>("/admin/config").then((c) => {
+      setConfig(c)
+      setRatePerMin(String(c.rateLimitPerMin ?? 120))
+      setExtractTotal(String(c.extractMaxTotalMB ?? 512))
+    }).catch((e) => toast.error((e as Error).message))
+    api.get<ServerStatus>("/admin/status").then(setStatus).catch(() => { /* 状态可缺省 */ })
+  }, [])
+  React.useEffect(load, [load])
+
+  const patch = async (body: Record<string, unknown>, msg?: string) => {
+    try {
+      const next = await api.patch<AdminConfig>("/admin/config", body)
+      setConfig(next)
+      setRatePerMin(String(next.rateLimitPerMin ?? 120))
+      setExtractTotal(String(next.extractMaxTotalMB ?? 512))
+      if (msg) toast.success(msg)
+    } catch (e) { toast.error((e as Error).message) }
+  }
+
+  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+
+  const trustProxy = status?.trustProxy
+  const ipMode = trustProxy === undefined
+    ? "未知"
+    : trustProxy === false
+      ? "直连（不信任代理头）"
+      : `信任代理头 ${Array.isArray(trustProxy) ? trustProxy.join(", ") : String(trustProxy)}`
+
+  return (
+    <div className="grid gap-5">
+      {/* 接口限流 */}
+      <div className="edge-highlight rounded-xl border border-border bg-card p-5">
+        <h3 className="mb-1 text-sm font-medium">接口限流</h3>
+        <p className="mb-4 text-xs text-muted-foreground">
+          限制单个 IP 每分钟可执行的打包、解压、搜索、查看详情、链接下载次数，防止被刷满 CPU 与磁盘。普通浏览目录与单文件下载不受影响。
+        </p>
+        <div className="mb-4 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+          <span className="text-sm font-medium">开启限流</span>
+          <Switch checked={config.rateLimitEnabled} onCheckedChange={(v) => patch({ rateLimitEnabled: !!v })} />
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-24 shrink-0 text-sm text-muted-foreground">每分钟上限</span>
+            <Input className="w-24 text-right" inputMode="numeric" value={ratePerMin} onChange={(e) => setRatePerMin(e.target.value)} />
+            <span className="text-xs text-muted-foreground">次</span>
+          </div>
+          <Button size="sm" onClick={() => patch({ rateLimitPerMin: Number(ratePerMin) }, "限流设置已更新")}>保存</Button>
+        </div>
+      </div>
+
+      {/* 解压保护 */}
+      <div className="edge-highlight rounded-xl border border-border bg-card p-5">
+        <h3 className="mb-1 text-sm font-medium">解压保护</h3>
+        <p className="mb-4 text-xs text-muted-foreground">
+          限制 ZIP 解压后的总大小；超出时会中止解压并清理已写出的内容，避免用小压缩包占满磁盘。
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-24 shrink-0 text-sm text-muted-foreground">解压总量最大</span>
+            <Input className="w-24 text-right" inputMode="numeric" value={extractTotal} onChange={(e) => setExtractTotal(e.target.value)} />
+            <span className="text-xs text-muted-foreground">MB</span>
+          </div>
+          <Button size="sm" onClick={() => patch({ extractMaxTotalMB: Number(extractTotal) }, "解压上限已更新")}>保存</Button>
+        </div>
+      </div>
+
+      {/* 其他开关 */}
+      <div className="edge-highlight rounded-xl border border-border bg-card p-5">
+        <h3 className="mb-4 text-sm font-medium">其他安全开关</h3>
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">允许复制只读映射目录的内容</p>
+              <p className="text-xs text-muted-foreground">关闭时，外部映射目录（只读虚拟文件夹）的内容不能复制或压缩进网盘目录</p>
+            </div>
+            <Switch checked={config.softDirAllowCopyOut} onCheckedChange={(v) => patch({ softDirAllowCopyOut: !!v })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">作业进度仅创建者可见</p>
+              <p className="text-xs text-muted-foreground">关闭后，团队成员之间可以互相查看压缩 / 解压 / 链接下载任务的文件名与进度</p>
+            </div>
+            <Switch checked={config.jobStatusOwnerOnly} onCheckedChange={(v) => patch({ jobStatusOwnerOnly: !!v })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">链接下载允许访问内网地址</p>
+              <p className="text-xs text-muted-foreground">关闭时禁止用链接下载工具抓取内网 / 回环 / 云元数据地址（防 SSRF）</p>
+            </div>
+            <Switch checked={config.downloadUrlAllowPrivate} onCheckedChange={(v) => patch({ downloadUrlAllowPrivate: !!v })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">写操作校验请求来源</p>
+              <p className="text-xs text-muted-foreground">拒绝来自其他站点的写请求（校验 Origin / Sec-Fetch-Site）。若反向代理改写了 Host 头造成误拦，可在此关闭</p>
+            </div>
+            <Switch checked={config.csrfOriginCheck} onCheckedChange={(v) => patch({ csrfOriginCheck: !!v })} />
+          </div>
+        </div>
+      </div>
+      <div className="edge-highlight rounded-xl border border-border bg-card p-5">
+        <h3 className="mb-3 text-sm font-medium">客户端 IP 解析</h3>
+        <div className="flex items-center gap-2">
+          <Badge variant={trustProxy === undefined || trustProxy === false ? "secondary" : "default"} className="shrink-0 text-[10px]">{ipMode}</Badge>
+          <span className="text-xs text-muted-foreground">用于日志记录与按 IP 限速</span>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          由服务端 .env 中的 <code className="font-mono">TRUST_PROXY</code> 决定，修改后需重启服务。
+          只通过隧道 / 反向代理访问时设为 <code className="font-mono">loopback</code>，日志与限流才会使用真实客户端 IP；
+          若服务同时能被直接访问，请保持关闭（默认），否则客户端可伪造该标头绕过限速。
+        </p>
+      </div>
     </div>
   )
 }

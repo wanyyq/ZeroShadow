@@ -5,7 +5,7 @@ import cookieParser from "cookie-parser"
 import { env, FILES_DIR, NOLOG, SOFT_DIR_NAMES, TMP_DIR, WEB_DIST } from "./src/env.js"
 import { attachAuth, csrfGuard } from "./src/auth.js"
 import { getConfig } from "./src/config.js"
-import { error as logError, info } from "./src/logger.js"
+import { error as logError, info, warn } from "./src/logger.js"
 import { applyTunnelConfig, stopTunnel } from "./src/tunnel.js"
 import { lanAddresses } from "./src/status.js"
 import authRoutes from "./src/routes/auth.js"
@@ -23,6 +23,13 @@ for (const name of fs.readdirSync(TMP_DIR)) {
 const app = express()
 app.disable("x-powered-by")
 
+// 反向代理 / SSH 隧道场景下取真实客户端 IP。默认不信任代理头（与旧行为一致）：
+// 只有确认服务只经可信代理暴露时才设置 TRUST_PROXY，否则客户端可伪造
+// X-Forwarded-For 绕过 IP 限速、污染日志。
+if (env.trustProxy !== false) {
+  app.set("trust proxy", env.trustProxy)
+}
+
 // 健康检查：最简裸响应，验证隧道代理可达
 app.get("/ping", (_req, res) => {
   res.setHeader("Content-Type", "text/plain; charset=utf-8")
@@ -32,7 +39,7 @@ app.get("/ping", (_req, res) => {
 // 请求日志：诊断隧道请求（-nolog 时只写文件不打印到控制台）
 app.use((req, _res, next) => {
   if (!NOLOG && req.path !== "/favicon.ico" && req.path !== "/resources/lucide.min.js") {
-    console.log(`[REQ] ${req.method} ${req.path} host=${req.headers.host} ua=${(req.headers["user-agent"] || "").slice(0, 40)}`)
+    console.log(`[REQ] ${req.method} ${req.path} host=${req.headers.host} ip=${req.ip} ua=${(req.headers["user-agent"] || "").slice(0, 40)}`)
   }
   next()
 })
@@ -41,6 +48,8 @@ app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff")
   res.setHeader("X-Frame-Options", "SAMEORIGIN")
   res.setHeader("Referrer-Policy", "no-referrer")
+  // 网盘不需要摄像头/麦克风/定位等能力，一律关闭（不影响剪贴板复制等既有功能）
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()")
   next()
 })
 
@@ -68,11 +77,32 @@ app.use("/api", (_req, res) => {
   res.status(404).json({ error: "接口不存在" })
 })
 
+// 应用外壳的 CSP：脚本只允许同源文件（构建产物 index.html 无内联脚本），样式
+// 保留 inline 以兼容 UI 库注入的 <style>；允许本站把预览页放进 iframe。
+// 注意：这里只作用于前端文档，/api 响应不受影响（上传内容走 fs.js 里独立的
+// sandbox 策略）。
+const SHELL_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join("; ")
+
 if (fs.existsSync(WEB_DIST)) {
   app.use(
     express.static(WEB_DIST, {
       index: false,
       setHeaders(res, filePath) {
+        if (filePath.toLowerCase().endsWith(".html")) {
+          res.setHeader("Content-Security-Policy", SHELL_CSP)
+        }
         if (filePath.includes(`${path.sep}assets${path.sep}`)) {
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable")
         } else if (filePath.includes(`${path.sep}resources${path.sep}`)) {
@@ -86,6 +116,7 @@ if (fs.existsSync(WEB_DIST)) {
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next()
     res.setHeader("Cache-Control", "no-cache")
+    res.setHeader("Content-Security-Policy", SHELL_CSP)
     res.sendFile(path.join(WEB_DIST, "index.html"))
   })
 } else {
@@ -116,8 +147,24 @@ const server = app.listen(env.port, env.host, () => {
       console.log(`  局域网访问: http://${addr}:${env.port}`)
     }
     console.log(`  文件目录:   ${FILES_DIR}`)
+    if (env.trustProxy === false) {
+      console.log("  客户端 IP:  直连（不信任代理头）")
+    } else {
+      const shown = typeof env.trustProxy === "string" ? env.trustProxy : String(env.trustProxy)
+      console.log(`  客户端 IP:  信任代理头 ${shown}`)
+      info("trust_proxy", { msg: `信任代理头: ${shown}` })
+    }
     if (SOFT_DIR_NAMES.length) {
       console.log(`  外部映射:   ${SOFT_DIR_NAMES.join(", ")}（只读）`)
+    }
+    // 放宽了 SSRF 防护时显式提醒，避免"以为还拦着内网"
+    const relaxed = []
+    const TRUE_RE = /^(1|true|yes|on)$/i
+    if (TRUE_RE.test(String(process.env.DOWNLOAD_URL_ALLOW_PRIVATE || "").trim())) relaxed.push("允许链接下载访问内网地址")
+    if (TRUE_RE.test(String(process.env.DOWNLOAD_URL_INSECURE_TLS || "").trim())) relaxed.push("跳过下载时的 TLS 证书校验")
+    if (relaxed.length) {
+      console.log(`  [注意] 链接下载工具已放宽限制: ${relaxed.join("、")}`)
+      warn("download_url_relaxed", { msg: relaxed.join("、") })
     }
     if (env.generatedPassword) {
       console.log("")

@@ -27,7 +27,10 @@ export default function PreviewPage() {
   const entryPath = params.get("path") || ""
   const name = entryPath.split("/").pop() || ""
   const ext = (name.split(".").pop() || "").toLowerCase()
-  const kind: string = EXT_KIND[ext] || "text"
+  // HTML 正常走 /html-preview 专用路由；若因权限被路由到这里，按文本预览，
+  // 否则没有任何分支匹配会得到空白页
+  const mappedKind = EXT_KIND[ext] || "text"
+  const kind: string = mappedKind === "html" ? "text" : mappedKind
   const url = entryPath ? downloadUrl(entryPath, true) : ""
   const [text, setText] = React.useState<string | null>(null)
   const [scale, setScale] = React.useState(0)

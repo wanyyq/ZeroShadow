@@ -1290,8 +1290,8 @@ var require_node = __commonJS({
           break;
         case "PIPE":
         case "TCP":
-          var net = require("net");
-          stream2 = new net.Socket({
+          var net2 = require("net");
+          stream2 = new net2.Socket({
             fd: fd2,
             readable: false,
             writable: true
@@ -63682,6 +63682,12 @@ var ENV_FILE = import_node_path.default.join(ROOT_DIR, ".env");
 function randomPassword() {
   return import_node_crypto.default.randomBytes(12).toString("base64url");
 }
+function restrictFileMode(file, mode = 384) {
+  try {
+    import_node_fs.default.chmodSync(file, mode);
+  } catch {
+  }
+}
 function envTemplate(password) {
   return [
     "# ===== ZeroShadow \u670D\u52A1\u914D\u7F6E =====",
@@ -63695,11 +63701,23 @@ function envTemplate(password) {
     "# \u767B\u5F55\u4F1A\u8BDD\u6709\u6548\u671F\uFF08\u5C0F\u65F6\uFF09",
     "SESSION_HOURS=72",
     "",
+    "# \u53CD\u5411\u4EE3\u7406 / SSH \u96A7\u9053\u573A\u666F\u4E0B\u53D6\u771F\u5B9E\u5BA2\u6237\u7AEF IP\uFF08\u9ED8\u8BA4\u5173\u95ED\uFF0C\u4FDD\u6301\u76F4\u8FDE\u884C\u4E3A\uFF09\u3002",
+    "# \u53EA\u6709\u670D\u52A1**\u4EC5**\u7ECF\u53EF\u4FE1\u4EE3\u7406\u66B4\u9732\u65F6\u624D\u5F00\u542F\uFF0C\u4F8B\u5982\u53EA\u901A\u8FC7 SSH \u96A7\u9053\u8BBF\u95EE\uFF1A",
+    "# TRUST_PROXY=loopback",
+    "# \u4E5F\u53EF\u586B\u8DF3\u6570\uFF08\u5982 1\uFF09\u6216\u7F51\u6BB5\uFF08\u5982 10.0.0.0/8\uFF09\u3002",
+    "# \u63D0\u9192\uFF1A\u5F00\u542F\u540E X-Forwarded-For \u53EF\u88AB\u4F2A\u9020\uFF0C\u82E5\u670D\u52A1\u540C\u65F6\u80FD\u88AB\u76F4\u8FDE\u8BBF\u95EE\u5C31\u4E0D\u8981\u5F00\u542F\u3002",
+    "",
     "# \u7F51\u76D8\u6587\u4EF6\u6839\u76EE\u5F55\uFF08\u7559\u7A7A\u5219\u4F7F\u7528 ./data/files\uFF09",
     "# FILES_DIR=D:\\ZeroShadowFiles",
     "",
     "# \u5916\u90E8\u6620\u5C04\u76EE\u5F55\uFF08\u53EA\u8BFB\u865A\u62DF\u6587\u4EF6\u5939\uFF09JSON \u683C\u5F0F\uFF1A\u5C06\u670D\u52A1\u5668\u5176\u4ED6\u8DEF\u5F84\u6620\u5C04\u4E3A\u7F51\u76D8\u6839\u76EE\u5F55\u53EA\u8BFB\u6587\u4EF6\u5939",
     '# FILES_SOFT_DIR={"\u8F6F\u4EF6\u6587\u4EF6\u5939":"./","\u5DE5\u4F5C\u76EE\u5F55":"D:/Program/xxx/xxx"}',
+    "",
+    "# ===== \u94FE\u63A5\u4E0B\u8F7D\u5DE5\u5177\uFF08download-url\uFF09\u5B89\u5168\u5F00\u5173 =====",
+    "# \u9ED8\u8BA4\u7981\u6B62\u4E0B\u8F7D\u5185\u7F51 / \u56DE\u73AF / \u94FE\u8DEF\u672C\u5730\u5730\u5740\uFF08\u9632 SSRF\uFF09\u3002\u786E\u6709\u9700\u8981\u518D\u663E\u5F0F\u653E\u5F00\uFF1A",
+    "# DOWNLOAD_URL_ALLOW_PRIVATE=1                       \u653E\u5F00\u5168\u90E8\u5185\u7F51\u5730\u5740\uFF08\u8C28\u614E\uFF09",
+    "# DOWNLOAD_URL_ALLOW_HOSTS=nas.local,192.168.1.10    \u4EC5\u653E\u5F00\u6307\u5B9A\u4E3B\u673A",
+    "# DOWNLOAD_URL_INSECURE_TLS=1                        \u8DF3\u8FC7 TLS \u8BC1\u4E66\u6821\u9A8C\uFF08\u4E0D\u63A8\u8350\uFF09",
     ""
   ].join("\n");
 }
@@ -63707,6 +63725,7 @@ var generatedPassword = null;
 if (!import_node_fs.default.existsSync(ENV_FILE)) {
   generatedPassword = randomPassword();
   import_node_fs.default.writeFileSync(ENV_FILE, envTemplate(generatedPassword), "utf8");
+  restrictFileMode(ENV_FILE);
 }
 try {
   const raw = import_node_fs.default.readFileSync(ENV_FILE, "utf8");
@@ -63728,6 +63747,15 @@ function toInt(value, fallback) {
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
+function parseTrustProxy(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value || /^(0|false|no|off)$/i.test(value)) return false;
+  if (/^(1|true|yes|on)$/i.test(value)) return true;
+  if (/^\d+$/.test(value)) return Number(value);
+  if (/^(loopback|linklocal|uniquelocal)$/i.test(value)) return value.toLowerCase();
+  const list = value.split(",").map((item) => item.trim()).filter(Boolean);
+  return list.length ? list : true;
+}
 var superPassword = (process.env.SUPER_ADMIN_PASSWORD || "").trim();
 if (!superPassword || superPassword === "change-me") {
   generatedPassword = generatedPassword || randomPassword();
@@ -63742,6 +63770,7 @@ SUPER_ADMIN_PASSWORD=${superPassword}
 `;
     }
     import_node_fs.default.writeFileSync(ENV_FILE, content, "utf8");
+    restrictFileMode(ENV_FILE);
   } catch {
   }
 }
@@ -63751,37 +63780,39 @@ var env2 = {
   superUser: (process.env.SUPER_ADMIN_USER || "admin").trim(),
   superPassword,
   sessionHours: clamp(toInt(process.env.SESSION_HOURS, 72), 1, 24 * 365),
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   generatedPassword
 };
 var DATA_DIR = import_node_path.default.join(ROOT_DIR, "data");
 var FILES_DIR = process.env.FILES_DIR?.trim() ? import_node_path.default.resolve(process.env.FILES_DIR.trim()) : import_node_path.default.join(DATA_DIR, "files");
-var softDirs = {};
+var softDirs = /* @__PURE__ */ Object.create(null);
 try {
   const raw = (process.env.FILES_SOFT_DIR || "").trim();
   if (raw) {
-    const safe = raw.replace(/\\/g, "/");
-    softDirs = JSON.parse(safe);
-    if (typeof softDirs !== "object" || softDirs === null || Array.isArray(softDirs)) {
-      softDirs = {};
-    }
-    for (const [name, target] of Object.entries(softDirs)) {
-      if (typeof target !== "string") {
-        softDirs = {};
-        break;
+    const parsed = JSON.parse(raw.replace(/\\/g, "/"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      const next = /* @__PURE__ */ Object.create(null);
+      let valid = true;
+      for (const [name, target] of Object.entries(parsed)) {
+        if (typeof target !== "string") {
+          valid = false;
+          break;
+        }
+        if (!/^[\w\u4e00-\u9fff\u3400-\u4dbf.-]{1,100}$/.test(name)) {
+          valid = false;
+          break;
+        }
+        if (name === "." || name === "..") {
+          valid = false;
+          break;
+        }
+        next[name] = import_node_path.default.resolve(target);
       }
-      if (!/^[\w\u4e00-\u9fff\u3400-\u4dbf.-]{1,100}$/.test(name)) {
-        softDirs = {};
-        break;
-      }
-      if (name === "." || name === "..") {
-        softDirs = {};
-        break;
-      }
-      softDirs[name] = import_node_path.default.resolve(target);
+      if (valid) softDirs = next;
     }
   }
 } catch {
-  softDirs = {};
+  softDirs = /* @__PURE__ */ Object.create(null);
 }
 var SOFT_DIRS = softDirs;
 var SOFT_DIR_NAMES = Object.keys(softDirs);
@@ -63800,6 +63831,7 @@ function loadSecret() {
   }
   const secret = import_node_crypto.default.randomBytes(48).toString("hex");
   import_node_fs.default.writeFileSync(SECRET_FILE, secret, "utf8");
+  restrictFileMode(SECRET_FILE);
   return secret;
 }
 var NOLOG = process.argv.includes("-nolog") || /^(true|1|yes)$/i.test(String(process.env.NOLOG || ""));
@@ -63842,6 +63874,7 @@ async function writeJsonAtomic(file, value) {
     await import_node_fs2.default.promises.rm(file, { force: true });
     await import_node_fs2.default.promises.rename(tmp, file);
   }
+  restrictFileMode(file);
 }
 
 // src/config.js
@@ -63853,8 +63886,24 @@ var DEFAULTS = {
   zipMaxSingleMB: 50,
   zipMaxTotalMB: 128,
   extractMaxZipMB: 128,
+  extractMaxTotalMB: 512,
+  downloadUrlMaxMB: 4096,
+  // ===== 安全开关（后台可调，默认均为较安全的取值）=====
+  // 单 IP 每分钟可执行的"重型操作"次数（打包/解压/搜索/详情/链接下载）
+  rateLimitEnabled: true,
+  rateLimitPerMin: 120,
+  // 只读外部映射目录的内容是否允许复制/压缩进网盘主目录
+  softDirAllowCopyOut: false,
+  // 作业进度是否只有创建者（与超管）可查询
+  jobStatusOwnerOnly: true,
+  // 链接下载是否允许访问内网地址（等效于环境变量 DOWNLOAD_URL_ALLOW_PRIVATE）
+  downloadUrlAllowPrivate: false,
+  // 写操作是否校验来源（Origin / Sec-Fetch-Site）；若反向代理会改写 Host 头
+  // 导致误拦，可在后台关闭（仍保留自定义请求头校验）
+  csrfOriginCheck: true,
   memberPerms: {
     fileWrite: true,
+    browse: true,
     upload: true,
     uploadFolders: true,
     downloadFile: true,
@@ -63874,6 +63923,7 @@ var DEFAULTS = {
     changePassword: true
   },
   guestPerms: {
+    browse: true,
     downloadFile: true,
     downloadFolder: true,
     preview: true,
@@ -63931,6 +63981,7 @@ function effectivePerms(role) {
   if (role === "superadmin") {
     return {
       fileWrite: true,
+      browse: true,
       upload: true,
       uploadFolders: true,
       downloadFile: true,
@@ -63956,6 +64007,7 @@ function effectivePerms(role) {
     const fw = !!p.fileWrite;
     return {
       fileWrite: fw,
+      browse: !!p.browse,
       upload: fw && !!p.upload,
       uploadFolders: fw && !!p.uploadFolders,
       downloadFile: legacyDownload(p),
@@ -63979,6 +64031,7 @@ function effectivePerms(role) {
   const g = config.guestPerms;
   return {
     fileWrite: false,
+    browse: !!g.browse,
     upload: false,
     uploadFolders: false,
     downloadFile: legacyDownload(g),
@@ -64013,8 +64066,13 @@ function zipLimits() {
     maxFiles: config.zipMaxFiles ?? 100,
     maxSingleBytes: (config.zipMaxSingleMB ?? 50) * 1024 * 1024,
     maxTotalBytes: (config.zipMaxTotalMB ?? 128) * 1024 * 1024,
-    extractMaxBytes: (config.extractMaxZipMB ?? 128) * 1024 * 1024
+    extractMaxBytes: (config.extractMaxZipMB ?? 128) * 1024 * 1024,
+    extractMaxTotalBytes: (config.extractMaxTotalMB ?? 512) * 1024 * 1024
   };
+}
+function downloadUrlLimitBytes() {
+  const mb = config.downloadUrlMaxMB ?? 4096;
+  return mb > 0 ? mb * 1024 * 1024 : 0;
 }
 
 // src/users.js
@@ -65977,6 +66035,25 @@ function csrfGuard(req, res, next) {
   if (req.headers["x-requested-with"] !== "XMLHttpRequest") {
     return res.status(403).json({ error: "\u8BF7\u6C42\u6821\u9A8C\u5931\u8D25" });
   }
+  if (getConfig().csrfOriginCheck !== false) {
+    const fetchSite = req.headers["sec-fetch-site"];
+    if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+      return res.status(403).json({ error: "\u8BF7\u6C42\u6821\u9A8C\u5931\u8D25" });
+    }
+    const origin = req.headers.origin;
+    if (origin) {
+      const host = req.headers.host;
+      let originHost = null;
+      try {
+        originHost = new URL(origin).host;
+      } catch {
+        originHost = null;
+      }
+      if (!originHost || originHost !== host) {
+        return res.status(403).json({ error: "\u8BF7\u6C42\u6821\u9A8C\u5931\u8D25" });
+      }
+    }
+  }
   next();
 }
 function requireRole(...roles) {
@@ -65999,16 +66076,24 @@ function requirePerm(perm) {
   };
 }
 var WINDOW_MS = 15 * 60 * 1e3;
-var LOCK_MS = 15 * 60 * 1e3;
 var IP_MAX_FAILS = 30;
+var IP_LOCK_MS = 15 * 60 * 1e3;
 var USER_MAX_FAILS = 10;
+var USER_LOCK_MS = 5 * 60 * 1e3;
+var USER_LOCK_MAX_MS = 30 * 60 * 1e3;
+var STRIKE_WINDOW_MS = 60 * 60 * 1e3;
 var attempts = /* @__PURE__ */ new Map();
 function bucket(key) {
-  let b = attempts.get(key);
   const now2 = Date.now();
-  if (!b || now2 - b.first > WINDOW_MS) {
-    b = { count: 0, first: now2, lockedUntil: 0 };
+  let b = attempts.get(key);
+  if (!b) {
+    b = { count: 0, first: now2, lockedUntil: 0, strikes: 0, lastStrikeAt: 0 };
     attempts.set(key, b);
+    return b;
+  }
+  if (now2 - b.first > WINDOW_MS) {
+    b.count = 0;
+    b.first = now2;
   }
   return b;
 }
@@ -66022,25 +66107,35 @@ function loginLocked(ip, username) {
   return 0;
 }
 function recordLoginFail(ip, username) {
+  const now2 = Date.now();
   const byIp = bucket(`ip:${ip}`);
   const byUser = bucket(`user:${String(username).toLowerCase()}`);
   byIp.count += 1;
   byUser.count += 1;
-  if (byIp.count >= IP_MAX_FAILS) byIp.lockedUntil = Date.now() + LOCK_MS;
+  if (byIp.count >= IP_MAX_FAILS) byIp.lockedUntil = now2 + IP_LOCK_MS;
   if (byUser.count >= USER_MAX_FAILS) {
-    byUser.lockedUntil = Date.now() + LOCK_MS;
-    warn("login_locked", { msg: `\u8D26\u6237 ${username} \u5DF2\u88AB\u4E34\u65F6\u9501\u5B9A`, ip });
+    const strikes = now2 - byUser.lastStrikeAt > STRIKE_WINDOW_MS ? 1 : byUser.strikes + 1;
+    byUser.strikes = strikes;
+    byUser.lastStrikeAt = now2;
+    const lockMs = Math.min(USER_LOCK_MS * 2 ** (strikes - 1), USER_LOCK_MAX_MS);
+    byUser.lockedUntil = now2 + lockMs;
+    byUser.count = 0;
+    byUser.first = now2;
+    warn("login_locked", { msg: `\u8D26\u6237 ${username} \u5DF2\u4E34\u65F6\u9501\u5B9A ${Math.round(lockMs / 6e4)} \u5206\u949F`, ip });
   }
   if (attempts.size > 5e3) {
-    const now2 = Date.now();
     for (const [k, v] of attempts) {
       if (now2 - v.first > WINDOW_MS && v.lockedUntil < now2) attempts.delete(k);
     }
   }
 }
-function recordLoginSuccess(ip, username) {
-  attempts.delete(`ip:${ip}`);
-  attempts.delete(`user:${String(username).toLowerCase()}`);
+function recordLoginSuccess(_ip, username) {
+  const byUser = attempts.get(`user:${String(username).toLowerCase()}`);
+  if (byUser) {
+    byUser.count = 0;
+    byUser.lockedUntil = 0;
+    byUser.strikes = 0;
+  }
 }
 function verifySuperPassword(password) {
   const a = Buffer.from(String(password));
@@ -66314,13 +66409,14 @@ function resolveSafe(input = "") {
 }
 function resolveAny(rel) {
   const first = rel.split("/")[0];
-  const softDirAbs = SOFT_DIRS[first];
+  const softDirAbs = typeof SOFT_DIRS[first] === "string" ? SOFT_DIRS[first] : null;
   if (softDirAbs) {
+    const base = import_node_path7.default.resolve(softDirAbs);
     const sub = rel.slice(first.length);
     const subRel = sub.startsWith("/") ? sub.slice(1) : sub;
-    const resolved2 = subRel ? import_node_path7.default.resolve(softDirAbs, subRel) : softDirAbs;
-    if (!resolved2.startsWith(softDirAbs) && resolved2 !== softDirAbs) throw badPath();
-    return { abs: resolved2, rel, isSoft: true, softName: first, softBase: softDirAbs };
+    const resolved2 = subRel ? import_node_path7.default.resolve(base, subRel) : base;
+    if (resolved2 !== base && !resolved2.startsWith(base + import_node_path7.default.sep)) throw badPath();
+    return { abs: resolved2, rel, isSoft: true, softName: first, softBase: base };
   }
   const abs = rel ? import_node_path7.default.join(FILES_DIR, ...rel.split("/")) : FILES_DIR;
   const resolved = import_node_path7.default.resolve(abs);
@@ -66378,18 +66474,21 @@ function sanitizeFileName(name) {
 function comparable(rel) {
   return CASE_INSENSITIVE ? rel.toLowerCase() : rel;
 }
+function samePath(a, b) {
+  return comparable(String(a)) === comparable(String(b));
+}
+function isSameOrInside(target, base) {
+  const t = comparable(String(target));
+  const b = comparable(String(base));
+  return t === b || t.startsWith(b + "/");
+}
 function isHiddenFromGuest(rel) {
   const hidden = getConfig().guestHiddenPaths;
   if (!hidden.length) return false;
-  const target = comparable(rel);
-  return hidden.some((h) => {
-    const hc = comparable(h);
-    return target === hc || target.startsWith(hc + "/");
-  });
+  return hidden.some((h) => isSameOrInside(rel, h));
 }
 function isExactHidden(rel) {
-  const target = comparable(rel);
-  return getConfig().guestHiddenPaths.some((h) => comparable(h) === target);
+  return getConfig().guestHiddenPaths.some((h) => samePath(h, rel));
 }
 function guestBlocked(req, rel) {
   return req.auth.role === "guest" && isHiddenFromGuest(rel);
@@ -66586,9 +66685,9 @@ function lanAddresses() {
   const addrs = [];
   const nets = import_node_os.default.networkInterfaces();
   for (const name of Object.keys(nets)) {
-    for (const net of nets[name] || []) {
-      if (net.family === "IPv4" && !net.internal) {
-        addrs.push(net.address);
+    for (const net2 of nets[name] || []) {
+      if (net2.family === "IPv4" && !net2.internal) {
+        addrs.push(net2.address);
       }
     }
   }
@@ -66619,6 +66718,7 @@ async function getStatus() {
     hostname: import_node_os.default.hostname(),
     port: env2.port,
     host: env2.host,
+    trustProxy: env2.trustProxy,
     lan: lanAddresses(),
     memory: {
       rss: mem.rss,
@@ -66732,6 +66832,243 @@ var import_express2 = __toESM(require_express2(), 1);
 var import_busboy = __toESM(require_lib3(), 1);
 var import_archiver = __toESM(require_archiver(), 1);
 
+// src/netguard.js
+var import_promises = __toESM(require("node:dns/promises"), 1);
+var import_node_net = __toESM(require("node:net"), 1);
+var TRUE_RE = /^(1|true|yes|on)$/i;
+function envFlag(name) {
+  return TRUE_RE.test(String(process.env[name] || "").trim());
+}
+function envHostList() {
+  return new Set(
+    String(process.env.DOWNLOAD_URL_ALLOW_HOSTS || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+  );
+}
+var MAX_REDIRECTS = 5;
+var MAX_URL_LENGTH = 2048;
+var REDIRECT_CODES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
+function insecureTlsAllowed() {
+  return envFlag("DOWNLOAD_URL_INSECURE_TLS");
+}
+function privateAccessAllowed() {
+  if (envFlag("DOWNLOAD_URL_ALLOW_PRIVATE")) return true;
+  try {
+    return !!getConfig().downloadUrlAllowPrivate;
+  } catch {
+    return false;
+  }
+}
+function badRequest(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+function ipv4ToInt(ip) {
+  const parts = String(ip).split(".");
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n > 255) return null;
+    value = value * 256 + n;
+  }
+  return value >>> 0;
+}
+var BLOCKED_V4 = [
+  ["0.0.0.0", 8, "\u672A\u6307\u5B9A\u6216\u672C\u673A\u5730\u5740"],
+  ["10.0.0.0", 8, "\u5185\u7F51\u5730\u5740"],
+  ["100.64.0.0", 10, "\u8FD0\u8425\u5546\u7EA7 NAT \u5730\u5740"],
+  ["127.0.0.0", 8, "\u56DE\u73AF\u5730\u5740"],
+  ["169.254.0.0", 16, "\u94FE\u8DEF\u672C\u5730\u6216\u4E91\u5143\u6570\u636E\u5730\u5740"],
+  ["172.16.0.0", 12, "\u5185\u7F51\u5730\u5740"],
+  ["192.0.0.0", 24, "\u4FDD\u7559\u5730\u5740"],
+  ["192.0.2.0", 24, "\u6587\u6863\u4FDD\u7559\u5730\u5740"],
+  ["192.88.99.0", 24, "6to4 \u4E2D\u7EE7\u5730\u5740"],
+  ["192.168.0.0", 16, "\u5185\u7F51\u5730\u5740"],
+  ["198.18.0.0", 15, "\u57FA\u51C6\u6D4B\u8BD5\u4FDD\u7559\u5730\u5740"],
+  ["198.51.100.0", 24, "\u6587\u6863\u4FDD\u7559\u5730\u5740"],
+  ["203.0.113.0", 24, "\u6587\u6863\u4FDD\u7559\u5730\u5740"],
+  ["224.0.0.0", 4, "\u7EC4\u64AD\u5730\u5740"],
+  ["240.0.0.0", 4, "\u4FDD\u7559\u5730\u5740"]
+].map(([base, bits, label]) => ({ base: ipv4ToInt(base), bits, label }));
+function blockedIpv4Reason(ip) {
+  const value = ipv4ToInt(ip);
+  if (value === null) return "\u5730\u5740\u683C\u5F0F\u65E0\u6548";
+  for (const range of BLOCKED_V4) {
+    const mask = range.bits >= 32 ? 4294967295 : 4294967295 << 32 - range.bits >>> 0;
+    if ((value & mask) >>> 0 === (range.base & mask) >>> 0) return range.label;
+  }
+  return null;
+}
+function parseIpv6(input) {
+  let text = String(input);
+  const zone = text.indexOf("%");
+  if (zone >= 0) text = text.slice(0, zone);
+  text = text.toLowerCase();
+  const lastColon = text.lastIndexOf(":");
+  if (lastColon >= 0 && text.slice(lastColon + 1).indexOf(".") >= 0) {
+    const v4 = ipv4ToInt(text.slice(lastColon + 1));
+    if (v4 === null) return null;
+    const hi = (v4 >>> 16 & 65535).toString(16);
+    const lo = (v4 & 65535).toString(16);
+    text = `${text.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  let head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  if (halves.length === 1) {
+    if (head.length !== 8) return null;
+  } else {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    head = [...head, ...new Array(missing).fill("0"), ...tail];
+    if (head.length !== 8) return null;
+  }
+  const groups = [];
+  for (const group of head) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    groups.push(parseInt(group, 16));
+  }
+  return groups;
+}
+function dottedFromGroups(hi, lo) {
+  return `${hi >> 8 & 255}.${hi & 255}.${lo >> 8 & 255}.${lo & 255}`;
+}
+function blockedIpv6Reason(groups) {
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
+  if (groups.every((g) => g === 0)) return "\u672A\u6307\u5B9A\u5730\u5740";
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0 && g6 === 0 && g7 === 1) {
+    return "\u56DE\u73AF\u5730\u5740";
+  }
+  const firstFiveZero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
+  if (firstFiveZero && (g5 === 65535 || g5 === 0 && (g6 !== 0 || g7 !== 0))) {
+    const embedded = dottedFromGroups(g6, g7);
+    const reason = blockedIpv4Reason(embedded);
+    if (reason) return `${reason}\uFF08IPv6 \u5185\u5D4C ${embedded}\uFF09`;
+    return null;
+  }
+  if (g0 === 8194) {
+    const embedded = dottedFromGroups(g1, g2);
+    const reason = blockedIpv4Reason(embedded);
+    if (reason) return `${reason}\uFF086to4 \u5185\u5D4C ${embedded}\uFF09`;
+    return null;
+  }
+  if (g0 === 100 && g1 === 65435 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
+    const embedded = dottedFromGroups(g6, g7);
+    const reason = blockedIpv4Reason(embedded);
+    if (reason) return `${reason}\uFF08NAT64 \u5185\u5D4C ${embedded}\uFF09`;
+    return null;
+  }
+  if (g0 === 8193 && g1 === 0) return "Teredo \u96A7\u9053\u5730\u5740";
+  if ((g0 & 65024) === 64512) return "\u552F\u4E00\u672C\u5730\u5730\u5740";
+  if ((g0 & 65472) === 65152) return "\u94FE\u8DEF\u672C\u5730\u5730\u5740";
+  if ((g0 & 65472) === 65216) return "\u7AD9\u70B9\u672C\u5730\u5730\u5740\uFF08\u5DF2\u5E9F\u5F03\uFF09";
+  if ((g0 & 65280) === 65280) return "\u7EC4\u64AD\u5730\u5740";
+  if (g0 === 8193 && g1 === 3512) return "\u6587\u6863\u4FDD\u7559\u5730\u5740";
+  return null;
+}
+function addressBlockReason(address) {
+  const ip = String(address || "");
+  const family = import_node_net.default.isIP(ip);
+  if (family === 4) return blockedIpv4Reason(ip);
+  if (family === 6) {
+    const groups = parseIpv6(ip);
+    if (!groups) return "\u5730\u5740\u683C\u5F0F\u65E0\u6548";
+    return blockedIpv6Reason(groups);
+  }
+  return "\u5730\u5740\u683C\u5F0F\u65E0\u6548";
+}
+function isHostAllowed(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  if (!host) return false;
+  if (privateAccessAllowed()) return true;
+  return envHostList().has(host);
+}
+async function resolveDownloadTarget(rawUrl) {
+  const text = String(rawUrl || "").trim();
+  if (!text) throw badRequest("\u8BF7\u8F93\u5165\u4E0B\u8F7D\u94FE\u63A5");
+  if (text.length > MAX_URL_LENGTH) throw badRequest("\u4E0B\u8F7D\u94FE\u63A5\u8FC7\u957F");
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    throw badRequest("URL \u683C\u5F0F\u65E0\u6548");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw badRequest("\u4EC5\u652F\u6301 http/https \u94FE\u63A5");
+  if (url.username || url.password) throw badRequest("\u4E0B\u8F7D\u94FE\u63A5\u4E0D\u80FD\u5305\u542B\u7528\u6237\u540D\u6216\u5BC6\u7801");
+  const hostname = url.hostname.replace(/^\[/, "").replace(/\]$/, "");
+  if (!hostname) throw badRequest("URL \u7F3A\u5C11\u4E3B\u673A\u540D");
+  const allowlisted = isHostAllowed(hostname);
+  let addresses;
+  if (import_node_net.default.isIP(hostname)) {
+    addresses = [hostname];
+  } else {
+    let resolved = [];
+    try {
+      resolved = await import_promises.default.lookup(hostname, { all: true, verbatim: true });
+    } catch {
+      throw badRequest("\u65E0\u6CD5\u89E3\u6790\u8BE5\u57DF\u540D");
+    }
+    addresses = [...new Set(resolved.map((entry) => entry.address).filter(Boolean))];
+    if (!addresses.length) throw badRequest("\u65E0\u6CD5\u89E3\u6790\u8BE5\u57DF\u540D");
+  }
+  if (!allowlisted) {
+    for (const address of addresses) {
+      const reason = addressBlockReason(address);
+      if (reason) throw badRequest(`\u4E0D\u5141\u8BB8\u4E0B\u8F7D${reason}\uFF08${address}\uFF09`);
+    }
+  }
+  const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  return { url, urlString: url.toString(), hostname, port, addresses, allowlisted };
+}
+function pinnedLookup(addresses) {
+  const entries = addresses.map((address) => ({ address, family: import_node_net.default.isIP(address) }));
+  return (hostname, options, callback) => {
+    let opts = options;
+    let cb = callback;
+    if (typeof options === "function") {
+      cb = options;
+      opts = {};
+    }
+    if (opts && opts.all) {
+      process.nextTick(cb, null, entries);
+      return;
+    }
+    process.nextTick(cb, null, entries[0].address, entries[0].family);
+  };
+}
+
+// src/ratelimit.js
+var WINDOW_MS2 = 60 * 1e3;
+var MAX_TRACKED_IPS = 5e3;
+var buckets = /* @__PURE__ */ new Map();
+function rateLimit(req, res, next) {
+  const config2 = getConfig();
+  if (!config2.rateLimitEnabled) return next();
+  const limit = Math.max(1, Number(config2.rateLimitPerMin) || 120);
+  const now2 = Date.now();
+  const key = String(req.ip || req.socket?.remoteAddress || "unknown");
+  let bucket2 = buckets.get(key);
+  if (!bucket2 || now2 - bucket2.windowStart >= WINDOW_MS2) {
+    bucket2 = { count: 0, windowStart: now2 };
+    buckets.set(key, bucket2);
+  }
+  bucket2.count += 1;
+  if (bucket2.count > limit) {
+    const retryAfter = Math.max(1, Math.ceil((WINDOW_MS2 - (now2 - bucket2.windowStart)) / 1e3));
+    res.setHeader("Retry-After", String(retryAfter));
+    return res.status(429).json({ error: `\u64CD\u4F5C\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7 ${retryAfter} \u79D2\u540E\u518D\u8BD5` });
+  }
+  if (buckets.size > MAX_TRACKED_IPS) {
+    for (const [k, v] of buckets) {
+      if (now2 - v.windowStart >= WINDOW_MS2) buckets.delete(k);
+    }
+  }
+  next();
+}
+
 // src/jobs.js
 var import_node_fs7 = __toESM(require("node:fs"), 1);
 var import_node_crypto4 = __toESM(require("node:crypto"), 1);
@@ -66796,6 +67133,10 @@ function jobStatus(id) {
   const { state: state2, type, label, percent, processed, total, processedBytes, totalBytes, error: error2, count } = job;
   return { id, state: state2, type, label, percent, processed, total, processedBytes, totalBytes, error: error2, count };
 }
+function jobCreatedBy(id) {
+  const job = jobs.get(id);
+  return job ? job.createdBy : void 0;
+}
 async function failJob(id, error2) {
   const job = jobs.get(id);
   if (!job) return;
@@ -66823,6 +67164,21 @@ function blockSoft(rel) {
     err.status = 403;
     throw err;
   }
+}
+function blockSoftCopyOut(rel) {
+  if (isSoftPath(rel) && !getConfig().softDirAllowCopyOut) {
+    const err = new Error("\u53EA\u8BFB\u6620\u5C04\u76EE\u5F55\u7684\u5185\u5BB9\u4E0D\u5141\u8BB8\u590D\u5236\u5230\u7F51\u76D8\u76EE\u5F55\uFF08\u53EF\u5728\u540E\u53F0\u8BBE\u7F6E\u4E2D\u653E\u5F00\uFF09");
+    err.status = 403;
+    throw err;
+  }
+}
+function visibleJobStatus(req, jobId) {
+  const owner = jobCreatedBy(jobId);
+  if (owner === void 0) return null;
+  if (getConfig().jobStatusOwnerOnly && req.auth.role !== "superadmin") {
+    if (owner !== (req.auth.username || "guest")) return null;
+  }
+  return jobStatus(jobId);
 }
 var INLINE_TYPES = new Map(
   Object.entries({
@@ -66893,12 +67249,13 @@ var INLINE_TYPES = new Map(
     ".env": "text/plain; charset=utf-8"
   })
 );
+var SCRIPTABLE_EXT = /* @__PURE__ */ new Set(["html", "htm", "svg"]);
 function contentDisposition(type, filename) {
   const fallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'");
   const encoded = encodeURIComponent(filename).replace(/['()]/g, escape);
   return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
-router2.get("/list", async (req, res, next) => {
+router2.get("/list", requirePerm("browse"), async (req, res, next) => {
   try {
     const { abs, rel, isSoft } = resolveSafe(req.query.path);
     if (!isSoft && guestBlocked(req, rel)) throw httpError2(404, "\u76EE\u5F55\u4E0D\u5B58\u5728");
@@ -66948,9 +67305,13 @@ router2.get("/download", async (req, res, next) => {
     const inline = req.query.inline === "1" && INLINE_TYPES.has(extKey);
     const forceInline = !perms.downloadFile && perms.preview;
     const useInline = inline || forceInline;
-    res.setHeader("Content-Type", useInline ? INLINE_TYPES.get(extKey) : "application/octet-stream");
+    const mime = useInline ? INLINE_TYPES.get(extKey) : "application/octet-stream";
+    res.setHeader("Content-Type", mime);
     res.setHeader("Content-Disposition", contentDisposition(useInline ? "inline" : "attachment", name));
     res.setHeader("Cache-Control", "no-store");
+    if (useInline && SCRIPTABLE_EXT.has(extKey)) {
+      res.setHeader("Content-Security-Policy", "sandbox allow-scripts");
+    }
     if (!useInline) info("download", { msg: resolved.rel, ...actor(req) });
     res.sendFile(resolved.abs, { dotfiles: "allow", cacheControl: false }, (err) => {
       if (err && !res.headersSent) next(err);
@@ -67046,7 +67407,7 @@ async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
     }
   }
 }
-router2.get("/zip", requirePerm("downloadFolder"), async (req, res, next) => {
+router2.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, next) => {
   try {
     let rels = [];
     if (req.query.paths) {
@@ -67275,7 +67636,7 @@ router2.post("/rename", requirePerm("rename"), async (req, res, next) => {
     if (isExactHidden(rel)) {
       await saveConfig((draft) => {
         draft.guestHiddenPaths = draft.guestHiddenPaths.map(
-          (h) => h === rel ? joinRel(parentRel, newName) : h
+          (h) => samePath(h, rel) ? joinRel(parentRel, newName) : h
         );
       });
     }
@@ -67301,7 +67662,7 @@ router2.post("/delete", requirePerm("delete"), async (req, res, next) => {
     }
     await saveConfig((draft) => {
       draft.guestHiddenPaths = draft.guestHiddenPaths.filter(
-        (h) => !deleted.some((d) => h === d || h.startsWith(d + "/"))
+        (h) => !deleted.some((d) => isSameOrInside(h, d))
       );
     });
     info("delete", { msg: deleted.join(", "), ...actor(req) });
@@ -67350,6 +67711,7 @@ async function transfer(req, res, next, mode) {
     for (const p of sources) {
       const src = resolveSafe(p);
       if (mode === "move") blockSoft(src.rel);
+      if (mode === "copy") blockSoftCopyOut(src.rel);
       if (!src.rel) throw httpError2(400, "\u975E\u6CD5\u6765\u6E90");
       const stat = await assertExists(src.abs);
       if (stat.isDirectory() && (dest.rel === src.rel || dest.rel.startsWith(src.rel + "/"))) {
@@ -67378,7 +67740,7 @@ async function transfer(req, res, next, mode) {
       if (mode === "move" && isExactHidden(src.rel)) {
         const newRel = joinRel(dest.rel, finalName);
         await saveConfig((draft) => {
-          draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) => h === src.rel ? newRel : h);
+          draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) => samePath(h, src.rel) ? newRel : h);
         });
       }
       done.push(finalName);
@@ -67391,7 +67753,7 @@ async function transfer(req, res, next, mode) {
 }
 router2.post("/copy", requirePerm("copy"), (req, res, next) => transfer(req, res, next, "copy"));
 router2.post("/move", requirePerm("move"), (req, res, next) => transfer(req, res, next, "move"));
-router2.get("/stat", requirePerm("details"), async (req, res, next) => {
+router2.get("/stat", requirePerm("details"), rateLimit, async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path));
     const stat = await assertExists(resolved.abs);
@@ -67416,7 +67778,7 @@ router2.get("/stat", requirePerm("details"), async (req, res, next) => {
     next(err);
   }
 });
-router2.get("/search", async (req, res, next) => {
+router2.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) => {
   try {
     const q = String(req.query.q || "").trim();
     if (!q || q.length > 100) throw httpError2(400, "\u8BF7\u8F93\u5165\u641C\u7D22\u5173\u952E\u8BCD");
@@ -67446,9 +67808,7 @@ router2.post(
       if (!stat.isDirectory()) throw httpError2(400, "\u53EA\u80FD\u5BF9\u6587\u4EF6\u5939\u8BBE\u7F6E\u8BBF\u5BA2\u53EF\u89C1\u6027");
       const hidden = !!req.body?.hidden;
       await saveConfig((draft) => {
-        const withoutCurrent = draft.guestHiddenPaths.filter(
-          (h) => h.toLowerCase() !== rel.toLowerCase()
-        );
+        const withoutCurrent = draft.guestHiddenPaths.filter((h) => !samePath(h, rel));
         draft.guestHiddenPaths = hidden ? [...withoutCurrent, rel] : withoutCurrent;
       });
       info("guest_visibility", {
@@ -67514,7 +67874,7 @@ async function runCompressJob(job, items, paths, destAbs, req) {
     failJob(job.id, err);
   }
 }
-router2.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
+router2.post("/compress", requirePerm("compressZip"), rateLimit, async (req, res, next) => {
   try {
     const paths = req.body?.paths;
     if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
@@ -67525,7 +67885,9 @@ router2.post("/compress", requirePerm("compressZip"), async (req, res, next) => 
     blockSoft(dest.rel);
     await assertDir(dest.abs);
     const forGuest = req.auth.role === "guest";
-    const items = await collectZipItems(paths.map((p) => normRel(p)), forGuest);
+    const sourceRels = paths.map((p) => normRel(p));
+    for (const rel of sourceRels) blockSoftCopyOut(rel);
+    const items = await collectZipItems(sourceRels, forGuest);
     if (!items.length) throw httpError2(404, "\u6CA1\u6709\u53EF\u538B\u7F29\u7684\u5185\u5BB9");
     await validateZipLimits(items, forGuest);
     const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest);
@@ -67542,14 +67904,14 @@ router2.post("/compress", requirePerm("compressZip"), async (req, res, next) => 
 });
 router2.get("/compress/status", requirePerm("compressZip"), (req, res, next) => {
   try {
-    const status = jobStatus(String(req.query.job || ""));
+    const status = visibleJobStatus(req, String(req.query.job || ""));
     if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" });
     res.json(status);
   } catch (err) {
     next(err);
   }
 });
-router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
+router2.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path);
     blockSoft(rel);
@@ -67570,16 +67932,26 @@ router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     if (directory.files.length > limits.maxFiles) {
       throw httpError2(400, `ZIP \u5185\u6587\u4EF6\u6570\u8D85\u51FA\u9650\u5236 (\u6700\u591A ${limits.maxFiles} \u4E2A)`);
     }
+    const declaredTotal = directory.files.reduce((sum, f) => sum + (Number(f.uncompressedSize) || 0), 0);
+    if (declaredTotal > limits.extractMaxTotalBytes) {
+      throw httpError2(400, `ZIP \u89E3\u538B\u540E\u603B\u5927\u5C0F (${Math.round(declaredTotal / 1024 / 1024)}MB) \u8D85\u51FA\u9650\u5236 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`);
+    }
     const job = createJob("extract", { label: import_node_path9.default.basename(abs), total: directory.files.length });
     job.createdBy = req.auth.username || "guest";
     const zipBaseName = import_node_path9.default.basename(abs).replace(/\.zip$/i, "");
     const extractRoot = await uniqueName(destAbs, zipBaseName);
     const extractDestAbs = import_node_path9.default.join(destAbs, extractRoot);
     import_node_fs8.default.mkdirSync(extractDestAbs, { recursive: true });
+    const abortExtract = async (err) => {
+      await import_node_fs8.default.promises.rm(extractDestAbs, { recursive: true, force: true }).catch(() => {
+      });
+      failJob(job.id, err);
+    };
     res.json({ jobId: job.id });
     void (async () => {
       const destResolved = import_node_path9.default.resolve(extractDestAbs);
       let count = 0;
+      let written = 0;
       for (const file of directory.files) {
         try {
           const entryPath = file.path;
@@ -67600,21 +67972,26 @@ router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
           }
           const buf = await file.buffer();
           if (buf.length > limits.maxSingleBytes) continue;
+          written += buf.length;
+          if (written > limits.extractMaxTotalBytes) {
+            throw new Error(`\u89E3\u538B\u540E\u603B\u5927\u5C0F\u8D85\u51FA\u9650\u5236 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`);
+          }
           await import_node_fs8.default.promises.writeFile(outPath, buf);
           count += 1;
         } catch (err) {
-          failJob(job.id, err);
+          await abortExtract(err);
           return;
         }
         patchJob(job.id, {
           processed: count,
+          processedBytes: written,
           percent: Math.min(99, Math.round(count / directory.files.length * 100))
         });
       }
       patchJob(job.id, { count });
       finishJob(job.id, { state: "done" });
       info("extract", { msg: `${rel} \u2192 ${count} \u6587\u4EF6`, ...actor(req) });
-    })().catch((err) => failJob(job.id, err));
+    })().catch((err) => abortExtract(err));
   } catch (err) {
     if (err.message?.includes("Cannot find module 'unzipper'")) {
       return next(httpError2(500, "\u670D\u52A1\u7AEF\u672A\u5B89\u88C5 unzipper \u6A21\u5757\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458"));
@@ -67624,7 +68001,7 @@ router2.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
 });
 router2.get("/extract/status", requirePerm("extractZip"), (req, res, next) => {
   try {
-    const status = jobStatus(String(req.query.job || ""));
+    const status = visibleJobStatus(req, String(req.query.job || ""));
     if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" });
     res.json(status);
   } catch (err) {
@@ -67644,109 +68021,154 @@ router2.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
     next(err);
   }
 });
-function validateHttpUrl(urlStr) {
+var DOWNLOAD_TIMEOUT_MS = 6e4;
+function sizeLimitError(maxBytes) {
+  const err = new Error(`\u4E0B\u8F7D\u4F53\u79EF\u8D85\u51FA\u9650\u5236\uFF08${Math.round(maxBytes / 1024 / 1024)}MB\uFF09`);
+  err.status = 400;
+  return err;
+}
+function safeDecode(value) {
   try {
-    const u = new URL(urlStr);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return "\u4EC5\u652F\u6301 http/https \u94FE\u63A5";
-    if (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1") return "\u4E0D\u5141\u8BB8\u4E0B\u8F7D\u672C\u5730\u5730\u5740";
-    const privateRanges = [/^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^169\.254\./];
-    if (privateRanges.some((r) => r.test(u.hostname))) return "\u4E0D\u5141\u8BB8\u4E0B\u8F7D\u5185\u7F51\u5730\u5740";
-    return null;
+    return decodeURIComponent(value);
   } catch {
-    return "URL \u683C\u5F0F\u65E0\u6548";
+    return value;
   }
 }
-async function downloadFileFromUrl(job, urlStr, destAbs) {
-  const parsed = new URL(urlStr);
-  const transport = parsed.protocol === "https:" ? import_node_https.default : import_node_http.default;
-  const tempFile = import_node_path9.default.join(TMP_DIR, `dl-${import_node_crypto5.default.randomBytes(8).toString("hex")}`);
-  return new Promise((resolve) => {
-    const req = transport.get(parsed, { rejectUnauthorized: false }, (res) => {
-      if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-        const loc = res.headers.location;
-        if (loc) {
-          const err = validateHttpUrl(loc.startsWith("/") ? `${parsed.origin}${loc}` : loc);
-          if (err) return resolve(failJob(job.id, new Error(err)));
-          return resolve(downloadFileFromUrl(job, loc.startsWith("/") ? `${parsed.origin}${loc}` : loc, destAbs));
+function fetchHop(target, { tempFile, job, maxBytes }) {
+  return new Promise((resolve, reject) => {
+    const transport = target.url.protocol === "https:" ? import_node_https.default : import_node_http.default;
+    let settled = false;
+    const done = (fn) => (value) => {
+      if (!settled) {
+        settled = true;
+        fn(value);
+      }
+    };
+    const ok = done(resolve);
+    const fail = done(reject);
+    const options = {
+      protocol: target.url.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      path: `${target.url.pathname}${target.url.search}`,
+      method: "GET",
+      headers: {
+        Host: target.url.host,
+        "User-Agent": "ZeroShadow/1.0",
+        Accept: "*/*"
+      },
+      // 连接只使用已校验的地址：检查之后不再解析 DNS，堵住 DNS rebinding
+      lookup: pinnedLookup(target.addresses),
+      // 默认严格校验证书；只有显式设置 DOWNLOAD_URL_INSECURE_TLS=1 才放开
+      rejectUnauthorized: !insecureTlsAllowed()
+    };
+    const req = transport.request(options, (res) => {
+      const status = res.statusCode || 0;
+      if (REDIRECT_CODES.has(status)) {
+        const location = res.headers.location;
+        res.resume();
+        if (!location) return fail(new Error("\u4E0B\u8F7D\u5931\u8D25\uFF1A\u91CD\u5B9A\u5411\u7F3A\u5C11\u76EE\u6807\u5730\u5740"));
+        let nextUrl;
+        try {
+          nextUrl = new URL(location, target.url).toString();
+        } catch {
+          return fail(new Error("\u91CD\u5B9A\u5411\u5730\u5740\u65E0\u6548"));
         }
-        return resolve(failJob(job.id, new Error(`\u4E0B\u8F7D\u5931\u8D25: \u91CD\u5B9A\u5411\u65E0\u76EE\u6807`)));
+        return ok({ redirect: nextUrl });
       }
-      if (res.statusCode < 200 || res.statusCode >= 400) {
-        return resolve(failJob(job.id, new Error(`\u4E0B\u8F7D\u5931\u8D25: HTTP ${res.statusCode}`)));
+      if (status < 200 || status >= 400) {
+        res.resume();
+        return fail(new Error(`\u4E0B\u8F7D\u5931\u8D25: HTTP ${status}`));
       }
-      const total = Number(res.headers["content-length"] || 0);
-      if (total > 0) patchJob(job.id, { totalBytes: total });
+      const declared = Number(res.headers["content-length"] || 0);
+      if (maxBytes > 0 && declared > maxBytes) {
+        res.resume();
+        return fail(sizeLimitError(maxBytes));
+      }
+      if (declared > 0) patchJob(job.id, { totalBytes: declared, processedBytes: 0, percent: 0 });
       const ws = import_node_fs8.default.createWriteStream(tempFile);
       let loaded = 0;
+      let tooBig = false;
       res.on("data", (chunk) => {
         loaded += chunk.length;
-        if (total > 0) {
-          patchJob(job.id, { processedBytes: loaded, percent: Math.min(99, Math.round(loaded / total * 100)) });
+        if (maxBytes > 0 && loaded > maxBytes) {
+          tooBig = true;
+          res.destroy();
+          ws.destroy();
+          return;
         }
+        if (declared > 0) {
+          patchJob(job.id, { processedBytes: loaded, percent: Math.min(99, Math.round(loaded / declared * 100)) });
+        }
+      });
+      res.on("error", (err) => {
+        ws.destroy();
+        fail(err);
+      });
+      ws.on("error", (err) => fail(err));
+      ws.on("close", () => {
+        if (tooBig) return fail(sizeLimitError(maxBytes));
+        if (declared > 0 && loaded < declared * 0.95) return fail(new Error("\u4E0B\u8F7D\u672A\u5B8C\u6210\uFF08\u7F51\u7EDC\u4E2D\u65AD\uFF09"));
+        ok({ downloaded: loaded });
       });
       res.pipe(ws);
-      ws.on("error", (err) => {
-        ws.destroy();
-        resolve(failJob(job.id, err));
-        return;
-      });
-      ws.on("close", async () => {
-        try {
-          const st = await import_node_fs8.default.promises.stat(tempFile);
-          if (total > 0 && st.size < total * 0.95) {
-            await import_node_fs8.default.promises.rm(tempFile, { force: true });
-            return resolve(failJob(job.id, new Error("\u4E0B\u8F7D\u672A\u5B8C\u6210\uFF08\u7F51\u7EDC\u4E2D\u65AD\uFF09")));
-          }
-          await moveEntry(tempFile, destAbs);
-          finishJob(job.id, { state: "done" });
-          resolve();
-        } catch (err) {
-          resolve(failJob(job.id, err));
-        }
-      });
     });
-    req.on("error", (err) => {
-      resolve(failJob(job.id, err));
-      return;
-    });
-    req.setTimeout(6e4, () => {
+    req.on("error", (err) => fail(err));
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
       req.destroy();
-      resolve(failJob(job.id, new Error("\u8FDE\u63A5\u8D85\u65F6")));
-      return;
+      fail(new Error("\u8FDE\u63A5\u8D85\u65F6"));
     });
+    req.end();
   });
 }
-router2.post("/download-url", requirePerm("downloadUrl"), async (req, res, next) => {
+async function downloadFileFromUrl(job, firstTarget, destAbs, maxBytes) {
+  const tempFile = import_node_path9.default.join(TMP_DIR, `dl-${import_node_crypto5.default.randomBytes(8).toString("hex")}`);
+  try {
+    let target = firstTarget;
+    for (let hop = 0; ; hop += 1) {
+      if (hop > MAX_REDIRECTS) throw new Error(`\u91CD\u5B9A\u5411\u6B21\u6570\u8FC7\u591A\uFF08\u6700\u591A ${MAX_REDIRECTS} \u6B21\uFF09`);
+      const result = await fetchHop(target, { tempFile, job, maxBytes });
+      if (result.redirect) {
+        target = await resolveDownloadTarget(result.redirect);
+        continue;
+      }
+      const stat = await import_node_fs8.default.promises.stat(tempFile);
+      if (!stat.size) throw new Error("\u4E0B\u8F7D\u5185\u5BB9\u4E3A\u7A7A");
+      await moveEntry(tempFile, destAbs);
+      finishJob(job.id, { state: "done" });
+      return;
+    }
+  } catch (err) {
+    await import_node_fs8.default.promises.rm(tempFile, { force: true }).catch(() => {
+    });
+    failJob(job.id, err);
+  }
+}
+router2.post("/download-url", requirePerm("downloadUrl"), rateLimit, async (req, res, next) => {
   try {
     const urlStr = String(req.body?.url || "").trim();
     if (!urlStr) throw httpError2(400, "\u8BF7\u8F93\u5165\u4E0B\u8F7D\u94FE\u63A5");
-    const urlErr = validateHttpUrl(urlStr);
-    if (urlErr) throw httpError2(400, urlErr);
-    const parts = typeof urlStr === "string" ? urlStr.split("/").filter(Boolean) : [];
-    const rawName = parts.length ? decodeURIComponent(parts[parts.length - 1]) : "downloaded-file";
-    const fallbackName = rawName.split("?")[0].split("#")[0];
+    const target = await resolveDownloadTarget(urlStr);
+    const lastSegment = target.url.pathname.split("/").filter(Boolean).pop() || "";
+    const fallbackName = safeDecode(lastSegment) || "downloaded-file";
     const inputName = typeof req.body?.filename === "string" ? req.body.filename.trim() : null;
-    const finalName = inputName || fallbackName || "downloaded-file";
-    const safeName = sanitizeFileName(finalName);
-    const dest = String(req.body?.dest || "");
-    const destResolved = resolveSafe(dest);
+    const safeName = sanitizeFileName(inputName || fallbackName);
+    const destResolved = resolveSafe(String(req.body?.dest || ""));
     blockSoft(destResolved.rel);
     await assertDir(destResolved.abs);
     const uniqueOut = await uniqueName(destResolved.abs, safeName);
     const outPath = import_node_path9.default.join(destResolved.abs, uniqueOut);
-    const label = uniqueOut;
-    const contentLength = 0;
-    const job = createJob("download", { label, total: 100, totalBytes: contentLength });
+    const job = createJob("download", { label: uniqueOut, total: 100, totalBytes: 0 });
     job.createdBy = req.auth.username || "guest";
     res.json({ jobId: job.id });
-    void downloadFileFromUrl(job, urlStr, outPath);
+    void downloadFileFromUrl(job, target, outPath, downloadUrlLimitBytes());
   } catch (err) {
     next(err);
   }
 });
 router2.get("/download-url/status", requirePerm("downloadUrl"), (req, res, next) => {
   try {
-    const status = jobStatus(String(req.query.job || ""));
+    const status = visibleJobStatus(req, String(req.query.job || ""));
     if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" });
     res.json(status);
   } catch (err) {
@@ -67774,14 +68196,17 @@ router3.patch("/config", async (req, res, next) => {
   try {
     const body = req.body || {};
     const updates = {};
-    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB"]) {
+    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB", "extractMaxTotalMB", "downloadUrlMaxMB", "rateLimitPerMin"]) {
       if (body[key] !== void 0) {
         const n = Number(body[key]);
         if (!Number.isInteger(n) || n < 1 || n > 1048576) {
-          throw httpError3(400, "\u4E0A\u4F20\u9650\u5236\u9700\u4E3A 1-1048576 \u4E4B\u95F4\u7684\u6574\u6570 (MB)");
+          throw httpError3(400, "\u6570\u503C\u9700\u4E3A 1-1048576 \u4E4B\u95F4\u7684\u6574\u6570");
         }
         updates[key] = n;
       }
+    }
+    for (const key of ["rateLimitEnabled", "softDirAllowCopyOut", "jobStatusOwnerOnly", "downloadUrlAllowPrivate", "csrfOriginCheck"]) {
+      if (body[key] !== void 0) updates[key] = !!body[key];
     }
     for (const group of ["memberPerms", "guestPerms"]) {
       if (body[group] !== void 0) {
@@ -67801,6 +68226,12 @@ router3.patch("/config", async (req, res, next) => {
       if (updates.zipMaxSingleMB) draft.zipMaxSingleMB = updates.zipMaxSingleMB;
       if (updates.zipMaxTotalMB) draft.zipMaxTotalMB = updates.zipMaxTotalMB;
       if (updates.extractMaxZipMB) draft.extractMaxZipMB = updates.extractMaxZipMB;
+      if (updates.extractMaxTotalMB) draft.extractMaxTotalMB = updates.extractMaxTotalMB;
+      if (updates.downloadUrlMaxMB) draft.downloadUrlMaxMB = updates.downloadUrlMaxMB;
+      if (updates.rateLimitPerMin) draft.rateLimitPerMin = updates.rateLimitPerMin;
+      for (const key of ["rateLimitEnabled", "softDirAllowCopyOut", "jobStatusOwnerOnly", "downloadUrlAllowPrivate", "csrfOriginCheck"]) {
+        if (updates[key] !== void 0) draft[key] = updates[key];
+      }
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms);
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms);
     });
@@ -67814,9 +68245,7 @@ router3.delete("/hidden-paths", async (req, res, next) => {
   try {
     const target = String(req.body?.path || "");
     const config2 = await saveConfig((draft) => {
-      draft.guestHiddenPaths = draft.guestHiddenPaths.filter(
-        (h) => h.toLowerCase() !== target.toLowerCase()
-      );
+      draft.guestHiddenPaths = draft.guestHiddenPaths.filter((h) => !samePath(h, target));
     });
     info("guest_visibility", { msg: `${target} \u5DF2\u5BF9\u8BBF\u5BA2\u53EF\u89C1`, ...actor2(req) });
     res.json(config2);
@@ -67950,13 +68379,16 @@ for (const name of import_node_fs9.default.readdirSync(TMP_DIR)) {
 }
 var app = (0, import_express4.default)();
 app.disable("x-powered-by");
+if (env2.trustProxy !== false) {
+  app.set("trust proxy", env2.trustProxy);
+}
 app.get("/ping", (_req, res) => {
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.end("pong");
 });
 app.use((req, _res, next) => {
   if (!NOLOG && req.path !== "/favicon.ico" && req.path !== "/resources/lucide.min.js") {
-    console.log(`[REQ] ${req.method} ${req.path} host=${req.headers.host} ua=${(req.headers["user-agent"] || "").slice(0, 40)}`);
+    console.log(`[REQ] ${req.method} ${req.path} host=${req.headers.host} ip=${req.ip} ua=${(req.headers["user-agent"] || "").slice(0, 40)}`);
   }
   next();
 });
@@ -67964,6 +68396,7 @@ app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()");
   next();
 });
 app.use((0, import_cookie_parser.default)());
@@ -67983,11 +68416,27 @@ app.use("/api/admin", admin_default);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "\u63A5\u53E3\u4E0D\u5B58\u5728" });
 });
+var SHELL_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'self'"
+].join("; ");
 if (import_node_fs9.default.existsSync(WEB_DIST)) {
   app.use(
     import_express4.default.static(WEB_DIST, {
       index: false,
       setHeaders(res, filePath) {
+        if (filePath.toLowerCase().endsWith(".html")) {
+          res.setHeader("Content-Security-Policy", SHELL_CSP);
+        }
         if (filePath.includes(`${import_node_path10.default.sep}assets${import_node_path10.default.sep}`)) {
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         } else if (filePath.includes(`${import_node_path10.default.sep}resources${import_node_path10.default.sep}`)) {
@@ -68001,6 +68450,7 @@ if (import_node_fs9.default.existsSync(WEB_DIST)) {
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
     res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Security-Policy", SHELL_CSP);
     res.sendFile(import_node_path10.default.join(WEB_DIST, "index.html"));
   });
 } else {
@@ -68026,8 +68476,23 @@ var server = app.listen(env2.port, env2.host, () => {
       console.log(`  \u5C40\u57DF\u7F51\u8BBF\u95EE: http://${addr}:${env2.port}`);
     }
     console.log(`  \u6587\u4EF6\u76EE\u5F55:   ${FILES_DIR}`);
+    if (env2.trustProxy === false) {
+      console.log("  \u5BA2\u6237\u7AEF IP:  \u76F4\u8FDE\uFF08\u4E0D\u4FE1\u4EFB\u4EE3\u7406\u5934\uFF09");
+    } else {
+      const shown = typeof env2.trustProxy === "string" ? env2.trustProxy : String(env2.trustProxy);
+      console.log(`  \u5BA2\u6237\u7AEF IP:  \u4FE1\u4EFB\u4EE3\u7406\u5934 ${shown}`);
+      info("trust_proxy", { msg: `\u4FE1\u4EFB\u4EE3\u7406\u5934: ${shown}` });
+    }
     if (SOFT_DIR_NAMES.length) {
       console.log(`  \u5916\u90E8\u6620\u5C04:   ${SOFT_DIR_NAMES.join(", ")}\uFF08\u53EA\u8BFB\uFF09`);
+    }
+    const relaxed = [];
+    const TRUE_RE2 = /^(1|true|yes|on)$/i;
+    if (TRUE_RE2.test(String(process.env.DOWNLOAD_URL_ALLOW_PRIVATE || "").trim())) relaxed.push("\u5141\u8BB8\u94FE\u63A5\u4E0B\u8F7D\u8BBF\u95EE\u5185\u7F51\u5730\u5740");
+    if (TRUE_RE2.test(String(process.env.DOWNLOAD_URL_INSECURE_TLS || "").trim())) relaxed.push("\u8DF3\u8FC7\u4E0B\u8F7D\u65F6\u7684 TLS \u8BC1\u4E66\u6821\u9A8C");
+    if (relaxed.length) {
+      console.log(`  [\u6CE8\u610F] \u94FE\u63A5\u4E0B\u8F7D\u5DE5\u5177\u5DF2\u653E\u5BBD\u9650\u5236: ${relaxed.join("\u3001")}`);
+      warn("download_url_relaxed", { msg: relaxed.join("\u3001") });
     }
     if (env2.generatedPassword) {
       console.log("");

@@ -8,17 +8,19 @@ import Busboy from "busboy"
 import archiver from "archiver"
 import { TMP_DIR } from "../env.js"
 import { requirePerm, requireRole } from "../auth.js"
-import { effectivePerms, saveConfig, uploadLimitBytes, uploadLimitMB, zipLimits } from "../config.js"
+import { effectivePerms, downloadUrlLimitBytes, getConfig, saveConfig, uploadLimitBytes, uploadLimitMB, zipLimits } from "../config.js"
 import {
   getSoftDirEntries,
   guestBlocked,
   isExactHidden,
   isHiddenFromGuest,
+  isSameOrInside,
   isSoftPath,
   joinRel,
   normRel,
   resolveAny,
   resolveSafe,
+  samePath,
   sanitizeFileName,
   validateName,
 } from "../safety.js"
@@ -34,7 +36,9 @@ import {
   uniqueName,
 } from "../files.js"
 import { info } from "../logger.js"
-import { createJob, failJob, finishJob, jobStatus, patchJob } from "../jobs.js"
+import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
+import { rateLimit } from "../ratelimit.js"
+import { createJob, failJob, finishJob, jobCreatedBy, jobStatus, patchJob } from "../jobs.js"
 
 const router = Router()
 
@@ -54,6 +58,27 @@ function blockSoft(rel) {
     err.status = 403
     throw err
   }
+}
+
+// 只读映射目录的内容默认不允许"搬进"网盘主目录：否则映射了项目根目录等敏感
+// 路径时，低权限成员能把 .env、data/.jwt-secret 复制到公开目录里再下载。
+// 超管可在后台放开（softDirAllowCopyOut）。
+function blockSoftCopyOut(rel) {
+  if (isSoftPath(rel) && !getConfig().softDirAllowCopyOut) {
+    const err = new Error("只读映射目录的内容不允许复制到网盘目录（可在后台设置中放开）")
+    err.status = 403
+    throw err
+  }
+}
+
+// 作业进度只对创建者与超管可见（后台可关闭该限制）
+function visibleJobStatus(req, jobId) {
+  const owner = jobCreatedBy(jobId)
+  if (owner === undefined) return null
+  if (getConfig().jobStatusOwnerOnly && req.auth.role !== "superadmin") {
+    if (owner !== (req.auth.username || "guest")) return null
+  }
+  return jobStatus(jobId)
 }
 
 const INLINE_TYPES = new Map(
@@ -126,13 +151,17 @@ const INLINE_TYPES = new Map(
   })
 )
 
+// 能在文档上下文中执行脚本的扩展名（HTML 与 SVG）：内联返回时必须用 CSP
+// sandbox 隔离，否则等于把攻击者上传的脚本放进网盘自身的源里执行。
+const SCRIPTABLE_EXT = new Set(["html", "htm", "svg"])
+
 function contentDisposition(type, filename) {
   const fallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'")
   const encoded = encodeURIComponent(filename).replace(/['()]/g, escape)
   return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`
 }
 
-router.get("/list", async (req, res, next) => {
+router.get("/list", requirePerm("browse"), async (req, res, next) => {
   try {
     const { abs, rel, isSoft } = resolveSafe(req.query.path)
     if (!isSoft && guestBlocked(req, rel)) throw httpError(404, "目录不存在")
@@ -186,9 +215,16 @@ router.get("/download", async (req, res, next) => {
     const inline = req.query.inline === "1" && INLINE_TYPES.has(extKey)
     const forceInline = !perms.downloadFile && perms.preview
     const useInline = inline || forceInline
-    res.setHeader("Content-Type", useInline ? INLINE_TYPES.get(extKey) : "application/octet-stream")
+    const mime = useInline ? INLINE_TYPES.get(extKey) : "application/octet-stream"
+    res.setHeader("Content-Type", mime)
     res.setHeader("Content-Disposition", contentDisposition(useInline ? "inline" : "attachment", name))
     res.setHeader("Cache-Control", "no-store")
+    // 上传的 HTML/SVG 属于用户内容，绝不能让它在网盘自身的源下执行：CSP 的
+    // sandbox 指令把它强制为不透明源，即使被直接打开（新标签页/第三方内嵌）
+    // 也拿不到本站 Cookie、父页面与 /api 会话；脚本仍可运行，静态页面不受影响。
+    if (useInline && SCRIPTABLE_EXT.has(extKey)) {
+      res.setHeader("Content-Security-Policy", "sandbox allow-scripts")
+    }
     if (!useInline) info("download", { msg: resolved.rel, ...actor(req) })
     res.sendFile(resolved.abs, { dotfiles: "allow", cacheControl: false }, (err) => {
       if (err && !res.headersSent) next(err)
@@ -289,7 +325,7 @@ async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
   }
 }
 
-router.get("/zip", requirePerm("downloadFolder"), async (req, res, next) => {
+router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, next) => {
   try {
     let rels = []
     if (req.query.paths) {
@@ -529,7 +565,7 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
     if (isExactHidden(rel)) {
       await saveConfig((draft) => {
         draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) =>
-          h === rel ? joinRel(parentRel, newName) : h
+          samePath(h, rel) ? joinRel(parentRel, newName) : h
         )
       })
     }
@@ -556,7 +592,7 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
     }
     await saveConfig((draft) => {
       draft.guestHiddenPaths = draft.guestHiddenPaths.filter(
-        (h) => !deleted.some((d) => h === d || h.startsWith(d + "/"))
+        (h) => !deleted.some((d) => isSameOrInside(h, d))
       )
     })
     info("delete", { msg: deleted.join(", "), ...actor(req) })
@@ -607,6 +643,7 @@ async function transfer(req, res, next, mode) {
     for (const p of sources) {
       const src = resolveSafe(p)
       if (mode === "move") blockSoft(src.rel)
+      if (mode === "copy") blockSoftCopyOut(src.rel)
       if (!src.rel) throw httpError(400, "非法来源")
       const stat = await assertExists(src.abs)
       if (
@@ -638,7 +675,7 @@ async function transfer(req, res, next, mode) {
       if (mode === "move" && isExactHidden(src.rel)) {
         const newRel = joinRel(dest.rel, finalName)
         await saveConfig((draft) => {
-          draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) => (h === src.rel ? newRel : h))
+          draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) => (samePath(h, src.rel) ? newRel : h))
         })
       }
       done.push(finalName)
@@ -653,7 +690,7 @@ async function transfer(req, res, next, mode) {
 router.post("/copy", requirePerm("copy"), (req, res, next) => transfer(req, res, next, "copy"))
 router.post("/move", requirePerm("move"), (req, res, next) => transfer(req, res, next, "move"))
 
-router.get("/stat", requirePerm("details"), async (req, res, next) => {
+router.get("/stat", requirePerm("details"), rateLimit, async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path))
     const stat = await assertExists(resolved.abs)
@@ -679,7 +716,7 @@ router.get("/stat", requirePerm("details"), async (req, res, next) => {
   }
 })
 
-router.get("/search", async (req, res, next) => {
+router.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) => {
   try {
     const q = String(req.query.q || "").trim()
     if (!q || q.length > 100) throw httpError(400, "请输入搜索关键词")
@@ -708,9 +745,7 @@ router.post(
       if (!stat.isDirectory()) throw httpError(400, "只能对文件夹设置访客可见性")
       const hidden = !!req.body?.hidden
       await saveConfig((draft) => {
-        const withoutCurrent = draft.guestHiddenPaths.filter(
-          (h) => h.toLowerCase() !== rel.toLowerCase()
-        )
+        const withoutCurrent = draft.guestHiddenPaths.filter((h) => !samePath(h, rel))
         draft.guestHiddenPaths = hidden ? [...withoutCurrent, rel] : withoutCurrent
       })
       info("guest_visibility", {
@@ -779,7 +814,7 @@ async function runCompressJob(job, items, paths, destAbs, req) {
   }
 }
 
-router.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
+router.post("/compress", requirePerm("compressZip"), rateLimit, async (req, res, next) => {
   try {
     const paths = req.body?.paths
     if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
@@ -790,7 +825,9 @@ router.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
     blockSoft(dest.rel)
     await assertDir(dest.abs)
     const forGuest = req.auth.role === "guest"
-    const items = await collectZipItems(paths.map((p) => normRel(p)), forGuest)
+    const sourceRels = paths.map((p) => normRel(p))
+    for (const rel of sourceRels) blockSoftCopyOut(rel)
+    const items = await collectZipItems(sourceRels, forGuest)
     if (!items.length) throw httpError(404, "没有可压缩的内容")
     await validateZipLimits(items, forGuest)
     const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest)
@@ -804,13 +841,13 @@ router.post("/compress", requirePerm("compressZip"), async (req, res, next) => {
 
 router.get("/compress/status", requirePerm("compressZip"), (req, res, next) => {
   try {
-    const status = jobStatus(String(req.query.job || ""))
+    const status = visibleJobStatus(req, String(req.query.job || ""))
     if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
     res.json(status)
   } catch (err) { next(err) }
 })
 
-router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
+router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
@@ -831,6 +868,11 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     if (directory.files.length > limits.maxFiles) {
       throw httpError(400, `ZIP 内文件数超出限制 (最多 ${limits.maxFiles} 个)`)
     }
+    // 先按包头声明值快速拒绝；真正的防护在解压循环里边写边累计
+    const declaredTotal = directory.files.reduce((sum, f) => sum + (Number(f.uncompressedSize) || 0), 0)
+    if (declaredTotal > limits.extractMaxTotalBytes) {
+      throw httpError(400, `ZIP 解压后总大小 (${Math.round(declaredTotal / 1024 / 1024)}MB) 超出限制 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`)
+    }
     const job = createJob("extract", { label: path.basename(abs), total: directory.files.length })
     job.createdBy = req.auth.username || "guest"
 
@@ -839,12 +881,18 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
     const extractRoot = await uniqueName(destAbs, zipBaseName)
     const extractDestAbs = path.join(destAbs, extractRoot)
     fs.mkdirSync(extractDestAbs, { recursive: true })
+    // 失败（含超出总量上限）时把半成品目录清掉，避免留下残缺结果与占满磁盘
+    const abortExtract = async (err) => {
+      await fs.promises.rm(extractDestAbs, { recursive: true, force: true }).catch(() => {})
+      failJob(job.id, err)
+    }
 
     res.json({ jobId: job.id })
 
     void (async () => {
       const destResolved = path.resolve(extractDestAbs)
       let count = 0
+      let written = 0
       for (const file of directory.files) {
         try {
           const entryPath = file.path
@@ -865,21 +913,27 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
           }
           const buf = await file.buffer()
           if (buf.length > limits.maxSingleBytes) continue
+          // 用实际写出的字节累计，压缩包头里声明的大小不可信
+          written += buf.length
+          if (written > limits.extractMaxTotalBytes) {
+            throw new Error(`解压后总大小超出限制 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`)
+          }
           await fs.promises.writeFile(outPath, buf)
           count += 1
         } catch (err) {
-          failJob(job.id, err)
+          await abortExtract(err)
           return
         }
         patchJob(job.id, {
           processed: count,
+          processedBytes: written,
           percent: Math.min(99, Math.round((count / directory.files.length) * 100)),
         })
       }
       patchJob(job.id, { count })
       finishJob(job.id, { state: "done" })
       info("extract", { msg: `${rel} → ${count} 文件`, ...actor(req) })
-    })().catch((err) => failJob(job.id, err))
+    })().catch((err) => abortExtract(err))
   } catch (err) {
     if (err.message?.includes("Cannot find module 'unzipper'")) {
       return next(httpError(500, "服务端未安装 unzipper 模块，请联系管理员"))
@@ -890,7 +944,7 @@ router.post("/extract", requirePerm("extractZip"), async (req, res, next) => {
 
 router.get("/extract/status", requirePerm("extractZip"), (req, res, next) => {
   try {
-    const status = jobStatus(String(req.query.job || ""))
+    const status = visibleJobStatus(req, String(req.query.job || ""))
     if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
     res.json(status)
   } catch (err) { next(err) }
@@ -911,103 +965,165 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
 })
 
 // ============ 多线程下载器 ============
-function validateHttpUrl(urlStr) {
+// 出站目标校验（DNS 解析 + 地址段判断）与"固定已校验 IP"的连接方式都在
+// netguard.js 中实现，详见该文件头部说明。
+const DOWNLOAD_TIMEOUT_MS = 60000
+
+function sizeLimitError(maxBytes) {
+  const err = new Error(`下载体积超出限制（${Math.round(maxBytes / 1024 / 1024)}MB）`)
+  err.status = 400
+  return err
+}
+
+function safeDecode(value) {
   try {
-    const u = new URL(urlStr)
-    if (u.protocol !== "http:" && u.protocol !== "https:") return "仅支持 http/https 链接"
-    if (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1") return "不允许下载本地地址"
-    const privateRanges = [/^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^169\.254\./]
-    if (privateRanges.some((r) => r.test(u.hostname))) return "不允许下载内网地址"
-    return null
+    return decodeURIComponent(value)
   } catch {
-    return "URL 格式无效"
+    return value
   }
 }
 
-async function downloadFileFromUrl(job, urlStr, destAbs) {
-  const parsed = new URL(urlStr)
-  const transport = parsed.protocol === "https:" ? https : http
-  const tempFile = path.join(TMP_DIR, `dl-${crypto.randomBytes(8).toString("hex")}`)
+function fetchHop(target, { tempFile, job, maxBytes }) {
+  return new Promise((resolve, reject) => {
+    const transport = target.url.protocol === "https:" ? https : http
+    let settled = false
+    const done = (fn) => (value) => { if (!settled) { settled = true; fn(value) } }
+    const ok = done(resolve)
+    const fail = done(reject)
 
-  return new Promise((resolve) => {
-    const req = transport.get(parsed, { rejectUnauthorized: false }, (res) => {
-      if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-        const loc = res.headers.location
-        if (loc) {
-          const err = validateHttpUrl(loc.startsWith("/") ? `${parsed.origin}${loc}` : loc)
-          if (err) return resolve(failJob(job.id, new Error(err)))
-          return resolve(downloadFileFromUrl(job, loc.startsWith("/") ? `${parsed.origin}${loc}` : loc, destAbs))
+    const options = {
+      protocol: target.url.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      path: `${target.url.pathname}${target.url.search}`,
+      method: "GET",
+      headers: {
+        Host: target.url.host,
+        "User-Agent": "ZeroShadow/1.0",
+        Accept: "*/*",
+      },
+      // 连接只使用已校验的地址：检查之后不再解析 DNS，堵住 DNS rebinding
+      lookup: pinnedLookup(target.addresses),
+      // 默认严格校验证书；只有显式设置 DOWNLOAD_URL_INSECURE_TLS=1 才放开
+      rejectUnauthorized: !insecureTlsAllowed(),
+    }
+
+    const req = transport.request(options, (res) => {
+      const status = res.statusCode || 0
+
+      if (REDIRECT_CODES.has(status)) {
+        const location = res.headers.location
+        res.resume()
+        if (!location) return fail(new Error("下载失败：重定向缺少目标地址"))
+        let nextUrl
+        try {
+          nextUrl = new URL(location, target.url).toString()
+        } catch {
+          return fail(new Error("重定向地址无效"))
         }
-        return resolve(failJob(job.id, new Error(`下载失败: 重定向无目标`)))
+        return ok({ redirect: nextUrl })
       }
-      if (res.statusCode < 200 || res.statusCode >= 400) {
-        return resolve(failJob(job.id, new Error(`下载失败: HTTP ${res.statusCode}`)))
+
+      if (status < 200 || status >= 400) {
+        res.resume()
+        return fail(new Error(`下载失败: HTTP ${status}`))
       }
-      const total = Number(res.headers["content-length"] || 0)
-      if (total > 0) patchJob(job.id, { totalBytes: total })
+
+      const declared = Number(res.headers["content-length"] || 0)
+      if (maxBytes > 0 && declared > maxBytes) {
+        res.resume()
+        return fail(sizeLimitError(maxBytes))
+      }
+      if (declared > 0) patchJob(job.id, { totalBytes: declared, processedBytes: 0, percent: 0 })
+
       const ws = fs.createWriteStream(tempFile)
       let loaded = 0
+      let tooBig = false
+
       res.on("data", (chunk) => {
         loaded += chunk.length
-        if (total > 0) {
-          patchJob(job.id, { processedBytes: loaded, percent: Math.min(99, Math.round((loaded / total) * 100)) })
+        if (maxBytes > 0 && loaded > maxBytes) {
+          tooBig = true
+          res.destroy()
+          ws.destroy()
+          return
         }
+        if (declared > 0) {
+          patchJob(job.id, { processedBytes: loaded, percent: Math.min(99, Math.round((loaded / declared) * 100)) })
+        }
+      })
+      res.on("error", (err) => { ws.destroy(); fail(err) })
+      ws.on("error", (err) => fail(err))
+      ws.on("close", () => {
+        if (tooBig) return fail(sizeLimitError(maxBytes))
+        if (declared > 0 && loaded < declared * 0.95) return fail(new Error("下载未完成（网络中断）"))
+        ok({ downloaded: loaded })
       })
       res.pipe(ws)
-      ws.on("error", (err) => {
-        ws.destroy(); resolve(failJob(job.id, err)); return
-      })
-      ws.on("close", async () => {
-        try {
-          const st = await fs.promises.stat(tempFile)
-          if (total > 0 && st.size < total * 0.95) {
-            await fs.promises.rm(tempFile, { force: true })
-            return resolve(failJob(job.id, new Error("下载未完成（网络中断）")))
-          }
-          await moveEntry(tempFile, destAbs)
-          finishJob(job.id, { state: "done" })
-          resolve()
-        } catch (err) {
-          resolve(failJob(job.id, err))
-        }
-      })
     })
-    req.on("error", (err) => { resolve(failJob(job.id, err)); return })
-    req.setTimeout(60000, () => { req.destroy(); resolve(failJob(job.id, new Error("连接超时"))); return })
+
+    req.on("error", (err) => fail(err))
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy()
+      fail(new Error("连接超时"))
+    })
+    // http.request 不会自动发送请求，必须 end()（漏掉会一直挂到超时）
+    req.end()
   })
 }
 
-router.post("/download-url", requirePerm("downloadUrl"), async (req, res, next) => {
+async function downloadFileFromUrl(job, firstTarget, destAbs, maxBytes) {
+  const tempFile = path.join(TMP_DIR, `dl-${crypto.randomBytes(8).toString("hex")}`)
+  try {
+    let target = firstTarget
+    for (let hop = 0; ; hop += 1) {
+      if (hop > MAX_REDIRECTS) throw new Error(`重定向次数过多（最多 ${MAX_REDIRECTS} 次）`)
+      const result = await fetchHop(target, { tempFile, job, maxBytes })
+      if (result.redirect) {
+        // 每一跳都重新解析并校验，避免"先公网后内网"的跳转绕过
+        target = await resolveDownloadTarget(result.redirect)
+        continue
+      }
+      const stat = await fs.promises.stat(tempFile)
+      if (!stat.size) throw new Error("下载内容为空")
+      await moveEntry(tempFile, destAbs)
+      finishJob(job.id, { state: "done" })
+      return
+    }
+  } catch (err) {
+    await fs.promises.rm(tempFile, { force: true }).catch(() => {})
+    failJob(job.id, err)
+  }
+}
+
+router.post("/download-url", requirePerm("downloadUrl"), rateLimit, async (req, res, next) => {
   try {
     const urlStr = String(req.body?.url || "").trim()
     if (!urlStr) throw httpError(400, "请输入下载链接")
-    const urlErr = validateHttpUrl(urlStr)
-    if (urlErr) throw httpError(400, urlErr)
-    const parts = typeof urlStr === "string" ? urlStr.split("/").filter(Boolean) : []
-    const rawName = parts.length ? decodeURIComponent(parts[parts.length - 1]) : "downloaded-file"
-    const fallbackName = rawName.split("?")[0].split("#")[0]
+    // 先做目标校验：不合格的地址直接 400，不创建任务
+    const target = await resolveDownloadTarget(urlStr)
+
+    const lastSegment = target.url.pathname.split("/").filter(Boolean).pop() || ""
+    const fallbackName = safeDecode(lastSegment) || "downloaded-file"
     const inputName = typeof req.body?.filename === "string" ? req.body.filename.trim() : null
-    const finalName = inputName || fallbackName || "downloaded-file"
-    const safeName = sanitizeFileName(finalName)
-    const dest = String(req.body?.dest || "")
-    const destResolved = resolveSafe(dest)
+    const safeName = sanitizeFileName(inputName || fallbackName)
+
+    const destResolved = resolveSafe(String(req.body?.dest || ""))
     blockSoft(destResolved.rel)
     await assertDir(destResolved.abs)
     const uniqueOut = await uniqueName(destResolved.abs, safeName)
     const outPath = path.join(destResolved.abs, uniqueOut)
 
-    const label = uniqueOut
-    const contentLength = 0  // unknown until HEAD
-    const job = createJob("download", { label, total: 100, totalBytes: contentLength })
+    const job = createJob("download", { label: uniqueOut, total: 100, totalBytes: 0 })
     job.createdBy = req.auth.username || "guest"
     res.json({ jobId: job.id })
-    void downloadFileFromUrl(job, urlStr, outPath)
+    void downloadFileFromUrl(job, target, outPath, downloadUrlLimitBytes())
   } catch (err) { next(err) }
 })
 
 router.get("/download-url/status", requirePerm("downloadUrl"), (req, res, next) => {
   try {
-    const status = jobStatus(String(req.query.job || ""))
+    const status = visibleJobStatus(req, String(req.query.job || ""))
     if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
     res.json(status)
   } catch (err) { next(err) }

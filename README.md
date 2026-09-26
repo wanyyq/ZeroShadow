@@ -134,6 +134,66 @@ pnpm start        # 启动服务 (http://localhost:12345)
 | `SESSION_HOURS`        | `72`           | 登录有效期（小时）                        |
 | `FILES_DIR`            | `./data/files` | 文件存储根目录                          |
 | `FILES_SOFT_DIR`       | 无              | 外部只读映射，JSON 格式：`{"显示名":"/真实路径"}` |
+| `TRUST_PROXY`          | 关闭             | 经隧道/反代访问时取真实客户端 IP（见下节）          |
+| `DOWNLOAD_URL_ALLOW_PRIVATE` | 关闭       | 允许链接下载访问内网地址（等效于后台开关）          |
+| `DOWNLOAD_URL_ALLOW_HOSTS`   | 无         | 仅放开指定主机的内网访问，逗号分隔              |
+| `DOWNLOAD_URL_INSECURE_TLS`  | 关闭       | 跳过链接下载的 TLS 证书校验（不推荐）           |
+| `NOLOG`                | 关闭             | 只写日志文件，不输出控制台                      |
+
+### 客户端 IP（隧道 / 反向代理）
+
+serveo、pinggy 这类隧道会让所有请求看起来来自 `127.0.0.1`，导致日志里的 IP 失去
+意义、按 IP 的失败限速会误伤所有人。**只通过隧道访问时**在 `.env` 里开启：
+
+```env
+TRUST_PROXY=loopback      # 也支持跳数（1）或网段（10.0.0.0/8，可逗号分隔）
+```
+
+服务同时还能被直接访问（不经过代理）时请保持关闭，否则客户端可伪造
+`X-Forwarded-For` 绕过限速。启动日志会打印当前生效模式，后台「设置 → 安全」也可查看。
+
+---
+
+## 安全设置（后台 → 设置 → 安全）
+
+所有安全防护都由超管在后台自由开关或调整，默认值偏保守：
+
+| 设置项                  | 默认    | 说明                                       |
+|:-------------------- |:----- |:---------------------------------------- |
+| 接口限流                 | 开 / 120 次每分钟 | 限制单 IP 每分钟的打包、解压、搜索、详情、链接下载次数；普通浏览与单文件下载不受影响 |
+| 解压总量最大               | 512 MB | 超出即中止解压并清理已写内容                            |
+| 允许复制只读映射目录的内容        | 关     | 关闭时外部映射目录的内容不能复制/压缩进网盘目录                  |
+| 作业进度仅创建者可见           | 开     | 关闭后成员之间可互看任务文件名与进度                        |
+| 链接下载允许访问内网地址         | 关     | 关闭时禁止抓取内网/回环/云元数据地址（防 SSRF）               |
+| 访客浏览目录（权限页）          | 开     | 关闭后未登录用户无法列出目录与搜索                        |
+
+---
+
+## 安全回归测试
+
+`security-test.ps1` 把审计结论固化成可重复执行的断言（凭据卫生、CSRF、路径穿越、
+访客权限开关语义、SSRF 12 种写法、HTML/SVG 沙箱、zip-slip、客户端 IP、登录锁定、
+解压上限、限流、只读映射目录、作业归属等）：
+
+```powershell
+# 1) 起一个测试实例（建议独立端口，避免打扰正在使用的服务）
+$env:HOST='127.0.0.1'; $env:PORT='5179'; node server/index.js
+
+# 2) 另开一个终端执行
+powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl http://127.0.0.1:5179
+```
+
+可选参数：`-PositiveProbeUrl`（正向下载验证，需服务端用 `DOWNLOAD_URL_ALLOW_HOSTS`
+放开该主机）、`-LoopbackAllowlisted`、`-TrustProxyMode`、`-TestLockout`（会消耗
+IP 失败额度，建议对全新实例运行）、`-SoftDirName`（验证只读映射目录）、
+`-TestJobOwnership`（临时创建并删除一个成员账号）。退出码 = 失败项数量。
+
+发布打包由 `package-release.ps1` 完成，它会在打包前清除 `.env`、`data/.jwt-secret`
+等运行时密钥，并在检出密钥时拒绝出包（`Auto-building.bat` 已接入）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File package-release.ps1
+```
 
 ---
 
@@ -149,6 +209,8 @@ ZeroShadow/
 │       ├── env.js          # .env 解析 · 密钥管理
 │       ├── files.js        # 文件系统操作
 │       ├── logger.js       # 结构化日志
+│       ├── netguard.js     # 出站目标校验（DNS + 地址段 + 固定 IP，防 SSRF）
+│       ├── ratelimit.js    # 重型接口按 IP 限流
 │       ├── safety.js       # 路径校验 · 文件名清洗
 │       ├── status.js       # 服务器状态收集
 │       ├── store.js        # 原子写入 · 文件锁
