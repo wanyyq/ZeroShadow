@@ -12,17 +12,20 @@ on:
       - main
     tags:
       - "v*"
-    paths:
-      - "server/**"
-      - "web/**"
+    # 这里刻意**不加** paths 过滤。
+    #
+    # 原因（这是踩过的坑）：GitHub 会把 paths 过滤同时应用到标签推送。而
+    # `git tag v1.0.0 && git push --tags` 常常是「标签指向刚推过的那个提交」，
+    # 此时标签推送的变更集为空 → 不匹配任何 paths → 工作流根本不触发 →
+    # 一个 Release 都不会产生。发版恰恰最依赖标签触发，所以标签这条路必须无条件跑。
+    #
+    # 代价是推 main 也会构建 5 个平台。若想省 CI 时间，用下面的 paths-ignore
+    # 把纯文档改动排除掉（注意仍然是 ignore 而不是白名单，标签推送不受影响）。
+    paths-ignore:
+      - "**.md"
       - "docs/**"
-      - "package.json"
-      - "build-release.ps1"
-      - "package-release.ps1"
-      - ".env.example"
-      - "LICENSE"
-      - "README.md"
-      - ".github/workflows/build-release.yml"
+      - ".gitignore"
+      - ".gitattributes"
   pull_request:
     paths:
       - "server/**"
@@ -58,8 +61,16 @@ jobs:
           # with an explanation instead of a cryptic pkg 404.
           - os: windows-latest
             platform: windows-x64
+          # windows-arm64 currently FAILS inside pkg (not a config problem).
+          # Evidence: the base runtime for it downloads fine and its SHA256
+          # matches pkg-fetch's own EXPECTED_HASHES exactly, yet pkg 5.8.1 still
+          # fails afterwards. So this is a pkg limitation for win-arm64.
+          # continue-on-error keeps that failure from blocking the other four
+          # archives and the Release. Remove it once the toolchain is fixed
+          # (e.g. by switching to @yao-pkg/pkg).
           - os: windows-latest
             platform: windows-arm64
+            experimental: true
           - os: ubuntu-latest
             platform: linux-x64
           - os: ubuntu-latest
@@ -68,6 +79,10 @@ jobs:
           # linux-armv7, and a static binary is better for distribution anyway.
           - os: ubuntu-latest
             platform: linux-armv7
+
+    # 被标记为 experimental 的平台允许失败：这样 4 个能出来的归档 + Release
+    # 不会被一个平台拖住。日志里那一格仍会显示红色，便于日后排查。
+    continue-on-error: ${{ matrix.experimental == true }}
 
     steps:
       - name: Checkout
@@ -169,15 +184,83 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # On a v* tag push, publish the archives as release assets. `gh` is
-      # preinstalled on the runners, so no third-party release action is needed.
-      - name: Attach archive to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+  # ---------------------------------------------------------------------------
+  #  发布：把各平台的归档汇总到一个 Release 里
+  #
+  #  为什么不放在上面的矩阵 job 里逐台上传（原来就是这么写的，已改）：
+  #  4 个 job 会**并发**去 gh release create 同一个标签，先到者成功、后到者
+  #  报 "already exists" 而失败——而那几个 job 本身构建是成功的。集中到这里的
+  #  一个 job 做，既没有竞态，也只需要一次 API 调用。
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish release
+    needs: build
+    # 只在推 v* 标签时发布；分支推送与 PR 只留 Actions 产物。
+    #
+    # 为什么必须带 always()：默认行为是「needs 的 job 失败/被跳过 → 本 job 也被跳过」。
+    # 那样只要有一个平台失败，Release 就会**静默不发布**（这正是之前"Releases 一个都没有"
+    # 那类问题的成因之一）。always() 保证标签推送一定会走到这里，再由下面的
+    # 「必需平台检查」明确判断该不该发、以及发哪些。
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "*-archive"
+          merge-multiple: true
+
+      - name: Check which platforms made it
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh artifacts/ || true
+          echo "----- 各平台归档 -----"
+          REQUIRED="windows-x64 linux-x64 linux-arm64 linux-armv7"
+          MISSING=""
+          for p in $REQUIRED; do
+            if ls artifacts/ZeroShadow-*-"$p".zip >/dev/null 2>&1; then
+              echo "  [ok]   $p"
+            else
+              echo "  [MISS] $p"
+              MISSING="$MISSING $p"
+            fi
+          done
+          # windows-arm64 目前受 pkg 限制，缺了只警告不拦
+          if ls artifacts/ZeroShadow-*-windows-arm64.zip >/dev/null 2>&1; then
+            echo "  [ok]   windows-arm64"
+          else
+            echo "  [warn] windows-arm64 缺失（pkg 对该目标的已知限制）"
+          fi
+          if [ -n "$MISSING" ]; then
+            echo "::error::必需平台未产出归档:$MISSING —— 拒绝发布不完整的 Release"
+            exit 1
+          fi
+          echo "----- 全部必需平台就位 -----"
+
+      - name: Create release and upload archives
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" ZeroShadow-*.zip --clobber
+          TAG="$GITHUB_REF_NAME"
+
+          # 幂等：重复推送同一个标签不会报错
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists, will just (re)upload assets"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+
+          # --clobber 让重跑覆盖同名资产
+          find artifacts -name 'ZeroShadow-*.zip' -print0 \
+            | xargs -0 gh release upload "$TAG" --clobber
+
+          echo "----- 已发布 -----"
+          gh release view "$TAG" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size/1048576*100|floor/100) MB"'
+
