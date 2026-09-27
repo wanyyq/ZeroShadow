@@ -32,6 +32,7 @@ data/
 .env.*.local
 !.env.example
 
+
 # ---- 发布打包产物 ----
 ZeroShadow-Release/
 # 多平台发布包，例如 ZeroShadow-1.1.0-windows-x64.zip
@@ -40,6 +41,7 @@ ZeroShadow-Release.zip
 # pkg 生成的各平台可执行文件（Windows 与类 Unix 的命名不同）
 server/ZeroShadow.exe
 server/ZeroShadow
+!!发行/
 
 # ---- 日志 ----
 *.log

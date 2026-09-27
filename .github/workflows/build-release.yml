@@ -244,16 +244,27 @@ jobs:
       - name: Create release and upload archives
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # 优先用你自己配的 RELEASE_TOKEN（见下方说明），没配就退回内置 token。
+          #
+          # 为什么需要这个后备：仓库/组织的 Settings → Actions → General →
+          # Workflow permissions 若是「Read repository contents permissions」，
+          # 那么即使本文件里写了 permissions: contents: write，GitHub 也会把
+          # GITHUB_TOKEN **降级为只读**，gh release create 于是报
+          # "Resource not accessible by integration (HTTP 403)"。
+          # 那种情况下改仓库设置，或配一个带 repo 权限的 PAT 存成 RELEASE_TOKEN 即可。
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
 
-          # 幂等：重复推送同一个标签不会报错
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists, will just (re)upload assets"
           else
-            gh release create "$TAG" --title "$TAG" --generate-notes
+            echo "creating release $TAG ..."
+            if ! gh release create "$TAG" --title "$TAG" --generate-notes; then
+              echo "::error::创建 Release 失败。最常见原因是 GITHUB_TOKEN 只读，见本步骤上方的注释。"
+              exit 1
+            fi
           fi
 
           # --clobber 让重跑覆盖同名资产
