@@ -140,7 +140,7 @@ carol pass888
 
 这一页分成六块。**改数值后别忘了点该块的「保存」**。
 
-每一块的条目与默认值如下；权限点之间的依赖关系见 [权限与角色](/docs/guide/permissions)。
+每一块的条目与默认值如下；权限点之间的依赖关系见 [权限与角色](/docs/zeroshadow/guide/permissions)。
 
 ### 1. 上传大小限制（单文件 MB）
 
@@ -174,7 +174,7 @@ carol pass888
 
 - **文件操作**（总开关 `fileWrite`）
   - 子项：上传文件、上传文件夹、新建文件夹、复制、移动、重命名、删除
-  - 总开关关闭时子项整体变灰且失效（原因见 [权限与角色](/docs/guide/permissions) 的「权限之间的依赖关系」一节）
+  - 总开关关闭时子项整体变灰且失效（原因见 [权限与角色](/docs/zeroshadow/guide/permissions) 的「权限之间的依赖关系」一节）
 - **下载与预览**：浏览目录、下载文件、下载文件夹、允许预览
 - **高级功能**：压缩为 Zip、解压 Zip、多线程下载器、HTML 全屏预览、在线编辑文件
 - **管理与账户**：管理访客可见性、修改密码
@@ -233,7 +233,7 @@ carol pass888
 - 只通过隧道 / 反向代理访问时设为 `loopback`，日志与按 IP 限速才会用真实客户端 IP；
 - 如果服务**同时能被直接访问**，请保持关闭，否则客户端可以伪造该请求头绕过限速。
 
-详细取值与取舍见 [公网访问与隧道](/docs/admin/tunnel#4-trust_proxy-该怎么填)。
+详细取值与取舍见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel#4-trust_proxy-该怎么填)。
 
 ## 公网
 
@@ -262,13 +262,13 @@ carol pass888
 `错误: 未检测到 SSH 客户端，请先安装 OpenSSH Client`，并给出 Windows 的安装路径提示。
 </Callout>
 
-完整的隧道模式对照、`ssh` 参数与排查方法见 [公网访问与隧道](/docs/admin/tunnel)。
+完整的隧道模式对照、`ssh` 参数与排查方法见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 
 ## 相关页面
 
 <Cards>
-  <Card title="配置参考" href="/docs/admin/configuration" description=".env 与 data/config.json 全部字段逐条对照" />
-  <Card title="公网访问与隧道" href="/docs/admin/tunnel" description="隧道模式、ssh 参数与排查方法" />
-  <Card title="权限与角色" href="/docs/guide/permissions" description="三角色权限矩阵与依赖关系" />
-  <Card title="安全设计" href="/docs/security/design" description="限流、SSRF、CSRF 等防护的完整取舍" />
+  <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description=".env 与 data/config.json 全部字段逐条对照" />
+  <Card title="公网访问与隧道" href="/docs/zeroshadow/admin/tunnel" description="隧道模式、ssh 参数与排查方法" />
+  <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="三角色权限矩阵与依赖关系" />
+  <Card title="安全设计" href="/docs/zeroshadow/security/design" description="限流、SSRF、CSRF 等防护的完整取舍" />
 </Cards>

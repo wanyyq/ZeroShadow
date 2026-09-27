@@ -15,12 +15,12 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
 `data/config.json` 两个文件，随时可迁移、可备份、可整目录带走。
 
 <Cards>
-  <Card title="快速开始" href="/docs/getting-started/quickstart" description="从安装依赖到第一次登录，五步跑起来" />
-  <Card title="使用手册" href="/docs/guide/manual" description="上传下载、预览、在线编辑、压缩解压、快捷方式" />
-  <Card title="权限与角色" href="/docs/guide/permissions" description="三种角色的完整权限矩阵" />
-  <Card title="安全设计" href="/docs/security/design" description="逐项拆解认证、路径安全、SSRF 防护与限流" />
-  <Card title="配置参考" href="/docs/admin/configuration" description=".env 与 config.json 的全部字段与默认值" />
-  <Card title="API 参考" href="/docs/api/reference" description="全部 HTTP 接口、参数、权限要求与错误码" />
+  <Card title="快速开始" href="/docs/zeroshadow/getting-started/quickstart" description="从安装依赖到第一次登录，五步跑起来" />
+  <Card title="使用手册" href="/docs/zeroshadow/guide/manual" description="上传下载、预览、在线编辑、压缩解压、快捷方式" />
+  <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="三种角色的完整权限矩阵" />
+  <Card title="安全设计" href="/docs/zeroshadow/security/design" description="逐项拆解认证、路径安全、SSRF 防护与限流" />
+  <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description=".env 与 config.json 的全部字段与默认值" />
+  <Card title="API 参考" href="/docs/zeroshadow/api/reference" description="全部 HTTP 接口、参数、权限要求与错误码" />
 </Cards>
 
 ## 为什么值得一用
@@ -74,7 +74,7 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
 - 团队成员由超管**批量创建**（一次最多 200 个）、启用 / 禁用、改用户名、重置密码，人数上限 500
 - 访客**无需登录**即可浏览与下载，可对指定文件夹逐个设置为「对访客隐藏」
 
-完整矩阵见 [权限与角色](/docs/guide/permissions)。
+完整矩阵见 [权限与角色](/docs/zeroshadow/guide/permissions)。
 
 ### 客户端体验
 
@@ -89,7 +89,7 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
 - 内置四种模式：**pinggy.io** / **localhost.run** / **serveo.net** / **自定义 SSH 服务器**
 - 掉线自动重连（5 秒起指数退避，最长 60 秒一轮），并记录重连次数
 
-细节见 [公网访问与隧道](/docs/admin/tunnel)。
+细节见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 
 ### 安全加固
 
@@ -102,7 +102,7 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
 - 上传的 HTML / SVG 内联返回时强制 `CSP: sandbox`，不会在网盘自身的源里执行脚本
 - 安全响应头：`Content-Security-Policy`、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`
 
-更完整的机制说明（含每一项的开关与默认值）见 [安全设计](/docs/security/design)。
+更完整的机制说明（含每一项的开关与默认值）见 [安全设计](/docs/zeroshadow/security/design)。
 
 ## 技术栈
 
@@ -124,14 +124,14 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
 
 | 你的身份 / 目的 | 建议阅读顺序 |
 |:--|:--|
-| 第一次部署，想赶紧跑起来 | [快速开始](/docs/getting-started/quickstart) → [常见问题](/docs/getting-started/faq) |
-| 想知道网盘怎么用 | [使用手册](/docs/guide/manual) → [权限与角色](/docs/guide/permissions) |
-| 我是超级管理员 | [管理员指南](/docs/admin/admin-guide) → [权限与角色](/docs/guide/permissions) → [配置参考](/docs/admin/configuration) |
-| 要开放到公网 | [公网访问与隧道](/docs/admin/tunnel) → [安全设计](/docs/security/design) |
-| 关心安全性 | [安全设计](/docs/security/design) → [公网访问与隧道](/docs/admin/tunnel) |
-| 要改代码 / 二次开发 | [架构与目录结构](/docs/development/architecture) → [开发与构建](/docs/development/build) → [API 参考](/docs/api/reference) |
-| 要对接接口 / 写脚本 | [API 参考](/docs/api/reference) → [配置参考](/docs/admin/configuration) |
-| 要打包发布 | [打包与 CI](/docs/development/release) |
+| 第一次部署，想赶紧跑起来 | [快速开始](/docs/zeroshadow/getting-started/quickstart) → [常见问题](/docs/zeroshadow/getting-started/faq) |
+| 想知道网盘怎么用 | [使用手册](/docs/zeroshadow/guide/manual) → [权限与角色](/docs/zeroshadow/guide/permissions) |
+| 我是超级管理员 | [管理员指南](/docs/zeroshadow/admin/admin-guide) → [权限与角色](/docs/zeroshadow/guide/permissions) → [配置参考](/docs/zeroshadow/admin/configuration) |
+| 要开放到公网 | [公网访问与隧道](/docs/zeroshadow/admin/tunnel) → [安全设计](/docs/zeroshadow/security/design) |
+| 关心安全性 | [安全设计](/docs/zeroshadow/security/design) → [公网访问与隧道](/docs/zeroshadow/admin/tunnel) |
+| 要改代码 / 二次开发 | [架构与目录结构](/docs/zeroshadow/development/architecture) → [开发与构建](/docs/zeroshadow/development/build) → [API 参考](/docs/zeroshadow/api/reference) |
+| 要对接接口 / 写脚本 | [API 参考](/docs/zeroshadow/api/reference) → [配置参考](/docs/zeroshadow/admin/configuration) |
+| 要打包发布 | [打包与 CI](/docs/zeroshadow/development/release) |
 
 ## 许可
 

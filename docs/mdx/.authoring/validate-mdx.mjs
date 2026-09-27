@@ -30,9 +30,33 @@
 import fs from "node:fs"
 import path from "node:path"
 
-const bundleRoot = path.resolve(process.argv[2] ?? path.join(import.meta.dirname, ".."))
+const bundleRoot = path.resolve(
+  process.argv.find((a) => !a.startsWith("--") && a !== process.argv[0] && a !== process.argv[1])
+    ?? path.join(import.meta.dirname, "..")
+)
 const contentRoot = path.join(bundleRoot, "content", "docs")
 const publicRoot = path.join(bundleRoot, "public")
+
+/**
+ * 站内链接的路径前缀。
+ *
+ * 这套文档是按「内容根 = 文档包根」写的，所以链接形如 /docs/guide/manual。
+ * 但若被嵌进已有文档库的一层子目录（Fumadocs 的 root folder，例如
+ * content/docs/zeroshadow/），真实 URL 会变成 /docs/zeroshadow/guide/manual。
+ *
+ * 这时**不要**去改前缀，而是用 --scope 把扫描范围限定到那个子目录：
+ *
+ *   # 在站点根目录执行：只校验 zeroshadow 这一套，路由按 /docs/zeroshadow 计算
+ *   node <文档包>/.authoring/validate-mdx.mjs . --scope=zeroshadow
+ *
+ * 原因：扫描根仍是 content/docs，子目录名本来就会出现在相对路径里，
+ * 所以站点路径自然就是 /docs/zeroshadow/xxx —— 用 --route-prefix 反而会多加一层。
+ */
+const argOf = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+
+const routePrefix = (argOf("route-prefix") ?? "/docs").replace(/\/+$/, "")
+/** 只校验 content/docs 下的某个子目录（留空 = 全部） */
+const scope = (argOf("scope") ?? "").replace(/^\/+|\/+$/g, "")
 
 const ALLOWED_COMPONENTS = new Set([
   "Callout",
@@ -69,14 +93,51 @@ if (!fs.existsSync(contentRoot)) {
   console.error(`找不到内容目录：${contentRoot}`)
   process.exit(1)
 }
-const files = walk(contentRoot).sort()
+
+/** 实际扫描的根：默认整个 content/docs，--scope 可限定到某个软件子目录 */
+const scanRoot = scope ? path.join(contentRoot, scope) : contentRoot
+if (!fs.existsSync(scanRoot)) {
+  console.error(`找不到内容目录：${scanRoot}`)
+  process.exit(1)
+}
+/** 站点路径前缀：/docs + scope */
+const routeBase = `${routePrefix}${scope ? "/" + scope : ""}`
+
+const files = walk(scanRoot).sort()
 
 // 站点路径 -> 文件，用于校验站内链接
+// <scanRoot>/index.mdx        -> <routeBase>
+// <scanRoot>/guide/manual.mdx -> <routeBase>/guide/manual
 const routeToFile = new Map()
 for (const file of files) {
-  let rel = path.relative(contentRoot, file).replace(/\\/g, "/").replace(/\.mdx$/, "")
+  let rel = path.relative(scanRoot, file).replace(/\\/g, "/").replace(/\.mdx$/, "")
   if (rel === "index") rel = ""
-  routeToFile.set(`/docs${rel ? "/" + rel : ""}`, file)
+  routeToFile.set(`${routeBase}${rel ? "/" + rel : ""}`, file)
+}
+
+// 站内链接正则：**按最外层前缀（/docs）匹配**，而不是按 routeBase 匹配。
+// 这一点很关键：如果按 routeBase 匹配，那么"嵌在子目录里但忘了加前缀"的链接
+// 根本不会被匹配到，于是静默通过——恰恰放过了最该抓的错误。
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const linkRe = new RegExp(`\\]\\((${escapeRe(routePrefix)}[^)\\s#]*)(#[^)\\s]*)?\\)`, "g")
+const hrefRe = new RegExp(`href\\s*=\\s*"(${escapeRe(routePrefix)}[^"\\s#]*)(#[^"\\s]*)?"`, "g")
+
+/** 检查一个站内路径：先看前缀对不对，再看页面是否存在 */
+function checkRoute(file, target, line, where) {
+  const clean = target.replace(/\/$/, "")
+  if (clean !== routeBase && !clean.startsWith(routeBase + "/")) {
+    report(
+      file,
+      line,
+      "link",
+      `${where}缺少前缀 ${routeBase}：${target}` +
+        `（内容嵌在子目录里时必须加这层，可用 integration/apply-docs-prefix.mjs 批量处理）`
+    )
+    return
+  }
+  if (!routeToFile.has(clean)) {
+    report(file, line, "link", `${where}指向不存在的页面：${target}`)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -238,17 +299,11 @@ for (const file of files) {
   }
 
   // ---- 站内链接：Markdown 形式 + 组件 href 属性 ----
-  for (const m of noCode.matchAll(/\]\((\/docs[^)\s#]*)(#[^)\s]*)?\)/g)) {
-    const target = m[1].replace(/\/$/, "")
-    if (!routeToFile.has(target)) {
-      report(relFile, bodyLineOf(m.index), "link", `站内链接指向不存在的页面：${m[1]}`)
-    }
+  for (const m of noCode.matchAll(linkRe)) {
+    checkRoute(relFile, m[1], bodyLineOf(m.index), "站内链接")
   }
-  for (const m of noCode.matchAll(/href\s*=\s*"(\/docs[^"\s#]*)(#[^"\s]*)?"/g)) {
-    const target = m[1].replace(/\/$/, "")
-    if (!routeToFile.has(target)) {
-      report(relFile, bodyLineOf(m.index), "link", `组件 href 指向不存在的页面：${m[1]}`)
-    }
+  for (const m of noCode.matchAll(hrefRe)) {
+    checkRoute(relFile, m[1], bodyLineOf(m.index), "组件 href")
   }
   for (const m of noCode.matchAll(/\]\(([^)\s]+\.mdx?)(#[^)\s]*)?\)/g)) {
     report(relFile, bodyLineOf(m.index), "link",
@@ -307,12 +362,17 @@ function walkDirs(dir) {
     if (entry.isDirectory()) walkDirs(path.join(dir, entry.name))
   }
 }
-walkDirs(contentRoot)
+walkDirs(scanRoot)
 
 // ---------------------------------------------------------------------------
 // 报告
 // ---------------------------------------------------------------------------
-console.log(`校验 ${files.length} 个 MDX 页面\n`)
+console.log(`校验 ${files.length} 个 MDX 页面`)
+console.log(`扫描范围：${path.relative(bundleRoot, scanRoot) || "."}    站点路径前缀：${routeBase}`)
+if (!scope && !argOf("route-prefix")) {
+  console.log("（若这套内容嵌在文档库的子目录里，请加 --scope=<子目录名> 以便正确校验站内链接）")
+}
+console.log("")
 
 if (problems.length) {
   console.log(`发现 ${problems.length} 个问题：\n`)

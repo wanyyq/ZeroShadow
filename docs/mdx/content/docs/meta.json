@@ -1,5 +1,7 @@
 {
-  "title": "ZeroShadow 文档",
+  "title": "ZeroShadow",
+  "description": "轻量级局域网网盘 ZeroShadow 的完整文档",
+  "root": true,
   "pages": [
     "index",
     "getting-started",

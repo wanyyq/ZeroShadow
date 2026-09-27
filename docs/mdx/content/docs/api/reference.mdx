@@ -9,7 +9,7 @@ ZeroShadow 的服务端是一套纯 JSON + 文件流的 HTTP 接口，前端只�
 
 <Callout type="info" title="对照源码阅读">
 路由在 `server/src/routes/`（`auth.js` / `fs.js` / `admin.js`），中间件与静态托管在 `server/index.js`。
-权限点的完整矩阵见 [权限与角色](/docs/guide/permissions)，行为约束与资源上限见 [安全设计](/docs/security/design)。
+权限点的完整矩阵见 [权限与角色](/docs/zeroshadow/guide/permissions)，行为约束与资源上限见 [安全设计](/docs/zeroshadow/security/design)。
 </Callout>
 
 ## 通用约定
@@ -91,7 +91,7 @@ X-Requested-With: XMLHttpRequest
 ### 权限点名称
 
 下面各节的"权限"一行使用的名称与 `data/config.json` 里的字段一致
-（`memberPerms.*` / `guestPerms.*`），对应关系见 [权限与角色](/docs/guide/permissions)。
+（`memberPerms.*` / `guestPerms.*`），对应关系见 [权限与角色](/docs/zeroshadow/guide/permissions)。
 本节统一写作「中文名（`memberPerms.键名`）」，访客侧的对应字段是 `guestPerms.键名`。
 标 `—` 表示该接口只有角色要求、没有单独的权限开关。
 
@@ -505,7 +505,7 @@ X-Requested-With: XMLHttpRequest
 - 请求体：`{ "path": "包.zip", "dest": "目标目录" }`（`dest` 省略时解压到 zip 所在目录）
 - 响应：`{ "jobId": "..." }`
 - 规则：只接受 `.zip`；解压到**以压缩包名命名的新文件夹**里（重名自动加 `(1)`）；
-- 错误与上限：见 [安全设计 · 资源上限](/docs/security/design)：
+- 错误与上限：见 [安全设计 · 资源上限](/docs/zeroshadow/security/design)：
   - `400 非法路径`、`400 只能解压 zip 文件`、`400 目录不存在`
   - `400 ZIP 文件超出解压大小限制 (NMB)`
   - `400 ZIP 内文件数超出限制 (最多 N 个)`
@@ -598,7 +598,7 @@ X-Requested-With: XMLHttpRequest
 
 ### GET /api/admin/config
 
-返回完整的配置对象（字段结构见 [配置参考](/docs/admin/configuration) 的 `data/config.json` 全部字段一节）。
+返回完整的配置对象（字段结构见 [配置参考](/docs/zeroshadow/admin/configuration) 的 `data/config.json` 全部字段一节）。
 
 ### PATCH /api/admin/config
 
@@ -751,7 +751,7 @@ X-Requested-With: XMLHttpRequest
   - `SSH 目标格式无效`
   - `SSH 目标格式无效，仅支持 user@host 或 user@host:端口`
 - 说明：调用后会立即按新配置生效（开启、关闭或重连）。
-- 隧道各模式的差异见 [公网访问与隧道](/docs/admin/tunnel)。
+- 隧道各模式的差异见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 
 ---
 
@@ -878,7 +878,7 @@ while True:
 | 其它任意路径 | 返回前端应用（SPA fallback） | — |
 
 <Cards>
-  <Card title="权限与角色" href="/docs/guide/permissions" description="权限点默认值与依赖关系" />
-  <Card title="安全设计" href="/docs/security/design" description="限流、穿越校验与资源上限" />
-  <Card title="配置参考" href="/docs/admin/configuration" description="data/config.json 全部字段" />
+  <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="权限点默认值与依赖关系" />
+  <Card title="安全设计" href="/docs/zeroshadow/security/design" description="限流、穿越校验与资源上限" />
+  <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description="data/config.json 全部字段" />
 </Cards>

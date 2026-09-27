@@ -6,7 +6,7 @@ icon: ShieldCheck
 
 这一篇说明 ZeroShadow **实际实现了哪些防护、默认值是什么、边界在哪里**。
 所有结论都能在源码里找到对应位置，标注了文件便于核对；想直接跑一遍验证，用
-[`security-test.ps1`](/docs/development/testing)。
+[`security-test.ps1`](/docs/zeroshadow/development/testing)。
 
 <Callout type="info" title="读取方式">
 下文每一项都按「威胁 → 防护做法 → 对应开关」给出，开关名、环境变量名与默认值全部照源码原样保留，
@@ -419,7 +419,7 @@ frame-ancestors 'self'
 限流状态保存在**内存**里，服务重启即清零；也不跨多进程共享（本服务设计为单进程运行）。
 限流的有效性**依赖客户端 IP 是否正确**——如果部署在代理后面却没配 `TRUST_PROXY`，
 所有人会共用一个 IP 计数；配错（同时又能被直连）则等于没限流。详见
-[公网访问与隧道](/docs/admin/tunnel)。
+[公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 </Callout>
 
 ### 限流与上限相关开关
@@ -517,8 +517,8 @@ SSRF 12 种写法、HTML/SVG 沙箱、既有防护不退化（zip-slip）、凭�
 ## 相关页面
 
 <Cards>
-  <Card title="公网访问与隧道" href="/docs/admin/tunnel" description="TRUST_PROXY 该怎么填、隧道与 HTTPS 入口" />
-  <Card title="配置参考" href="/docs/admin/configuration" description="全部环境变量与后台开关的完整清单" />
-  <Card title="管理员指南" href="/docs/admin/admin-guide" description="设置 → 安全里的每一项开关在哪里调" />
-  <Card title="权限与角色" href="/docs/guide/permissions" description="超管 / 成员 / 访客的能力边界" />
+  <Card title="公网访问与隧道" href="/docs/zeroshadow/admin/tunnel" description="TRUST_PROXY 该怎么填、隧道与 HTTPS 入口" />
+  <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description="全部环境变量与后台开关的完整清单" />
+  <Card title="管理员指南" href="/docs/zeroshadow/admin/admin-guide" description="设置 → 安全里的每一项开关在哪里调" />
+  <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="超管 / 成员 / 访客的能力边界" />
 </Cards>

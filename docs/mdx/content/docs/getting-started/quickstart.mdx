@@ -132,7 +132,7 @@ pnpm start
 就会读 `server/data/`。回到仓库根重新 `pnpm start` 即可看到原来的数据。
 </Callout>
 
-本地开发与构建的完整约定见 [开发与构建](/docs/development/build)，各配置项含义见 [配置参考](/docs/admin/configuration)。
+本地开发与构建的完整约定见 [开发与构建](/docs/zeroshadow/development/build)，各配置项含义见 [配置参考](/docs/zeroshadow/admin/configuration)。
 
 ## 第一次登录
 
@@ -149,7 +149,7 @@ pnpm start
 | 场景 | 做法 |
 |:-------------- |:--------------------------------------- |
 | **同一局域网** | 别人直接访问 `http://<你的局域网IP>:12345`，无需登录（访客）或使用你创建的成员账号 |
-| **跨网络 / 外网** | 用内置的 SSH 反向隧道，详见 [公网访问与隧道](/docs/admin/tunnel) |
+| **跨网络 / 外网** | 用内置的 SSH 反向隧道，详见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel) |
 | **只给自己用** | 把 `HOST` 改成 `127.0.0.1`，然后访问 `http://127.0.0.1:12345` |
 
 ## 开发模式
@@ -204,8 +204,8 @@ ZeroShadow-Release.zip    # 上述目录的压缩包（已过密钥门禁）
 
 1. 进「设置 → 权限」按需调整成员能做什么，特别是**上传大小限制**（默认成员 512MB、超管 2048MB）；
 2. 进「设置 → 成员」批量添加团队成员账号；
-3. 需要把服务器上的素材目录挂进网盘时，配置 [只读映射目录](/docs/admin/configuration#15-外部只读映射目录-files_soft_dir)；
+3. 需要把服务器上的素材目录挂进网盘时，配置 [只读映射目录](/docs/zeroshadow/admin/configuration#15-外部只读映射目录-files_soft_dir)；
 4. 需要对访客隐藏某些文件夹时，在文件列表里右键文件夹 →「对访客隐藏」；
-5. 需要外网访问时，看 [公网访问与隧道](/docs/admin/tunnel)。
+5. 需要外网访问时，看 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 
-日常操作细节见 [使用手册](/docs/guide/manual)，权限点逐个说明见 [权限与角色](/docs/guide/permissions)。
+日常操作细节见 [使用手册](/docs/zeroshadow/guide/manual)，权限点逐个说明见 [权限与角色](/docs/zeroshadow/guide/permissions)。

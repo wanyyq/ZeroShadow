@@ -112,7 +112,7 @@ FILES_SOFT_DIR={"软件文件夹":"D:/MyFiles","工作目录":"D:\\Program\\xxx"
 </Callout>
 
 影响范围：**日志里记录的 IP** 与**按 IP 的失败限速 / 接口限流**。
-取值取舍与风险见 [公网访问与隧道](/docs/admin/tunnel#4-trust_proxy-该怎么填)。
+取值取舍与风险见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel#4-trust_proxy-该怎么填)。
 
 <Callout type="info" title="这个值只在启动时读取一次，改完必须重启">
 当前生效模式会打印在启动日志里，也可以在「设置 → 安全 → 客户端 IP 解析」里查看。
@@ -284,7 +284,7 @@ SESSION_HOURS=72
 | `mode` | `"pinggy"` | `"pinggy"` / `"localhostrun"` / `"serveo"` / `"custom"` |
 | `customHost` | `""` | 仅在 `mode = "custom"` 时生效，格式 `user@host[:端口]` |
 
-服务启动时若 `enabled` 为 `true`，会自动建立隧道。四种模式的实际命令与取舍见 [公网访问与隧道](/docs/admin/tunnel)。
+服务启动时若 `enabled` 为 `true`，会自动建立隧道。四种模式的实际命令与取舍见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 
 ## 四、其他运行时文件
 
@@ -311,8 +311,8 @@ SESSION_HOURS=72
 ## 相关页面
 
 <Cards>
-  <Card title="公网访问与隧道" href="/docs/admin/tunnel" description="四种隧道模式、TRUST_PROXY 取值与排查清单" />
-  <Card title="管理员指南" href="/docs/admin/admin-guide" description="后台设置的入口与日常运维操作" />
-  <Card title="安全设计" href="/docs/security/design" description="每个安全开关背后的机制与默认值" />
-  <Card title="API 参考" href="/docs/api/reference" description="PATCH /api/admin/config 等接口的参数与错误码" />
+  <Card title="公网访问与隧道" href="/docs/zeroshadow/admin/tunnel" description="四种隧道模式、TRUST_PROXY 取值与排查清单" />
+  <Card title="管理员指南" href="/docs/zeroshadow/admin/admin-guide" description="后台设置的入口与日常运维操作" />
+  <Card title="安全设计" href="/docs/zeroshadow/security/design" description="每个安全开关背后的机制与默认值" />
+  <Card title="API 参考" href="/docs/zeroshadow/api/reference" description="PATCH /api/admin/config 等接口的参数与错误码" />
 </Cards>

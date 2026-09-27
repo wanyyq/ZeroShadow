@@ -185,10 +185,10 @@ TRUST_PROXY=loopback
 - 启动日志会打印当前生效模式：`客户端 IP: 直连（不信任代理头）` 或 `客户端 IP: 信任代理头 loopback`；
 - 也可以随时在「设置 → 安全 → 客户端 IP 解析」里查看这个徽章。
 
-字段级的完整说明（含义、影响范围）见 [配置参考](/docs/admin/configuration#16-客户端-ip-解析-trust_proxy)。
+字段级的完整说明（含义、影响范围）见 [配置参考](/docs/zeroshadow/admin/configuration#16-客户端-ip-解析-trust_proxy)。
 
 相关回归测试：`security-test.ps1` 的第 9 组会验证"`TRUST_PROXY` 关闭时 `X-Forwarded-For` 是否被忽略"，
-加 `-TrustProxyMode` 参数则反过来验证开启后是否生效。见 [开发与测试](/docs/development/testing)。
+加 `-TrustProxyMode` 参数则反过来验证开启后是否生效。见 [开发与测试](/docs/zeroshadow/development/testing)。
 
 ## 5. 暴露到公网前请务必确认
 
@@ -219,8 +219,8 @@ TRUST_PROXY=loopback
 ## 相关页面
 
 <Cards>
-  <Card title="配置参考" href="/docs/admin/configuration" description=".env 与 config.json 的全部字段与默认值" />
-  <Card title="安全设计" href="/docs/security/design" description="认证、路径安全、SSRF 防护与限流的完整机制" />
-  <Card title="管理员指南" href="/docs/admin/admin-guide" description="后台设置入口与日常运维" />
-  <Card title="权限与角色" href="/docs/guide/permissions" description="访客权限的可配项与隐藏规则" />
+  <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description=".env 与 config.json 的全部字段与默认值" />
+  <Card title="安全设计" href="/docs/zeroshadow/security/design" description="认证、路径安全、SSRF 防护与限流的完整机制" />
+  <Card title="管理员指南" href="/docs/zeroshadow/admin/admin-guide" description="后台设置入口与日常运维" />
+  <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="访客权限的可配项与隐藏规则" />
 </Cards>

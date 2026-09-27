@@ -51,7 +51,7 @@ SUPER_ADMIN_PASSWORD=你自己的新密码
 </Accordion>
 
 <Accordion title="登录成功但很多按钮是灰的">
-你的角色或超管的权限设置限制了你。见 [权限与角色](/docs/guide/permissions)。
+你的角色或超管的权限设置限制了你。见 [权限与角色](/docs/zeroshadow/guide/permissions)。
 </Accordion>
 
 <Accordion title="直接改 data/users.json 后登录不了">
@@ -118,7 +118,7 @@ pnpm build
 <Accordion title="是否在同一网段">
 **怎么确认**：`ipconfig` / `ifconfig` 对比前三位。
 
-**处理**：不同网段（比如一方连了手机热点）需要走公网隧道，见 [公网访问与隧道](/docs/admin/tunnel)。
+**处理**：不同网段（比如一方连了手机热点）需要走公网隧道，见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 </Accordion>
 
 <Accordion title="WiFi 是否开了「AP 隔离 / 客户端隔离」">
@@ -257,7 +257,7 @@ ss -lntp | grep 12345
 </Accordion>
 
 <Accordion title="HTML 页面里的脚本行为异常">
-出于安全，HTML 在**沙箱 iframe** 中运行（`sandbox="allow-scripts"`，不带 `allow-same-origin`），无法访问网盘的 Cookie 与接口。见 [安全设计](/docs/security/design#5-html-与-svg-的沙箱处理)。
+出于安全，HTML 在**沙箱 iframe** 中运行（`sandbox="allow-scripts"`，不带 `allow-same-origin`），无法访问网盘的 Cookie 与接口。见 [安全设计](/docs/zeroshadow/security/design#5-html-与-svg-的沙箱处理)。
 </Accordion>
 
 <Accordion title="文本预览没有高亮">
@@ -351,7 +351,7 @@ JSON 请求体上限 1 MB，超大文本请改用其他方式写入文件。
 
 ## 公网隧道
 
-隧道问题已经单独整理，见 [公网访问与隧道 · 排查清单](/docs/admin/tunnel#6-排查清单)。最常见的三条：
+隧道问题已经单独整理，见 [公网访问与隧道 · 排查清单](/docs/zeroshadow/admin/tunnel#6-排查清单)。最常见的三条：
 
 <Accordions>
 <Accordion title="没装 SSH 客户端">
@@ -464,4 +464,4 @@ JSON 请求体上限 1 MB，超大文本请改用其他方式写入文件。
 4. 服务端环境：操作系统、Node 版本、是否通过隧道 / 反代访问、`TRUST_PROXY` 的取值；
 5. 浏览器控制台（F12）里的报错与失败请求的响应内容。
 
-排查完之后，如果确认是配置问题，见 [配置参考](/docs/admin/configuration)；如果怀疑是权限口径问题，见 [权限与角色](/docs/guide/permissions)。
+排查完之后，如果确认是配置问题，见 [配置参考](/docs/zeroshadow/admin/configuration)；如果怀疑是权限口径问题，见 [权限与角色](/docs/zeroshadow/guide/permissions)。

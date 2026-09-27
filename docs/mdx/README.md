@@ -8,7 +8,11 @@
 ```text
 docs/mdx/
 ├── README.md                  ← 本文件（接入说明，不用放进站点）
-├── .authoring/                ← 写作规范，只给维护者看，不要放进站点
+├── integration/               ← ★ 接入所需的组件文件与完整教程，先看这里
+│   ├── README.md              ← 完整接入指南（含组件报错排查）
+│   ├── mdx-components.tsx     → 复制到 <站点根>/mdx-components.tsx
+│   └── mdx-fallbacks.tsx      → 复制到 <站点根>/components/mdx-fallbacks.tsx
+├── .authoring/                ← 写作规范 + 三个校验脚本，只给维护者看
 ├── public/                    ← 静态资源，对应站点根的 public/
 │   └── img/                   ← 文档里引用的截图
 └── content/
@@ -25,58 +29,71 @@ docs/mdx/
 
 ## 接入步骤
 
+> **接入前先做组件那一步。** 这套文档用了 12 个 Fumadocs 自定义组件，
+> 如果站点是二次开发过的、组件不全，会报
+> `Expected component \`Step\` to be defined`。
+> 直接照 [integration/README.md](integration/README.md) 走，里面有针对
+> Fumadocs v16 的确切做法（v16 起 `Steps`/`Tabs`/`Files`/`Accordions`
+> 不再包含在默认组件里，需要从子路径显式导入）。
+
 ### 1. 复制内容
 
-把 `content/docs/` 里的**全部内容**复制到你站点的 `content/docs/` 下：
-
-```bash
-cp -r docs/mdx/content/docs/* <你的站点>/content/docs/
-```
-
-如果 `wiki.hellowyq.com` 上已经有别的文档，而你想把 ZeroShadow 当成一个**子栏目**，
-那就整包放进一个文件夹里，例如放到 `content/docs/zeroshadow/`：
+> ⚠️ **本套内容的站内链接是写死 `/docs/zeroshadow/...` 的**（84 处，已经改好）。
+> 所以它**必须挂在 `<站点>/content/docs/zeroshadow/` 这一层**，不能放在 `content/docs/` 顶层。
+> 要挂到别的名字下，看 [integration/README.md](integration/README.md) 的说明。
 
 ```bash
 mkdir -p <你的站点>/content/docs/zeroshadow
 cp -r docs/mdx/content/docs/* <你的站点>/content/docs/zeroshadow/
 ```
 
-然后在 `<你的站点>/content/docs/meta.json` 的 `pages` 里加一项 `"zeroshadow"`。
+然后在 `<你的站点>/content/docs/meta.json` 的 `pages` 数组**末尾追加** `"zeroshadow"`
+（只追加，不要重排已有条目——你的文档库里还有别的软件，`pages` 同时起"只显示列出的项"的作用）。
 
-> 注意：**嵌套之后站内链接会失效**。本套文档里的站内链接写的是绝对路径
-> `/docs/...`（例如 `/docs/guide/manual`）。如果改成放在 `/docs/zeroshadow/` 下，
-> 需要把所有 `/docs/` 前缀批量替换成 `/docs/zeroshadow/`。
-> 例如：
-> ```bash
-> grep -rl '/docs/' content/docs/zeroshadow | xargs sed -i 's#/docs/#/docs/zeroshadow/#g'
-> ```
-> 替换后记得人工检查一遍有没有把 `/docs/zeroshadow/zeroshadow/` 这类重复前缀弄出来。
+`content/docs/zeroshadow/meta.json` 里已经带 `"root": true`，会自动成为顶部一个独立 Tab
+（Fumadocs 的 root folder 机制 → Layout Tabs），侧边栏只显示它自己的页面。
 
 ### 2. 复制图片
 
 ```bash
-mkdir -p <你的站点>/public/img
+ls <你的站点>/public/img/     # ← 先看有没有同名文件
 cp docs/mdx/public/img/* <你的站点>/public/img/
 ```
 
 文档里用 `/img/xxx.png` 引用这四张截图，所以目标路径必须是站点根的 `public/img/`。
+
+> 那 4 个文件名很通用（`file.png`、`ssh.png`、`vidio.png`、`dark.png`），
+> 若站点里已有同名文件会被**静默覆盖**，改名后记得同步改 MDX 里的引用。
 
 ### 3. 确认组件可用
 
 这套 MDX 只用了 Fumadocs 的**默认组件**，正常情况下不需要任何额外配置。
 用到的组件：
 
-| 组件 | 用途 |
-|:--|:--|
-| `Callout` | 提示框（`type` 取 `info` / `warn` / `error` / `success`） |
-| `Cards` / `Card` | 卡片导航 |
-| `Steps` / `Step` | 分步操作 |
-| `Tabs` / `Tab` | 平台分栏 |
-| `Files` / `File` / `Folder` | 目录树 |
-| `Accordions` / `Accordion` | 折叠问答 |
+### 3. 确认组件可用（**Fumadocs v16 必做**）
 
-如果你的 `mdx-components.tsx` 是从 `fumadocs-ui/mdx` 的 `getMDXComponents()` 生成的，
-它们**全部已内置**，无需改动。若你自定义过组件表，请确认上面这些仍然被导出。
+> **⚠️ v16 起这些组件不再内置，这一步是必做的**
+>
+> `fumadocs-ui` **16.x** 的 `defaultMdxComponents`（即 `fumadocs-ui/mdx` 默认导出）
+> **只包含** `pre` / `Card` / `Cards` / `a` / `img` / `h1`–`h6` / `table` /
+> `Callout`（含 Container/Title/Description）/ `CodeBlockTab*`。
+>
+> `Steps`、`Step`、`Tabs`、`Tab`、`Files`、`File`、`Folder`、`Accordions`、`Accordion`
+> **都不在里面**，必须从子路径显式导入，否则会报
+> `Expected component \`Step\` to be defined`。
+>
+> 确切的补法与已验证的导出名见 [integration/README.md](integration/README.md)。
+
+用到的组件（共 12 个）：
+
+| 组件 | 用途 | v16 是否内置 |
+|:--|:--|:--|
+| `Callout` | 提示框（`type` 取 `info` / `warn` / `error` / `success`） | ✅ 内置 |
+| `Cards` / `Card` | 卡片导航 | ✅ 内置 |
+| `Steps` / `Step` | 分步操作 | ❌ 需从 `fumadocs-ui/components/steps` 导入 |
+| `Tabs` / `Tab` | 平台分栏 | ❌ 需从 `fumadocs-ui/components/tabs` 导入 |
+| `Files` / `File` / `Folder` | 目录树 | ❌ 需从 `fumadocs-ui/components/files` 导入 |
+| `Accordions` / `Accordion` | 折叠问答 | ❌ 需从 `fumadocs-ui/components/accordion` 导入 |
 
 ### 4. 可选：首页入口
 

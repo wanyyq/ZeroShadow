@@ -6,7 +6,7 @@ icon: BookOpen
 
 面向**日常使用者**（超管、团队成员、访客都适用）。这一篇讲的是“界面上每个按钮干什么、点了会发生什么”。
 
-权限点是否对你开放，取决于你的角色与超管的设置，详见 [权限与角色](/docs/guide/permissions)。
+权限点是否对你开放，取决于你的角色与超管的设置，详见 [权限与角色](/docs/zeroshadow/guide/permissions)。
 
 ## 界面结构
 
@@ -222,7 +222,7 @@ icon: BookOpen
 
 `.html` / `.htm` 文件如果拥有「HTML 全屏预览」权限，右键菜单会多出「HTML 预览」，在**沙箱 iframe** 中渲染（`sandbox="allow-scripts"`，不含 `allow-same-origin`）。
 
-这意味着页面里的脚本可以运行，但**拿不到网盘的 Cookie 与接口会话**——这是刻意的安全设计，详见 [安全设计](/docs/security/design#5-html-与-svg-的沙箱处理)。
+这意味着页面里的脚本可以运行，但**拿不到网盘的 Cookie 与接口会话**——这是刻意的安全设计，详见 [安全设计](/docs/zeroshadow/security/design#5-html-与-svg-的沙箱处理)。
 
 <Callout type="info" title="没有权限时会退化为文本预览">
 没有这个权限时，打开 HTML 会退化为普通**文本预览**，看到的是源码。
