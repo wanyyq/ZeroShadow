@@ -1,0 +1,161 @@
+---
+title: 开发与构建
+description: 工作目录规则、本地开发命令、前端构建与后端打包，以及开发时的常见坑。
+icon: Terminal
+---
+
+## 工作目录（重要）
+
+`server/src/env.js` 用 **`process.cwd()`** 推导项目根目录（`ROOT_DIR`），
+`.env`、`data/`、`web/dist` 全都挂在它下面。也就是说：**工作目录决定用哪一套配置和数据。**
+
+```js
+const ROOT_DIR = isPkg ? path.dirname(process.execPath) : process.cwd()
+```
+
+历史上有过两种跑法，各读各的 `.env` 与 `data/`，非常容易踩坑：
+
+| 命令 | 旧行为的工作目录 | 读到的配置 |
+|:--|:--|:--|
+| `pnpm start` | 仓库根 | 根 `.env` + 根 `data/` |
+| `pnpm dev:server` | `server/`（旧脚本是 `pnpm -C server dev`） | `server/.env` + `server/data/` |
+
+现在 `dev:server` 已改成 `node --watch server/index.js`，**与 `start` 一样以仓库根为工作目录**，
+两套配置的歧义已消除。请遵守以下约定：
+
+- 一律在**仓库根**执行 `pnpm start` / `pnpm dev:server`，不要在 `server/` 里直接 `node index.js`
+  （那会把 `server/` 当成项目根，凭空生成 `server/.env` 与 `server/data/`，看起来像"数据丢了"）；
+- `server/` 下**不应出现** `.env` 或 `data/`。若出现了，说明有命令用错了工作目录，删掉即可
+  （`data/` 与 `.env` 都是可再生的）；
+- 打包成 exe 后规则不同：`ROOT_DIR` 取 `ZeroShadow.exe` 所在目录，`.env` 与 `data/` 就在 exe 旁边。
+
+<Callout type="info" title="为什么不用 __dirname 一劳永逸地修掉">
+非 pkg 模式下改用「文件所在位置」推导根目录确实能让 `server/` 内的直接调用也正确，
+但那会改变 `env.js` 的运行时行为，属于应用逻辑改动。目前的处理是**统一脚本的工作目录**，
+并用文档与 `.gitignore` 约定把这类错误拦在外面。
+</Callout>
+
+## 环境要求
+
+- **Node.js** ≥ 18（构建前端需要 ≥ 20.19，见下方说明）
+- **pnpm** ≥ 9
+
+<Callout type="warn" title="构建前端不能用 Node 18">
+`vite@8` 与 `@vitejs/plugin-react@6` 都声明了 `engines: ^20.19.0 || >=22.12.0`，
+所以**前端在 Node 18 上构建不了**。
+
+注意区分两件事：**运行**后端只需要 Node 18；而**构建**前端需要 Node ≥ 20.19。
+打包进产物的 Node 运行时是 pkg 目标决定的（`node18-*`），与构建机的 Node 版本无关，
+详见 [打包与 CI](/docs/development/release)。
+</Callout>
+
+## 常用命令
+
+```bash
+pnpm setup          # 安装 server 与 web 的依赖
+pnpm dev:server     # 后端：node --watch server/index.js（保存自动重启），端口取根 .env 的 PORT
+pnpm dev:web        # 前端：Vite 开发服务器，默认 5173
+
+pnpm typecheck      # web: tsc --noEmit
+pnpm lint           # web: eslint .
+pnpm -C web format  # web: prettier --write "**/*.{ts,tsx}"
+```
+
+开发时浏览器打开 **http://localhost:5173**（Vite 会把 `/api` 代理到后端）。
+
+代理目标端口是 `web/vite.config.ts` 里的 `backendPort()` **从根 `.env` 的 `PORT` 读出来的**，
+所以不必再手工同步——改了 `.env` 的 `PORT`，代理会跟着变。
+
+<Callout type="info" title="Vite 代理为什么设 changeOrigin: false">
+刻意**不**重写 `Host` / `Origin`，这样服务端的 `csrfOriginCheck`
+（比对 `Origin` 与 `Host` 是否一致）在开发模式下也能通过，开发与生产行为保持一致。
+</Callout>
+
+## 构建
+
+```bash
+pnpm build                  # web: tsc -b && vite build → web/dist
+cd server && pnpm bundle    # 后端打包成 dist/server-bundle.cjs（esbuild，供 pkg 使用）
+```
+
+`server` 的 `bundle` 脚本把 ESM 打成 CJS，因为 pkg 对 ESM 支持不佳；
+`--external:../web/*`、`--external:../data/*` 让这些运行时路径不被内联进去。
+
+> 注意：`pnpm build` 与 `pnpm -C web build` 等价，都必须在仓库根执行；
+> `web/dist` 不存在时后端会对 `/` 返回 503 并提示先构建。
+
+### 前端构建产物
+
+| 产物 | 说明 |
+|:--|:--|
+| `web/dist/index.html` | 入口页，无内联脚本（因为应用外壳 CSP 是 `script-src 'self'`） |
+| `web/dist/assets/*.js` / `*.css` | 带内容哈希，缓存 1 年（`immutable`） |
+| `web/dist/resources/*` | 字体、lucide、gsap、tailwindcss，缓存 1 天 |
+
+后端的缓存策略写在 `server/index.js` 的 `express.static` 里：
+`assets/**` → 一年 immutable，`resources/**` → 86400 秒，其余 → `no-cache`。
+
+## 开发时的常见坑
+
+<Accordions>
+<Accordion title="改了前端代码，但 pnpm start 下页面没变化">
+`pnpm start` 是后端直接托管已构建好的 `web/dist`，**不会**自动重建。
+开发阶段请用 `pnpm dev:web`（Vite 热更新，访问 5173）；
+或者每次改完执行 `pnpm build` 再刷新 12345 端口。
+</Accordion>
+<Accordion title="前端起不来，报 spawn EPERM 或 nodenext 之类">
+这类报错通常来自受限的执行环境（沙箱、企业安全软件）阻止了 Vite/rolldown
+派生子进程。Vite 在加载配置文件时会调用子进程（`optimizeSafeRealPathSync`），
+被拦时表现为 `Error: spawn EPERM`。换一个不受限的终端再试。
+</Accordion>
+<Accordion title="data/config.json 是怎么冒出来的">
+后台改过任何设置（含访客隐藏文件夹）就会生成它。它一旦存在就**永久覆盖代码里的默认值**，
+所以调试时如果发现"改了 `DEFAULTS` 却不生效"，先检查这个文件在不在。
+测完想恢复"纯默认值"状态，删掉它即可。
+</Accordion>
+<Accordion title="端口冲突或想让开发实例与正式实例并存">
+`.env` 里的 `PORT` 决定监听端口。想并存可以给开发实例临时覆盖：
+`$env:PORT='5179'; $env:HOST='127.0.0.1'; node server/index.js`。
+环境变量优先级高于 `.env`（`env.js` 只填充 `process.env` 里还没有的键）。
+</Accordion>
+<Accordion title="提交前发现 server/ 下多了 .env 和 data/">
+说明某次执行用错了工作目录。两者都是可再生的，直接删掉；`.gitignore` 里的
+`data/` 与 `.env` 是无前导斜杠的写法，已经能覆盖任意层级的同名路径。
+</Accordion>
+</Accordions>
+
+## 调试技巧
+
+### 看后端收到的请求
+
+默认每条请求都会打印一行：
+
+```text
+[REQ] GET /api/fs/list host=127.0.0.1:12345 ip=127.0.0.1 ua=Mozilla/5.0...
+```
+
+想关掉控制台输出（只写日志文件）用静默模式：
+
+```bash
+NOLOG=true pnpm start
+# 或者
+pnpm start -- -nolog
+```
+
+### 直接读日志
+
+日志是按天的 JSONL，用 `jq` 之类过滤很方便：
+
+```bash
+tail -f data/logs/zs-$(date +%F).log
+```
+
+后台「设置 → 日志」里也能按级别与关键字查询，或一键清空。
+
+### 前端类型检查只查类型、不产出
+
+```bash
+pnpm typecheck
+```
+
+注意它**不报未使用的 export**，所以死代码不会因此暴露。

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "setup": "pnpm -C server install && pnpm -C web install",
-    "dev:server": "pnpm -C server dev",
+    "dev:server": "node --watch server/index.js",
     "dev:web": "pnpm -C web dev",
     "build": "pnpm -C web build",
     "start": "node server/index.js",

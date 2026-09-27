@@ -3,22 +3,39 @@
 #
 #  WHY THIS EXISTS
 #    A release archive must NEVER contain runtime secrets. `.env` holds the
-#    superadmin password, `data\.jwt-secret` signs every session token and
-#    `data\users.json` holds member password hashes. If any of them ship inside
+#    superadmin password, `data/.jwt-secret` signs every session token and
+#    `data/users.json` holds member password hashes. If any of them ship inside
 #    an archive, every user of that archive shares one password / one signing
 #    key - and the publisher's own credentials leak to the public.
 #
 #    Zipping the project root is therefore always wrong. This script only ever
 #    packages the contents of the release directory: it removes regenerable
-#    credentials, then refuses to build the archive if anything secret or any
-#    user data is still present.
+#    credentials, stages the legal/user documentation, then refuses to build the
+#    archive if anything secret or any user data is still present.
+#
+#  WHAT LANDS IN THE ARCHIVE
+#    <binary>            ZeroShadow.exe (Windows) or ZeroShadow (Linux)
+#    web/dist/           built frontend, served by the backend
+#    .env.example        config template (copied to .env by the operator)
+#    data/               empty runtime folder
+#    LICENSE             Apache 2.0
+#    README.md           project overview
+#    docs/               all user manuals (+ docs/img screenshots)
+#
+#    LICENSE / README.md / docs are staged automatically by this script (see
+#    -IncludeDocs), so the local build and CI cannot drift apart.
 #
 #  USAGE
 #    powershell -NoProfile -ExecutionPolicy Bypass -File package-release.ps1
+#    powershell ... -File package-release.ps1 -Platform windows-x64
 #    powershell ... -File package-release.ps1 -ReleaseDir ZeroShadow-Release `
-#                                               -ZipPath ZeroShadow-Release.zip
-#    powershell ... -File package-release.ps1 -NoZip    # purge + scan only
+#                                               -ZipPath ZeroShadow-1.1.0-linux-x64.zip
+#    powershell ... -File package-release.ps1 -NoZip    # purge + scan + stage only
 #    powershell ... -File package-release.ps1 -DryRun   # report only, no changes
+#
+#    When -ZipPath is omitted the archive is named
+#      ZeroShadow-<version>-<platform>.zip   (platform from -Platform)
+#      ZeroShadow-<version>.zip              (no platform given)
 #
 #  EXIT CODES
 #    0  success
@@ -26,7 +43,8 @@
 #    2  secret gate tripped - nothing was packaged
 #
 #  NOTE: messages are intentionally ASCII-only so the script behaves the same
-#        under Windows PowerShell 5.1 in any console code page.
+#        under Windows PowerShell 5.1 in any console code page. Do not add
+#        non-ASCII characters here unless you also add a UTF-8 BOM.
 # ============================================================================
 [CmdletBinding()]
 param(
@@ -36,15 +54,25 @@ param(
   [string]$Root = "",
   # Release directory to package (relative to -Root unless absolute).
   [string]$ReleaseDir = "ZeroShadow-Release",
-  # Output archive path (relative to -Root unless absolute).
-  [string]$ZipPath = "ZeroShadow-Release.zip",
-  # Skip archive creation and only purge/verify the release directory.
+  # Output archive path. Empty => ZeroShadow-<version>[-<platform>].zip
+  [string]$ZipPath = "",
+  # Target platform label used in the default archive name, e.g. windows-x64.
+  [string]$Platform = "",
+  # Override the version (empty => read "version" from the root package.json).
+  [string]$Version = "",
+  # Stage LICENSE / README.md / docs into the release directory before packing.
+  [switch]$IncludeDocs,
+  # Skip archive creation and only purge/verify/stage the release directory.
   [switch]$NoZip,
-  # Do not delete anything - only report what would be removed.
+  # Do not delete or copy anything - only report what would happen.
   [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
+
+# $PSBoundParameters does not survive into functions, so remember the switch
+# here; documentation staging is on by default.
+$StageDocs = -not $PSBoundParameters.ContainsKey("IncludeDocs") -or [bool]$IncludeDocs
 
 if (-not $Root) {
   $scriptPath = $MyInvocation.MyCommand.Path
@@ -86,6 +114,10 @@ $BLOCK_PATTERNS = @(
   @{ Name = "temp upload state";   Glob = "data/tmp/*" },
   @{ Name = "nested archive";      Glob = "*.zip"; Recursive = $true }
 )
+
+# --- Documentation staged into every release -------------------------------
+# Paths are relative to the project root; directories are copied recursively.
+$DOC_SOURCES = @("LICENSE", "README.md", "docs")
 
 function Get-ReleasePath {
   param([string]$ReleaseRoot, [string]$Relative)
@@ -132,6 +164,38 @@ function Remove-SecretState {
   }
 }
 
+function Add-ReleaseDocs {
+  param([string]$ProjectRoot, [string]$ReleaseRoot)
+  foreach ($source in $DOC_SOURCES) {
+    $from = Join-Path $ProjectRoot $source
+    if (-not (Test-Path $from)) {
+      Write-Warn2 "documentation missing from the project: $source (skipped)"
+      continue
+    }
+    $to = Join-Path $ReleaseRoot $source
+    if ($DryRun) {
+      Write-Warn2 "would stage: $source"
+      continue
+    }
+    Copy-Item -LiteralPath $from -Destination $to -Recurse -Force
+    Write-Host "        staged: $source"
+  }
+}
+
+function Get-ProjectVersion {
+  param([string]$ProjectRoot)
+  try {
+    $manifest = Join-Path $ProjectRoot "package.json"
+    if (Test-Path $manifest) {
+      $parsed = [System.IO.File]::ReadAllText($manifest, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+      if ($parsed.version) { return [string]$parsed.version }
+    }
+  } catch {
+    Write-Warn2 "cannot read version from package.json: $($_.Exception.Message)"
+  }
+  return "0.0.0"
+}
+
 function New-ReleaseArchive {
   param([string]$ReleaseRoot, [string]$Destination)
   $parent = Split-Path -Parent $Destination
@@ -150,6 +214,16 @@ function New-ReleaseArchive {
       $entry = $zip.CreateEntry($relative, [System.IO.Compression.CompressionLevel]::Optimal)
       # ZIP timestamps cannot represent anything before 1980.
       if ($file.LastWriteTime.Year -ge 1980) { $entry.LastWriteTime = $file.LastWriteTime }
+
+      # Carry a Unix mode in the high 16 bits of the external attributes. Without
+      # this a Linux/macOS unzip yields a 0644 binary and the operator has to
+      # `chmod +x` it by hand. 0100755 = regular file + rwxr-xr-x (0x81ED),
+      # 0100644 = regular file + rw-r--r-- (0x81A4). The extension-less
+      # "ZeroShadow" entry is the Linux/macOS build, so it gets the exec bit.
+      $unixMode = if ($relative -eq "ZeroShadow") { 0x81ED } else { 0x81A4 }
+      $attributes = [int64]$unixMode -shl 16
+      if ($attributes -gt [int]::MaxValue) { $attributes -= 4294967296 }   # fold into signed Int32
+      $entry.ExternalAttributes = [int]$attributes
       $input = [System.IO.File]::OpenRead($file.FullName)
       try {
         $output = $entry.Open()
@@ -176,10 +250,16 @@ function Test-ArchiveSafety {
       ($n -match '\.log$') -or
       ($_.FullName -match '\\')      # backslash entry name: not portable
     })
+    # Platform-agnostic: pkg emits ZeroShadow.exe on Windows and ZeroShadow on
+    # Linux/macOS, so do not hard-code the Windows name here.
+    $binary = @($names | Where-Object { $_ -match '^ZeroShadow(\.exe)?$' })
     return [pscustomobject]@{
       Count      = $entries.Count
-      HasExe     = [bool](@($names | Where-Object { $_ -match '(^|/)ZeroShadow\.exe$' }).Count)
+      BinaryName = if ($binary.Count) { $binary[0] } else { $null }
       HasWebDist = [bool](@($names | Where-Object { $_ -match '^web/dist/' }).Count)
+      HasLicense = [bool](@($names | Where-Object { $_ -match '^LICENSE$' }).Count)
+      HasReadme  = [bool](@($names | Where-Object { $_ -match '^README\.md$' }).Count)
+      DocCount   = @($names | Where-Object { $_ -match '^docs/.+\.md$' }).Count
       Violations = @($bad | ForEach-Object { $_.FullName })
     }
   } finally {
@@ -193,9 +273,16 @@ function Test-ArchiveSafety {
 $staging = $null
 try {
   $releaseRoot = Resolve-UnderRoot -Base $Root -Path $ReleaseDir
+
+  # Resolve the archive name before anything else so -DryRun can report it.
+  $version = if ($Version) { $Version } else { Get-ProjectVersion -ProjectRoot $Root }
+  if (-not $ZipPath) {
+    $ZipPath = if ($Platform) { "ZeroShadow-$version-$Platform.zip" } else { "ZeroShadow-$version.zip" }
+  }
   $zipFull = Resolve-UnderRoot -Base $Root -Path $ZipPath
 
   Write-Step "Release directory: $releaseRoot"
+  Write-Step "Target archive:    $zipFull"
   if (-not (Test-Path $releaseRoot)) {
     Write-Err "release directory not found: $releaseRoot"
     Write-Err "run the build first (frontend build + pkg), then package."
@@ -206,6 +293,19 @@ try {
   if ((Resolve-Path $releaseRoot).Path -eq (Resolve-Path $Root).Path) {
     Write-Err "refusing to package the project root - use the release directory."
     exit 2
+  }
+
+  # Never let the archive land inside the directory it packages, otherwise the
+  # *.zip gate would flag the output as a nested archive.
+  $releaseFull = (Resolve-Path $releaseRoot).Path.TrimEnd('\', '/')
+  if ($zipFull.StartsWith($releaseFull + [System.IO.Path]::DirectorySeparatorChar)) {
+    Write-Err "output archive must not be written inside the release directory."
+    exit 1
+  }
+
+  if ($StageDocs) {
+    Write-Step "Staging documentation (LICENSE / README.md / docs)..."
+    Add-ReleaseDocs -ProjectRoot $Root -ReleaseRoot $releaseRoot
   }
 
   Write-Step "Purging regenerable credentials from the release directory..."
@@ -232,7 +332,7 @@ try {
   # Build beside the target and only publish it once verification passed, so a
   # failed run never leaves the previous archive deleted or half written.
   $staging = "$zipFull.building"
-  Write-Step "Creating archive: $zipFull"
+  Write-Step "Creating archive..."
   New-ReleaseArchive -ReleaseRoot $releaseRoot -Destination $staging
 
   Write-Step "Verifying archive contents..."
@@ -243,13 +343,25 @@ try {
     Write-Err "unsafe archive discarded; existing release archive left untouched."
     exit 2
   }
-  if (-not $report.HasExe) { Write-Warn2 "ZeroShadow.exe not found in archive" }
+  if ($report.BinaryName) {
+    Write-Ok "backend binary: $($report.BinaryName)"
+  } else {
+    Write-Warn2 "no ZeroShadow binary found in archive - did pkg run?"
+  }
   if (-not $report.HasWebDist) { Write-Warn2 "web/dist not found in archive - the UI will not be served" }
+  if (-not $report.HasLicense) { Write-Warn2 "LICENSE not found in archive" }
+  if (-not $report.HasReadme) { Write-Warn2 "README.md not found in archive" }
+  if ($report.DocCount -eq 0) {
+    Write-Warn2 "no docs/*.md found in archive - user manuals are missing"
+  } else {
+    Write-Ok "user manuals included: $($report.DocCount) markdown files"
+  }
 
   Move-Item -LiteralPath $staging -Destination $zipFull -Force
   $staging = $null
   $size = [math]::Round((Get-Item $zipFull).Length / 1MB, 2)
   Write-Ok "archive verified: $($report.Count) entries, $size MB, no secrets"
+  Write-Ok "output: $zipFull"
   exit 0
 } catch {
   Write-Err $_.Exception.Message

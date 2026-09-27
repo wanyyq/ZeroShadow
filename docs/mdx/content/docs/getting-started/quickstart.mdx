@@ -1,0 +1,211 @@
+---
+title: 快速开始
+description: 从安装依赖到第一次登录，把 ZeroShadow 跑起来，并让同事访问到它。
+icon: Rocket
+---
+
+这一篇只讲一件事：**把 ZeroShadow 跑起来，并让别人能访问到它**。整个过程不需要数据库、不需要 Docker，也不需要改任何代码。
+
+## 从源码启动
+
+从零到能访问一共四步：确认环境 → 安装依赖 → 构建前端 → 启动服务，对应命令 `pnpm setup`、`pnpm build`、`pnpm start`。
+
+<Steps>
+<Step>
+### 第一步：确认环境
+
+| 组件 | 要求 | 说明 |
+|:-------- |:-------- |:--------------------------------------- |
+| **Node.js** | 18 及以上 | 仅源码运行需要。`Auto-building.bat` 会检查主版本号，低于 18 时告警；`pkg` 打包目标为 `node18-win-x64` |
+| **pnpm** | 9 及以上 | 仓库锁文件为 `lockfileVersion: '9.0'`（见 `web/pnpm-lock.yaml`、`server/pnpm-lock.yaml`） |
+| **SSH 客户端** | 可选 | 只有要用「公网访问」功能时才需要（服务端要能执行 `ssh` 命令） |
+
+检查一下版本：
+
+```bash
+node -v
+pnpm -v
+```
+
+</Step>
+<Step>
+### 第二步：安装依赖
+
+会分别安装 `server` 与 `web` 两个子项目（root `package.json` 的 `setup` 脚本）：
+
+```bash
+# 安装依赖：会分别安装 server 与 web 两个子项目（root package.json 的 setup 脚本）
+pnpm setup
+```
+
+</Step>
+<Step>
+### 第三步：构建前端
+
+等价于 `cd web && tsc -b && vite build`，产物在 `web/dist`：
+
+```bash
+# 构建前端：等价于 cd web && tsc -b && vite build，产物在 web/dist
+pnpm build
+```
+
+</Step>
+<Step>
+### 第四步：启动服务
+
+等价于 `node server/index.js`：
+
+```bash
+# 启动服务：等价于 node server/index.js
+pnpm start
+```
+
+</Step>
+</Steps>
+
+### 启动成功后你会看到
+
+控制台会输出类似内容：
+
+```text
+  ZeroShadow 网盘已启动
+  本机访问:   http://localhost:12345
+  局域网访问: http://192.168.1.23:12345
+  文件目录:   D:\ZeroShadow\data\files
+  客户端 IP:  直连（不信任代理头）
+```
+
+- 「本机访问」是你自己这台机器用的地址；
+- 「局域网访问」可能有多个（机器有多张网卡时逐个列出），**把这个地址发给同事即可**；
+- 「文件目录」就是网盘的文件根目录，往里放文件等价于在网页里上传；
+- 「客户端 IP」显示的是 `TRUST_PROXY` 的当前生效模式，默认是"直连（不信任代理头）"。
+
+<Callout type="warn" title="看到「前端尚未构建」怎么办">
+如果看到 `前端尚未构建：请先运行 pnpm build，然后重启服务。`，说明 `web/dist` 不存在，执行一次 `pnpm build` 再重启即可。
+</Callout>
+
+### 首次启动会自动生成 `.env`
+
+只要项目根目录（打包后是 `ZeroShadow.exe` 同目录）没有 `.env`，服务会**自动创建一个**，内容包括：
+
+- `PORT=12345`、`HOST=0.0.0.0`、`SUPER_ADMIN_USER=admin`、`SESSION_HOURS=72`；
+- 一个**随机生成的超级管理员密码**（`crypto.randomBytes(12)` 的 base64url 编码，16 个字符），并在控制台上以醒目块打印：
+
+```text
+  [重要] 已自动生成超级管理员密码并写入 .env：
+         用户名: admin
+         密码:   xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**请立刻把密码记下来。** 如果 `.env` 里 `SUPER_ADMIN_PASSWORD` 缺失，或者值还是模板里的 `change-me`，
+服务也会重新生成一个随机密码并回写进 `.env`，同样会打印出来。
+
+<Callout type="info">
+`.env` 属于敏感文件，已被 `.gitignore` 忽略。在 Linux / macOS 上写入权限会收紧为仅属主可读写。
+</Callout>
+
+### 会自动创建的运行时目录
+
+首次启动时，下面这些目录不存在的话会被自动创建（都在"运行根目录"下，即 `.env` 旁边）：
+
+| 目录 / 文件 | 用途 |
+|:--------------------- |:------------------------ |
+| `data/` | 运行时数据根目录 |
+| `data/files/` | 网盘文件的真实根目录（可用 `FILES_DIR` 改到别处） |
+| `data/logs/` | 按天写入的日志文件 `zs-YYYY-MM-DD.log` |
+| `data/tmp/` | 上传与下载的临时中转目录，**每次启动都会清空** |
+| `data/.jwt-secret` | 会话签名密钥，自动生成 96 个十六进制字符（`crypto.randomBytes(48)`） |
+| `data/config.json` | 后台设置（首次保存设置时才写入） |
+| `data/users.json` | 团队成员账号（密码为 bcrypt 哈希） |
+
+## 工作目录很重要
+
+`server/src/env.js` 用 `process.cwd()` 推导项目根目录，`.env`、`data/`、`web/dist` 都挂在它下面。所以：
+
+- `pnpm start` / `pnpm dev:server` 必须**一律在仓库根**执行；
+- 如果在 `server/` 目录里直接跑 `node index.js`，程序会把 `server/` 当成项目根，凭空生成 `server/.env` 与 `server/data/`——账号、设置、文件列表全都变空，看起来就像"数据丢了"，其实只是换了根；
+- `server/` 下不应该出现 `.env` 或 `data/`；一旦出现，删掉即可（两者都是可再生的，不会影响仓库根下的正式数据）；
+- 打包成 exe 后规则不同：项目根目录 = `ZeroShadow.exe` 所在目录。
+
+<Callout type="warn" title="文件列表是空的时候先看这一条">
+启动后如果发现网盘是空的，先确认自己是在哪个目录敲的命令：在 `server/` 里跑 `node index.js`
+就会读 `server/data/`。回到仓库根重新 `pnpm start` 即可看到原来的数据。
+</Callout>
+
+本地开发与构建的完整约定见 [开发与构建](/docs/development/build)，各配置项含义见 [配置参考](/docs/admin/configuration)。
+
+## 第一次登录
+
+1. 浏览器打开 `http://localhost:12345`；
+2. 右上角点「登录」（或直接访问 `/login`）；
+3. 输入 `.env` 里的 `SUPER_ADMIN_USER` / `SUPER_ADMIN_PASSWORD`；
+4. 登录后左下角就会出现「设置」，可以配置成员、权限、公网等。
+
+不登录也可以直接点「以访客身份浏览」——**访客模式默认可以浏览和下载**，具体能做什么由超管在
+「设置 → 权限 → 访客权限」中决定。
+
+### 想让别人访问
+
+| 场景 | 做法 |
+|:-------------- |:--------------------------------------- |
+| **同一局域网** | 别人直接访问 `http://<你的局域网IP>:12345`，无需登录（访客）或使用你创建的成员账号 |
+| **跨网络 / 外网** | 用内置的 SSH 反向隧道，详见 [公网访问与隧道](/docs/admin/tunnel) |
+| **只给自己用** | 把 `HOST` 改成 `127.0.0.1`，然后访问 `http://127.0.0.1:12345` |
+
+## 开发模式
+
+需要前后端分开跑的时候：
+
+```bash
+pnpm dev:server   # 终端 1：后端，node --watch 热重载，端口由 .env 的 PORT 决定
+pnpm dev:web      # 终端 2：前端 Vite 开发服务器，端口 5173
+```
+
+**开发时请访问 http://localhost:5173**，不要访问 12345：Vite 会把浏览器发来的 `/api` 请求
+转发到 `http://localhost:12345`（见 `web/vite.config.ts` 的 `server.proxy`）。
+如果改了后端端口，记得同步改 `vite.config.ts` 里的代理目标。
+
+<Callout type="info">
+`pnpm dev:server` 同样要在仓库根执行（原因见 [工作目录很重要](#工作目录很重要)）。
+生产模式下不需要 Vite，后端直接托管构建产物。
+</Callout>
+
+## 使用发布包（ZeroShadow.exe）
+
+在 Windows 上双击 `Auto-building.bat` 会生成：
+
+```text
+ZeroShadow-Release/
+├── ZeroShadow.exe        # 后端可执行文件（前端已内置资源引用）
+├── web/dist/             # 前端构建产物
+├── data/                 # 空的数据目录
+├── .env.example          # 配置模板
+├── LICENSE               # Apache 2.0 许可证
+├── README.md             # 项目说明
+└── docs/                 # 全部用户手册
+ZeroShadow-Release.zip    # 上述目录的压缩包（已过密钥门禁）
+```
+
+使用方式：
+
+1. 把 `ZeroShadow-Release` 整个目录拷到目标机器（路径随意）；
+2. 双击 `ZeroShadow.exe`；
+3. 首次运行会在 **exe 同目录**生成 `.env` 与 `data/`，控制台打印访问地址与随机超管密码；
+4. 需要固定配置时，把 `.env.example` 复制成 `.env` 再编辑。
+
+<Callout type="info" title="关闭程序">
+打包后的程序把"运行根目录"认定为 **exe 所在目录**（源码运行则是当前工作目录），
+所以 `data/`、`.env`、`web/dist` 都相对 exe 定位。
+
+关闭程序：在控制台按 `Ctrl + C`。服务会先停掉隧道再退出，3 秒内没退干净就强制结束。
+</Callout>
+
+## 接下来做什么
+
+1. 进「设置 → 权限」按需调整成员能做什么，特别是**上传大小限制**（默认成员 512MB、超管 2048MB）；
+2. 进「设置 → 成员」批量添加团队成员账号；
+3. 需要把服务器上的素材目录挂进网盘时，配置 [只读映射目录](/docs/admin/configuration#15-外部只读映射目录-files_soft_dir)；
+4. 需要对访客隐藏某些文件夹时，在文件列表里右键文件夹 →「对访客隐藏」；
+5. 需要外网访问时，看 [公网访问与隧道](/docs/admin/tunnel)。
+
+日常操作细节见 [使用手册](/docs/guide/manual)，权限点逐个说明见 [权限与角色](/docs/guide/permissions)。

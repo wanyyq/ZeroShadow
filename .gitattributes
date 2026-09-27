@@ -1,2 +1,30 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Windows shell scripts must keep CRLF in the working tree, otherwise a checkout
+# that later lands on a Windows box produces a .bat cmd.exe can mis-parse around
+# labels and goto.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# NOTE: PowerShell scripts are deliberately NOT listed here.
+#   * smoke-test.ps1 contains Chinese string literals and therefore carries a
+#     UTF-8 BOM, because Windows PowerShell 5.1 decodes .ps1 files using the
+#     ANSI code page when no BOM is present - that mangles the literals and can
+#     even make the file unparseable.
+#   * package-release.ps1, build-release.ps1 and security-test.ps1 are kept
+#     pure ASCII on purpose so they decode identically in every code page.
+#   * Do NOT add `working-tree-encoding=UTF-8` for these: git documents it as
+#     unnecessary and harmful for files that are already UTF-8, and it can
+#     mangle the BOM as well as leave files perpetually showing as modified.
+# Keep *.ps1 to plain line-ending normalization (already implied by text=auto).
+
+# Keep binary assets untouched (text=auto would normally detect these anyway;
+# being explicit prevents an unlucky heuristic from corrupting them).
+*.woff  binary
+*.woff2 binary
+*.png   binary
+*.ico   binary
+*.jpg   binary
+*.zip   binary
+*.exe   binary

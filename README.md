@@ -256,11 +256,18 @@ ZeroShadow/
 │   ├── logs/               # 运行日志
 │   └── tmp/                # 临时文件（每次启动清空）
 │
-├── Auto-building.bat       # Windows 一键打包（→ ZeroShadow.exe + 发布目录 + zip）
-├── package-release.ps1     # 发布打包 + 密钥门禁
+├── build-release.ps1       # 多平台构建编排（本地与 CI 共用；产物 ZeroShadow-<版本>-<平台>.zip）
+├── Auto-building.bat       # Windows 一键打包（build-release.ps1 的薄封装）
+├── package-release.ps1     # 发布打包 + 文档暂存 + 密钥门禁
 ├── security-test.ps1       # 安全回归测试（16 组断言）
-└── smoke-test.ps1          # 冒烟测试（15 组 / 30 项断言）
+├── smoke-test.ps1          # 冒烟测试（38 项断言，跑完自动还原现场）
+└── .github/workflows/      # GitHub Actions：五平台 node18 自动编译
 ```
+
+> **工作目录很重要**：`server/src/env.js` 用 `process.cwd()` 推导项目根目录，
+> 因此请一律在**仓库根**执行 `pnpm start` / `pnpm dev:server`。在 `server/` 里直接
+> `node index.js` 会把 `server/` 当成项目根，凭空生成 `server/.env` 与 `server/data/`，
+> 看起来就像"数据丢了"。详见 [开发者指南](docs/开发者指南.md#工作目录重要)。
 
 ---
 
@@ -275,16 +282,32 @@ cd server && pnpm bundle    # 后端打包为单个 CJS（esbuild，供 pkg 使�
 ### 冒烟测试
 
 ```powershell
-# 1) 先确认服务在运行（脚本顶部 $base 默认是 http://localhost:5170，按需修改）
-# 2) 执行
+# 1) 先确认服务在运行（pnpm dev:server 或 pnpm start）
+# 2) 另开一个终端执行——端口与超管账号会自动从 .env 读取
 powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1
+
+# 也可以指定别的实例（例如独立测试实例）
+powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http://127.0.0.1:5179
 ```
 
-覆盖 CSRF 拦截、登录、目录创建、路径穿越拦截、上传、访客隐藏文件夹、访客权限边界、成员创建与登录、复制 / 重命名 / 移动 / 详情 / 删除、禁用成员后会话失效、ZIP 打包、搜索、日志、服务器状态、隧道状态、SPA 与静态资源等 15 组共 30 项断言。
+覆盖 CSRF 拦截、登录、目录创建、路径穿越拦截、上传、访客隐藏文件夹、访客权限边界、
+成员创建与登录、复制 / 重命名 / 移动 / 详情 / 删除、禁用成员后会话失效、ZIP 打包、
+搜索、日志、服务器状态、隧道状态、SPA 与静态资源等 **9 组共 38 项断言**。
 
-> 注意：脚本顶部把服务地址写死为 `http://localhost:5170`，且部分断言是针对示例数据写的
-> （例如会创建/删除「公开资料」「内部资料」并检查搜索结果）。它会**真实改动你的网盘内容**，
-> 建议对测试实例运行，并按自己的环境调整断言。详见 [开发者指南](docs/开发者指南.md#smoke-testps1冒烟测试)。
+脚本的行为约定：
+
+- **端口与超管凭据从 `.env` 读取**，不再写死；可用 `-BaseUrl` / `-User` / `-Password` 覆盖；
+- 只在自己的临时目录里活动（随机命名 `_smoketest-<随机>`），**跑完自动删除**；
+- 临时创建的成员账号跑完自动删除，因此 `data/users.json` 不会被改动；
+- 若 `data/config.json` 是本轮才第一次生成的（访客可见性测试会写它），跑完会删掉，
+  让实例回到「纯用代码内默认值」的原状；已被别人改过配置则原样保留、不做删改；
+- **退出码 = 失败项数量**，`0` 表示全部通过；连不上服务退 `1`，超管登录失败退 `2`；
+- 断言「错误凭据返回 401」时故意用**不存在的用户名**，而不是超管自己的账号——
+  登录失败计数按提交的用户名累计，超管全局唯一，用他的账号做这个断言会让每跑一次就
+  给他记一笔失败，多跑几轮可能把自己锁在门外。
+
+> 它会**真实改动你的网盘内容**（创建/删除自己那个临时目录），建议对测试实例运行。
+> 详见 [开发者指南](docs/开发者指南.md#smoke-testps1冒烟测试)。
 
 ### 安全回归测试
 
@@ -309,26 +332,98 @@ zip-slip、凭据与发布卫生、客户端 IP 解析、登录锁定、解压�
 
 ---
 
-## 一键打包（Windows）
+## 一键打包
 
-双击 `Auto-building.bat` 即可，脚本会依次：
+构建逻辑集中在 **`build-release.ps1`** 一个脚本里，本地与 GitHub Actions 都调用它，
+所以两边的产物不会跑偏。
 
-1. 检查 Node.js 版本（低于 18 时告警）
-2. 缺少 `pkg` 时自动全局安装
-3. 分别安装 `server` 与 `web` 依赖
-4. 构建前端（`web/dist/`）
-5. 清除调试用的 `data/config.json`
-6. 用 `esbuild` 把后端打成单个 CJS
-7. 用 `pkg` 生成 `server/ZeroShadow.exe`（target `node18-win-x64`）
-8. 组装发布目录 `ZeroShadow-Release/`（`ZeroShadow.exe` + `web/dist/` + 空 `data/` + `.env.example`）
-9. 调用 `package-release.ps1` 清理运行期密钥、执行密钥门禁，并产出 `ZeroShadow-Release.zip`
+### Windows：双击 `Auto-building.bat`
 
-发布包使用方式与从源码运行完全一致：把整个目录拷到目标机器，双击 `ZeroShadow.exe`，
-首次运行会在 exe 同目录生成 `.env` 与 `data/`。
+它会调用 `build-release.ps1`，依次完成：
+
+1. 检查 Node.js 版本、确认 `pnpm` 与 `pkg` 可用（缺 `pkg` 时自动全局安装）
+2. 安装 `server` 与 `web` 依赖
+3. 构建前端（`web/dist/`）
+4. 用 `esbuild` 把后端 ESM 打成单个 CJS（pkg 对 ESM 支持不佳）
+5. 对每个目标平台跑 `pkg`，把结果暂存到 `build/<平台>/`
+6. 调用 `package-release.ps1`：补上 `LICENSE` / `README.md` / `docs/`，清理运行期密钥，
+   执行密钥门禁，产出 `ZeroShadow-<版本>-<平台>.zip`
+
+也可以只构建指定平台（避免每次下载全部运行时）：
+
+```bat
+Auto-building.bat windows-x64
+Auto-building.bat windows-x64,linux-x64
+```
+
+### 平台矩阵
+
+| 平台标签 | pkg 目标 | 可执行文件 |
+|:--------------- |:------------------------- |:------------------ |
+| `windows-x64` | `node18-win-x64` | `ZeroShadow.exe` |
+| `windows-arm64` | `node18-win-arm64` | `ZeroShadow.exe` |
+| `linux-x64` | `node18-linux-x64` | `ZeroShadow` |
+| `linux-arm64` | `node18-linux-arm64` | `ZeroShadow` |
+| `linux-armv7` | `node18-linuxstatic-armv7` | `ZeroShadow` |
+
+> **`windows-x32` 做不出来**（32 位 Windows）。`pkg` 依赖的 `pkg-fetch` 从来没有发布过
+> win-x86 的基础运行时——不是 node18 没有，而是**任何 Node 版本都没有**。这一点经过三方核对：
+> `pkg-fetch` 3.4.2 自带的 `EXPECTED_HASHES` 里没有任何 `*-win-x86` 键、它的 v3.4 release
+> 共 178 个 asset 里没有 win-x86、社区维护分支 `@yao-pkg/pkg-fetch` 的 v3.5 release 共 997 个
+> asset 里同样没有。向 `pkg` 请求该目标会直接报
+> `404: Not Found ... {"tag":"v3.4","name":"node-v18.5.0-win-x86"}`。
+> 若确实需要 32 位 Windows 包，得换用别的打包器（例如 nexe），那会产出一个结构完全不同的
+> 二进制，需要单独一条打包路径，不是在这里多加一个 `--target` 就能解决的。
+> `build-release.ps1` 收到 `windows-x32` 时会直接给出上述原因并退出，而不是抛一个难懂的 pkg 404。
+>
+> `linux-armv7` 用的是 **`linuxstatic-armv7`**：`pkg-fetch` 只有静态链接版的 armv7，
+> 没有普通的 `linux-armv7`。静态链接对分发反而更好——产物不依赖目标机的 glibc 版本。
+
+> **"node18" 指的是打进包里的运行时，不是构建时用的 Node。** `pkg` 会把 node18 运行时
+> 嵌进产物，所以产物与构建机的 Node 版本无关；但构建机本身需要较新的 Node，因为
+> Vite 8 要求 `^20.19.0 || >=22.12.0`——**前端在 Node 18 上根本构建不了**。
+
+### Linux / macOS 上构建
+
+```bash
+pwsh -NoProfile -File build-release.ps1 -Targets linux-x64,linux-arm64,linux-armv7
+```
+
+Linux 归档里的 `ZeroShadow` 会带上可执行位（ZIP 的 external attributes 里写了 `0755`），
+解压后可直接运行，不需要手工 `chmod +x`。
+
+### GitHub Actions 自动编译
+
+`.github/workflows/build-release.yml` 在 `windows-latest` 与 `ubuntu-latest` 上并行构建
+上表中的五个平台，每个平台产出一个 `ZeroShadow-<版本>-<平台>.zip`：
+
+- 推 `v*` 标签时，归档会自动附加到对应的 GitHub Release；
+- 其它触发方式（`main` 分支、PR、手动 `workflow_dispatch`）只上传为 Actions 产物；
+- 打包后会**校验归档内容**：必须含后端可执行文件、`web/dist/`、`.env.example`、
+  `LICENSE`、`README.md` 与 `docs/*.md`，且不得含任何凭据——缺任何一项都会让 CI 失败。
+
+### 发布包内容
+
+```
+ZeroShadow-1.1.0-windows-x64.zip
+├── ZeroShadow.exe   /  ZeroShadow    后端可执行文件
+├── web/dist/                         前端静态文件
+├── .env.example                      配置模板（首次运行自动生成 .env）
+├── data/                             运行期数据目录
+├── LICENSE                           Apache 2.0
+├── README.md                         项目说明
+└── docs/                             全部用户手册 + 截图
+```
+
+使用方式与从源码运行完全一致：把包解压到目标机器，运行可执行文件，
+首次启动会在它同目录生成 `.env` 与 `data/`，并在控制台打印随机超管密码。
 
 > **密钥门禁**：`package-release.ps1` 会删除发布目录里的 `.env`、`data/.jwt-secret`、
 > `data/users.json`、`data/config.json`、`data/logs/*.log`；如果发现 `data/files/*`、
 > `data/tmp/*` 或任何 `.zip` 残留，则**拒绝出包**（退出码 2）。也正因如此，**永远不要把仓库根目录直接打成压缩包**。
+> 另外请注意：**不要打包一个已经运行过的发布目录**——它内部已经生成了 `.env` 与
+> `data/.jwt-secret`，一旦被打进归档，所有拿到该包的人都共用同一个超管密码与同一个
+> 会话签名密钥（后者可被用来伪造任意登录态）。务必让脚本从干净目录重新组装。
 
 ---
 

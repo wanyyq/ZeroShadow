@@ -1,0 +1,317 @@
+---
+title: 打包与 CI
+description: 多平台构建编排、发布包组成、密钥门禁，以及 GitHub Actions 自动编译。
+icon: Package
+---
+
+## 三层结构
+
+构建逻辑只在 `build-release.ps1` 里有一份，本地与 CI 都调它，**两边的产物不会跑偏**。
+
+```text
+Auto-building.bat          薄封装，只在 Windows 上双击用（转发参数给下一层）
+.github/workflows/*.yml    CI：五个平台并行跑下一层
+        ↓
+build-release.ps1          构建编排：依赖 → 前端 → esbuild 打包 → 逐平台 pkg → 暂存
+        ↓
+package-release.ps1        单个平台的收尾：暂存文档 → 清理凭据 → 密钥门禁 → 出 zip
+```
+
+## 平台矩阵
+
+| 平台标签 | pkg 目标 | 二进制 |
+|:--|:--|:--|
+| `windows-x64` | `node18-win-x64` | `ZeroShadow.exe` |
+| `windows-arm64` | `node18-win-arm64` | `ZeroShadow.exe` |
+| `linux-x64` | `node18-linux-x64` | `ZeroShadow` |
+| `linux-arm64` | `node18-linux-arm64` | `ZeroShadow` |
+| `linux-armv7` | `node18-linuxstatic-armv7` | `ZeroShadow` |
+
+产物落在仓库根，命名为 `ZeroShadow-<版本>-<平台>.zip`，版本取自根 `package.json`。
+逐平台的暂存目录是 `build/<平台>/`（已 gitignore）。
+
+<Callout type="error" title="windows-x32（32 位 Windows）做不出来，这是工具链限制">
+`pkg` 依赖的 `pkg-fetch` **从未**发布过 win-x86 的基础运行时——不是 node18 没有，
+而是**任何 Node 版本都没有**。已从三个独立来源核对：
+
+1. `pkg-fetch` 3.4.2 自带的 `lib-es5/expected.js`（`EXPECTED_HASHES`）里**没有任何**
+   `*-win-x86` 键；
+2. `pkg-fetch` v3.4 的 GitHub release 共 **178** 个 asset，没有 win-x86；
+3. 社区维护分支 `@yao-pkg/pkg-fetch` 的 v3.5 release 共 **997** 个 asset，同样没有 win-x86。
+
+向 `pkg` 请求该目标会直接返回：
+
+```text
+Error! 404: Not Found
+Not found in remote cache:
+  {"tag":"v3.4","name":"node-v18.5.0-win-x86"}
+```
+
+真要出 32 位 Windows 包，得换用别的打包器（例如 nexe），那会产出一个结构完全不同的
+二进制，需要单独一条打包路径，**不是多加一个 `--target` 就能解决的**。
+
+`build-release.ps1` 里有一张 `$UNSUPPORTED_TARGETS` 表，收到 `windows-x32` 时会打印上述原因
+并以退出码 1 结束，而不是抛一个难懂的 pkg 404——后人不必再踩一遍。
+</Callout>
+
+<Callout type="info" title="linux-armv7 为什么是 linuxstatic">
+`pkg-fetch` 只有静态链接版的 armv7，没有普通的 `linux-armv7`。
+静态链接对分发反而更好：**产物不依赖目标机的 glibc 版本**，在老发行版上也能跑。
+</Callout>
+
+## "node18" 指的是什么
+
+**`node18` 是打进包里的运行时，不是构建机上的 Node。**
+
+`pkg` 会把 node18 运行时内嵌进产物，所以产物与构建机的 Node 版本无关。但构建机本身
+需要较新的 Node，因为 `vite@8` 与 `@vitejs/plugin-react@6` 声明了
+`engines: ^20.19.0 || >=22.12.0`——**前端在 Node 18 上根本构建不了**。
+
+| | 需要的 Node |
+|:--|:--|
+| 运行后端源码（`pnpm start`） | ≥ 18 |
+| 构建前端（`pnpm build`） | ≥ 20.19（或 ≥ 22.12） |
+| 产物内嵌的运行时 | 由 pkg 目标决定，即 `node18-*` |
+
+## 构建用法
+
+```powershell
+# 全部受支持平台
+pwsh -NoProfile -File build-release.ps1
+
+# 只构建指定平台（避免每次重新下载 pkg 运行时）
+pwsh -NoProfile -File build-release.ps1 -Targets windows-x64,windows-arm64
+
+# CI 用法：依赖按锁文件安装
+pwsh -NoProfile -File build-release.ps1 -FrozenLockfile
+
+# 只构建 + 暂存，不出包
+pwsh -NoProfile -File build-release.ps1 -NoZip
+```
+
+### 参数
+
+| 参数 | 说明 |
+|:--|:--|
+| `-Root` | 项目根目录，默认脚本所在目录 |
+| `-Targets` | 平台标签列表，逗号分隔；留空 = 全部受支持平台 |
+| `-FrozenLockfile` | 给 `pnpm install` 加 `--frozen-lockfile`（CI 应当启用） |
+| `-SkipInstall` | 跳过依赖安装 |
+| `-SkipFrontend` | 跳过前端构建（复用已有 `web/dist`） |
+| `-SkipBundle` | 跳过后端 esbuild 打包（复用已有 bundle） |
+| `-NoZip` | 只构建与暂存，不产归档 |
+
+### 退出码
+
+| 退出码 | 含义 |
+|:--|:--|
+| `0` | 全部请求的平台都成功 |
+| `1` | 致命错误（工具链缺失、前端构建失败、请求了不支持的目标……） |
+| `2` | 至少一个平台失败（其它平台的结果仍保留，矩阵的 `fail-fast` 是关的） |
+
+<Callout type="info" title="Linux / macOS 上构建">
+```bash
+pwsh -NoProfile -File build-release.ps1 -Targets linux-x64,linux-arm64,linux-armv7
+```
+Linux 归档里的 `ZeroShadow` 会带上可执行位，解压后可直接运行，不需要手工 `chmod +x`。
+</Callout>
+
+### 构建步骤做了什么
+
+<Steps>
+<Step>
+### 检查工具链
+
+确认 `node` 可用、选定包管理器（优先 `pnpm`，回退 `npm`）、找到 `pkg`
+（依次尝试全局 `pkg`、`server/node_modules/.bin/pkg`，都没有就 `npm i -g pkg`）。
+</Step>
+<Step>
+### 安装依赖
+
+`pnpm -C server install` 与 `pnpm -C web install`，均在仓库根执行
+（`env.js` 依赖工作目录，所有步骤必须对根目录有共识）。
+</Step>
+<Step>
+### 构建前端
+
+`pnpm -C web build`（即 `tsc -b && vite build`），产出 `web/dist`。
+构建后会校验 `web/dist/index.html` 确实存在。
+</Step>
+<Step>
+### 打包后端
+
+`pnpm -C server bundle`，用 esbuild 把 ESM 打成单个 CJS：
+`server/dist/server-bundle.cjs`（pkg 对 ESM 支持不佳）。
+</Step>
+<Step>
+### 逐平台 pkg
+
+对每个目标跑一次 `pkg`，产物直接落到 `build/<平台>/` 里。
+`pkg` 会按需下载该平台的基础运行时，因此首次构建某个平台需要联网。
+</Step>
+<Step>
+### 组装与出包
+
+往暂存目录补上 `web/dist`、`.env.example`、`data/`，然后交给 `package-release.ps1`。
+</Step>
+</Steps>
+
+## 打包器 `package-release.ps1`
+
+```powershell
+# 默认行为（自动按 版本+平台 命名归档）
+powershell -NoProfile -ExecutionPolicy Bypass -File package-release.ps1 -Platform windows-x64
+
+# 只清理 + 扫描 + 暂存文档，不出包
+... -File package-release.ps1 -NoZip
+
+# 只报告会发生什么，不实际改动
+... -File package-release.ps1 -DryRun
+
+# 自定义目录 / 输出
+... -File package-release.ps1 -ReleaseDir ZeroShadow-Release -ZipPath ZeroShadow-Release.zip
+```
+
+### 参数
+
+| 参数 | 说明 |
+|:--|:--|
+| `-Root` | 项目根目录，默认脚本所在目录 |
+| `-ReleaseDir` | 待打包的发布目录（相对 `-Root` 或绝对路径），默认 `ZeroShadow-Release` |
+| `-ZipPath` | 输出归档路径。省略时按 `ZeroShadow-<版本>[-<平台>].zip` 生成 |
+| `-Platform` | 平台标签，用于生成默认归档名 |
+| `-Version` | 覆盖版本号，默认读根 `package.json` |
+| `-IncludeDocs` | 是否暂存 `LICENSE` / `README.md` / `docs/`，**默认开启**；用 `-IncludeDocs:$false` 关闭 |
+| `-NoZip` | 不创建归档 |
+| `-DryRun` | 不删除也不复制，只报告会做什么 |
+
+### 阶段与行为
+
+| 阶段 | 行为 |
+|:--|:--|
+| 暂存文档 | 复制 `LICENSE` / `README.md` / `docs/`（含 `docs/img` 截图）进发布目录；源文件缺失时告警但不中断 |
+| 清理 | 删除 `.env`、`data/.jwt-secret`、`data/users.json`、`data/config.json`、`data/logs/*.log`（都是可再生的） |
+| 拦截 | 若存在 `data/files/*`、`data/tmp/*`、任何 `.zip`，**拒绝出包**（退出码 2），并列出具体文件 |
+| 拒绝根目录 | 目标目录等于项目根目录时直接退出（否则会把 `.env` 与 `data/` 打进包） |
+| 拒绝自嵌套 | 归档路径位于发布目录内部时退出（否则新包会被自己的 `*.zip` 规则拦下） |
+| 打包 | 手工逐条写 zip 条目，路径统一用 `/`（`CreateFromDirectory` 在 Windows 上会写出反斜杠，导致 macOS/Linux 解压成一堆乱名文件）；1980 年之前的时间戳会被跳过（zip 格式无法表示） |
+| 可执行位 | `ZeroShadow`（无扩展名，即 Linux/macOS 产物）在 zip 的 external attributes 里写入 `0100755`，解压后即可运行；其余文件写 `0100644` |
+| 复核 | 打开生成的压缩包再扫一遍：不得含 `.env`、`jwt-secret`、`users.json`、`config.json`、`.log` 或反斜杠条目；有违规则**丢弃压缩包**，保留原有包不动 |
+| 报告 | 列出归档里的二进制名与手册数量；二进制缺失或手册为 0 时告警 |
+| 退出码 | `0` 成功；`1` 意外失败；`2` 门禁拦截 |
+
+<Callout type="warn" title="为什么文档暂存放在打包脚本里">
+`LICENSE` / `README.md` / `docs/` 的暂存只在 `package-release.ps1` 里实现了一次，
+本地构建与 CI 都复用它，因此不会出现「CI 的包里有手册、本地打的包没有」这种偏差。
+</Callout>
+
+## 发布包内容
+
+```text
+ZeroShadow-1.1.0-windows-x64.zip
+├── ZeroShadow.exe   /  ZeroShadow    后端可执行文件
+├── web/dist/                         前端静态文件
+├── .env.example                      配置模板（首次运行自动生成 .env）
+├── data/                             运行期数据目录
+├── LICENSE                           Apache 2.0
+├── README.md                         项目说明
+└── docs/                             全部用户手册 + 截图
+```
+
+使用方式与从源码运行完全一致：把包解压到目标机器，运行可执行文件，
+首次启动会在它同目录生成 `.env` 与 `data/`，并在控制台打印随机超管密码。
+
+## 密钥门禁
+
+一次发布归档里**绝不能**出现运行期凭据：
+
+| 文件 | 为什么危险 |
+|:--|:--|
+| `.env` | 里面是超管的**明文密码** |
+| `data/.jwt-secret` | 会话签名密钥——泄露后可**伪造任意登录态** |
+| `data/users.json` | 成员密码哈希 |
+| `data/config.json` | 服务配置（可能含访客隐藏目录结构） |
+
+> 脚本注释里明确写了：**永远不要打包项目根目录** —— 那里有 `.env` 与 `data/`。
+
+<Callout type="error" title="也不要打包一个「已经运行过」的发布目录">
+已经启动过一次的发布目录内部会生成 `.env` 与 `data/.jwt-secret`。门禁虽然会把它们清掉，
+但只要漏掉一个就是全量凭据泄漏。**本仓库历史上就有一个发布归档因此带着 `.env` 与
+`.jwt-secret` 出了门**（`ZeroShadow-Release.zip`，在门禁机制建立之前产出）。
+
+正确做法：让 `build-release.ps1` / `Auto-building.bat` 从干净目录重新组装，不要手工 zip。
+</Callout>
+
+## GitHub Actions 自动编译
+
+`.github/workflows/build-release.yml` 在 `windows-latest` 与 `ubuntu-latest` 上并行构建上表
+五个平台，每个平台产出一个 `ZeroShadow-<版本>-<平台>.zip`。
+
+### 触发条件
+
+| 事件 | 行为 |
+|:--|:--|
+| 推 `v*` 标签 | 构建，并把归档**附加到对应的 GitHub Release** |
+| 推到 `main`（限相关路径改动） | 构建，归档上传为 Actions 产物 |
+| Pull Request（限相关路径改动） | 构建校验，不上传 |
+| 手动 `workflow_dispatch` | 同上 |
+
+路径过滤覆盖 `server/**`、`web/**`、`docs/**`、`package.json`、两个构建脚本、
+`.env.example`、`LICENSE`、`README.md` 与工作流自身。
+
+### 每个平台的任务步骤
+
+1. `actions/checkout`
+2. `pnpm/action-setup`（pnpm 10）
+3. `actions/setup-node`（**Node 22**，带 pnpm 缓存，缓存键是两个锁文件）
+4. 打印工具链版本
+5. `build-release.ps1 -Targets <平台> -FrozenLockfile`
+6. **校验归档内容**（见下）
+7. `actions/upload-artifact`（`if-no-files-found: error`）
+8. 标签构建时用 `gh release upload` 附加到 Release
+
+<Callout type="info" title="为什么 CI 用 Node 22 而产物是 node18">
+见上文「"node18" 指的是什么」。宿主 Node 只负责构建，pkg 目标决定产物内嵌的运行时。
+</Callout>
+
+### 归档内容校验（CI 会因此失败）
+
+打包脚本的告警在 CI 里不够——**缺文档应当算失败**。所以工作流里有一步会打开归档逐项断言：
+
+必须存在：
+
+- `ZeroShadow.exe`（Windows）或 `ZeroShadow`（Linux），位于归档根
+- `web/dist/index.html`
+- `.env.example`
+- `LICENSE`
+- `README.md`
+- 至少一个 `docs/*.md` 用户手册
+
+必须不存在：
+
+- 任何 `.env`、`jwt-secret`、`users.json`、`config.json`、`.log` 条目
+
+缺任何一项、或出现任何敏感条目，CI 直接报错并终止该平台的任务。
+
+### 并发
+
+工作流带 `concurrency` 组（按 ref 分组）且 `cancel-in-progress: true`，
+同一分支上连续推送时会取消上一次未完成的运行，避免白跑。
+
+## 本地一键打包（Windows）
+
+双击 `Auto-building.bat` 即可，它会把参数转发给 `build-release.ps1`：
+
+```bat
+Auto-building.bat                         :: 全部受支持平台
+Auto-building.bat windows-x64             :: 单个平台
+Auto-building.bat windows-x64,linux-x64   :: 多个平台
+```
+
+结束后归档就在仓库根目录，形如 `ZeroShadow-1.1.0-windows-x64.zip`。
+
+<Callout type="warn" title="首次构建每个平台需要联网">
+`pkg` 会按需下载该平台的基础运行时（几十 MB），缓存在 `~/.pkg-cache`。
+缓存在的话后续构建不需要网络。下载偶尔会失败并报出难懂的
+`ENOENT ... .downloading`，重试通常即可。
+</Callout>

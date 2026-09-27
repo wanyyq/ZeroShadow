@@ -1,0 +1,140 @@
+---
+title: 介绍
+description: ZeroShadow 是一款轻量级局域网网盘 —— 把一台电脑变成团队共用的私有网盘，客户端只要浏览器。
+---
+
+ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的工作室网盘」。
+
+核心思路很简单：**服务端一个命令跑起来，客户端只要有浏览器。**
+
+- 同一个局域网里，同事打开 `http://<你的局域网IP>:12345` 就能存取文件，**无需安装任何客户端**；
+- 需要给外部的人访问时，内置 SSH 反向隧道，**一次点击拿到公网地址**；
+- 角色只有三种（超级管理员 / 团队成员 / 访客），**每个权限点都能在后台单独开关**。
+
+没有数据库、没有 Docker、也没有外部服务依赖：文件直接躺在磁盘目录里，配置就是 `.env` 和
+`data/config.json` 两个文件，随时可迁移、可备份、可整目录带走。
+
+<Cards>
+  <Card title="快速开始" href="/docs/getting-started/quickstart" description="从安装依赖到第一次登录，五步跑起来" />
+  <Card title="使用手册" href="/docs/guide/manual" description="上传下载、预览、在线编辑、压缩解压、快捷方式" />
+  <Card title="权限与角色" href="/docs/guide/permissions" description="三种角色的完整权限矩阵" />
+  <Card title="安全设计" href="/docs/security/design" description="逐项拆解认证、路径安全、SSRF 防护与限流" />
+  <Card title="配置参考" href="/docs/admin/configuration" description=".env 与 config.json 的全部字段与默认值" />
+  <Card title="API 参考" href="/docs/api/reference" description="全部 HTTP 接口、参数、权限要求与错误码" />
+</Cards>
+
+## 为什么值得一用
+
+| | ZeroShadow 的做法 |
+|:--|:--|
+| **开箱即用** | `pnpm setup && pnpm build && pnpm start`，首次启动**自动生成 `.env` 与随机超管密码**并打印在控制台；也可以直接运行打包出的 `ZeroShadow.exe` |
+| **跨平台** | 服务端 Windows / macOS / Linux 都能跑；客户端现代浏览器即可，手机、平板都能用 |
+| **权限够细** | 19 个权限开关，成员「文件操作」还有一个总开关统一收口；访客可**按文件夹**隐藏 |
+| **看得见的进度** | 上传、ZIP 压缩、ZIP 解压、链接下载都是**带百分比的任务**，不怕大文件没反馈 |
+| **不搬数据** | `FILES_SOFT_DIR` 把服务器上任意目录挂成**只读文件夹**，视频、素材库、软件包原地播放，零拷贝 |
+| **安全是默认值** | 默认**禁止**链接下载访问内网（防 SSRF）、默认**禁止**把只读目录内容复制进网盘、默认限制单 IP 重型操作频率；所有开关都在后台可见 |
+| **可验证** | 仓库自带安全回归测试与冒烟测试，断言写成脚本，改完代码跑一遍就知道有没有退化 |
+
+## 界面一览
+
+![文件浏览器：列表 / 网格视图、右键菜单、多选操作](/img/file.png)
+
+![超管设置：权限管理与 SSH 公网隧道](/img/ssh.png)
+
+![文件预览：图片 / 视频 / 音频 / PDF / 文本](/img/vidio.png)
+
+![暗色模式](/img/dark.png)
+
+## 功能特性
+
+### 文件管理
+
+- **上传** 点击上传、拖拽上传、整目录拖拽上传（保留目录结构），单次请求最多 100 个文件
+- **下载** 单文件流式下载；多选或文件夹自动 ZIP 打包下载（文件数 / 单文件 / 总量三重上限）
+- **预览** 图片（滚轮缩放、拖拽平移、双击放大）、视频、音频、PDF 内嵌、文本原样预览
+- **在线编辑** 文本文件直接在浏览器里改并保存回写（`Ctrl + S`）
+- **HTML 预览** 上传的 HTML 可以全屏渲染，并在沙箱 iframe 中运行，拿不到网盘自身的会话
+- **文件操作** 新建文件夹、复制 / 剪切 / 粘贴、复制到…、移动到…、重命名、删除，遇到同名可逐项选择**重命名 / 跳过 / 覆盖 / 合并**
+- **递归搜索** 按文件名递归查找（界面从根目录开始搜，最多返回 200 条，避免把服务器搜爆）
+- **压缩 / 解压** 在线打包 ZIP、在线解压 ZIP（带进度、带体积上限、失败自动清理半成品）
+- **只读映射目录** 把服务器其他路径挂成网盘里的只读文件夹，不占空间、不复制
+- **快捷方式** `.zeropath` 文件可以把入口指向任意目录或文件，并自定义显示名与图标
+- **链接下载器** 填一个 `http/https` 直链，服务端帮你抓进网盘目录（带进度、可自定义文件名）
+- **实用工具** 内置文件大小单位换算
+
+### 权限体系
+
+| 角色 | 浏览 | 下载 | 上传 | 编辑 | 成员管理 | 服务器设置 |
+|:--|:--:|:--:|:--:|:--:|:--:|:--:|
+| **超级管理员** | 全部 | 全部 | 全部（默认 ≤ 2048MB） | 全部 | 全部 | 全部 |
+| **团队成员** | 全部 | 可配 | 可配（默认 ≤ 512MB） | 可配 | 不可 | 仅客户端设置 |
+| **访客** | 可配 | 可配 | 不可 | 不可 | 不可 | 仅客户端设置 |
+
+- 超级管理员**全局唯一**，密码只能改 `.env`，改后重启生效（旧会话同时失效）
+- 团队成员由超管**批量创建**（一次最多 200 个）、启用 / 禁用、改用户名、重置密码，人数上限 500
+- 访客**无需登录**即可浏览与下载，可对指定文件夹逐个设置为「对访客隐藏」
+
+完整矩阵见 [权限与角色](/docs/guide/permissions)。
+
+### 客户端体验
+
+- 列表 / 网格两种视图，名称 / 大小 / 修改时间排序，文件夹置顶
+- 浅色 / 深色 / 跟随系统三态主题，按 `D` 键快速切换
+- 常用快捷键：`F2` 重命名、`Delete` 删除、`Ctrl/⌘ + A/C/X/V` 全选 / 复制 / 剪切 / 粘贴、`Enter` 打开
+- 窄屏自适应，手机浏览器同样可上传下载；面包屑、悬浮信息卡、右键菜单一应俱全
+
+### 公网穿透
+
+- 内置 SSH 反向隧道，后台一键开启，实时日志与公网地址直接显示在界面上
+- 内置四种模式：**pinggy.io** / **localhost.run** / **serveo.net** / **自定义 SSH 服务器**
+- 掉线自动重连（5 秒起指数退避，最长 60 秒一轮），并记录重连次数
+
+细节见 [公网访问与隧道](/docs/admin/tunnel)。
+
+### 安全加固
+
+- 会话走 **httpOnly + SameSite=Lax** Cookie，服务端每次请求校验 JWT 与账号状态
+- **CSRF 双重校验**：自定义请求头 + 浏览器来源信息（`Origin` / `Sec-Fetch-Site`）
+- **登录暴破防护**：按 IP 与用户名双维度计数，连续触发时锁定时长递增
+- 成员密码 **bcrypt** 哈希存储；超管密码使用 `timingSafeEqual` 定时安全比较
+- **路径穿越防护**：拒绝 `..`、NUL 字节、越界符号链接；上传文件名统一清洗
+- **链接下载防 SSRF**：解析全部 A/AAAA 记录后逐条校验地址段，并把已校验 IP 固定给 socket
+- 上传的 HTML / SVG 内联返回时强制 `CSP: sandbox`，不会在网盘自身的源里执行脚本
+- 安全响应头：`Content-Security-Policy`、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`
+
+更完整的机制说明（含每一项的开关与默认值）见 [安全设计](/docs/security/design)。
+
+## 技术栈
+
+| 层级 | 技术 |
+|:--|:--|
+| **后端运行时** | Node.js（ESM） |
+| **后端框架** | Express 4 |
+| **认证** | JWT（jsonwebtoken）+ bcryptjs + CSRF 校验 |
+| **文件上传** | Busboy |
+| **压缩** | Archiver / Unzipper |
+| **前端** | React 19 + TypeScript + react-router-dom 7 |
+| **样式** | Tailwind CSS v4 + shadcn 组件（base-vega 风格） |
+| **图标 / 动画** | Lucide（本地 `lucide.min.js`）/ GSAP（本地） |
+| **构建** | Vite / esbuild / pkg |
+
+> 图标、字体、GSAP 全部走本地 `public/resources/`，**不依赖任何 CDN**，内网离线也能正常显示。
+
+## 文档怎么读
+
+| 你的身份 / 目的 | 建议阅读顺序 |
+|:--|:--|
+| 第一次部署，想赶紧跑起来 | [快速开始](/docs/getting-started/quickstart) → [常见问题](/docs/getting-started/faq) |
+| 想知道网盘怎么用 | [使用手册](/docs/guide/manual) → [权限与角色](/docs/guide/permissions) |
+| 我是超级管理员 | [管理员指南](/docs/admin/admin-guide) → [权限与角色](/docs/guide/permissions) → [配置参考](/docs/admin/configuration) |
+| 要开放到公网 | [公网访问与隧道](/docs/admin/tunnel) → [安全设计](/docs/security/design) |
+| 关心安全性 | [安全设计](/docs/security/design) → [公网访问与隧道](/docs/admin/tunnel) |
+| 要改代码 / 二次开发 | [架构与目录结构](/docs/development/architecture) → [开发与构建](/docs/development/build) → [API 参考](/docs/api/reference) |
+| 要对接接口 / 写脚本 | [API 参考](/docs/api/reference) → [配置参考](/docs/admin/configuration) |
+| 要打包发布 | [打包与 CI](/docs/development/release) |
+
+## 许可
+
+本项目采用 [Apache 2.0](https://github.com/wanyyq/ZeroShadow/blob/main/LICENSE) 许可。
+
+Copyright © Wanyyq（GitHub: [wanyyq](https://github.com/wanyyq)）

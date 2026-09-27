@@ -1,0 +1,183 @@
+name: Build release archives
+
+# Produces one archive per platform, named ZeroShadow-<version>-<platform>.zip.
+# All the real work lives in build-release.ps1 / package-release.ps1, which are
+# the same scripts Auto-building.bat calls locally - that is deliberate, so the
+# CI and local builds cannot drift apart.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "server/**"
+      - "web/**"
+      - "docs/**"
+      - "package.json"
+      - "build-release.ps1"
+      - "package-release.ps1"
+      - ".env.example"
+      - "LICENSE"
+      - "README.md"
+      - ".github/workflows/build-release.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "web/**"
+      - "build-release.ps1"
+      - "package-release.ps1"
+      - ".github/workflows/build-release.yml"
+
+# Needed so a tag build can attach its archives to a GitHub Release.
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One broken platform must not hide the results of the other five.
+      fail-fast: false
+      matrix:
+        include:
+          # pkg cross-builds by downloading a prebuilt runtime, but building
+          # each platform on its native OS is by far the most reliable.
+          #
+          # windows-x32 (node18-win-x86) is deliberately absent: pkg-fetch has
+          # never published a win-x86 base runtime for ANY Node version, so the
+          # target cannot be produced at all. See the target table comment in
+          # build-release.ps1 for the evidence. Requesting it there fails loudly
+          # with an explanation instead of a cryptic pkg 404.
+          - os: windows-latest
+            platform: windows-x64
+          - os: windows-latest
+            platform: windows-arm64
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-latest
+            platform: linux-arm64
+          # Statically linked: pkg-fetch ships linuxstatic-armv7 but no plain
+          # linux-armv7, and a static binary is better for distribution anyway.
+          - os: ubuntu-latest
+            platform: linux-armv7
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm must be installed before setup-node so its cache integration works.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # NOTE ON THE NODE VERSION
+      #   The host Node here is NOT the Node that ends up inside the shipped
+      #   binary. pkg embeds the node18 runtime because build-release.ps1 passes
+      #   --target node18-<os>-<arch>. A modern host is required anyway: Vite 8
+      #   and @vitejs/plugin-react 6 declare engines ^20.19.0 || >=22.12.0, so
+      #   the frontend simply cannot be built on Node 18.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            server/pnpm-lock.yaml
+            web/pnpm-lock.yaml
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          Write-Host "host node: $(node -v)"
+          Write-Host "pnpm:      $(pnpm -v)"
+          Write-Host "pwsh:      $($PSVersionTable.PSVersion)"
+
+      - name: Build and package ${{ matrix.platform }}
+        shell: pwsh
+        run: |
+          ./build-release.ps1 -Targets ${{ matrix.platform }} -FrozenLockfile
+
+      # Enforces what the archive must ship: the binary, the built frontend, the
+      # config template, the licence and every user manual. A warning from the
+      # packaging script is not enough in CI - missing documentation should fail
+      # the build.
+      - name: Verify archive contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+          $archive = Get-ChildItem -Path "ZeroShadow-*.zip" | Select-Object -First 1
+          if (-not $archive) { throw "the build produced no ZeroShadow-*.zip archive" }
+
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' })
+          } finally {
+            $zip.Dispose()
+          }
+
+          Write-Host "archive : $($archive.Name)"
+          Write-Host "entries : $($names.Count)"
+
+          $missing = @()
+          foreach ($required in @('web/dist/index.html', 'LICENSE', 'README.md', '.env.example')) {
+            if ($names -notcontains $required) { $missing += $required }
+          }
+          # ZeroShadow.exe on Windows, bare ZeroShadow on Linux, at archive root.
+          if (-not ($names | Where-Object { $_ -match '^ZeroShadow(\.exe)?$' })) {
+            $missing += 'ZeroShadow[.exe]'
+          }
+          $manuals = @($names | Where-Object { $_ -match '^docs/.+\.md$' })
+          if ($manuals.Count -eq 0) { $missing += 'docs/*.md (user manuals)' }
+
+          if ($missing.Count -gt 0) {
+            Write-Host "archive is missing required entries:" -ForegroundColor Red
+            $missing | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+            throw "release archive is incomplete"
+          }
+
+          Write-Host "verified: binary + web/dist + LICENSE + README.md + .env.example + $($manuals.Count) manual(s)" -ForegroundColor Green
+
+          # Secrets must never survive into a published archive.
+          $forbidden = @($names | Where-Object {
+            $_ -match '(^|/)\.env$' -or $_ -match 'jwt-secret' -or
+            $_ -match '(^|/)users\.json$' -or $_ -match '(^|/)config\.json$' -or
+            $_ -match '\.log$'
+          })
+          if ($forbidden.Count -gt 0) {
+            Write-Host "archive contains secret material:" -ForegroundColor Red
+            $forbidden | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+            throw "secret gate failed in CI"
+          }
+          Write-Host "secret gate: clean" -ForegroundColor Green
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-archive
+          path: ZeroShadow-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # On a v* tag push, publish the archives as release assets. `gh` is
+      # preinstalled on the runners, so no third-party release action is needed.
+      - name: Attach archive to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" ZeroShadow-*.zip --clobber

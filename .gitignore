@@ -1,13 +1,61 @@
+# ============================================================================
+#  ZeroShadow .gitignore
+#
+#  两条铁律：
+#   1. 绝不提交任何凭据 —— .env 里有超管明文密码，data/.jwt-secret 是会话签名
+#      密钥，data/users.json 是成员密码哈希。任一入库都等于公开泄露；其中
+#      .jwt-secret 一旦泄露，任何人都能伪造出有效的登录态。
+#   2. 绝不提交构建产物与运行时数据 —— 它们体积大且随时可再生产。
+#
+#  注意：.gitignore 只对**尚未被跟踪**的文件生效。若某文件已被 git 跟踪
+#  （本仓库历史遗留的 server/ZeroShadow.exe 就属于这种情况），必须先
+#  `git rm --cached <文件>` 让它脱离索引，忽略规则才会真正起作用。
+# ============================================================================
+
+# ---- 依赖 ----
 node_modules/
+
+# ---- 构建产物 ----
 web/dist/
+server/dist/
+*.tsbuildinfo
+# build-release.ps1 的逐平台暂存目录（build/<platform>/）
+build/
+
+# ---- 运行时数据（凭据 + 用户文件）----
+# 无前导斜杠 => 匹配任意层级的 data/，因此根 data/ 与 server/data/ 一并覆盖。
+# 注意 server/ 下不应再出现 data/ 或 .env（服务必须以仓库根为工作目录启动，
+# 见 docs/开发者指南.md「工作目录」一节）。
 data/
 .env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- 发布打包产物 ----
+ZeroShadow-Release/
+# 多平台发布包，例如 ZeroShadow-1.1.0-windows-x64.zip
+ZeroShadow-*.zip
+ZeroShadow-Release.zip
+# pkg 生成的各平台可执行文件（Windows 与类 Unix 的命名不同）
+server/ZeroShadow.exe
+server/ZeroShadow
+
+# ---- 日志 ----
 *.log
+logs/
+
+# ---- 临时备份（统一 .env/data 时产生，可随时删除）----
+.migration-backup/
+
+# ---- 编辑器与操作系统 ----
+.vs/
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
-ZeroShadow-Release/
-ZeroShadow-Release.zip
-server/ZeroShadow.exe
-server/dist/
+desktop.ini
+
+# ---- 个人设计/需求工作稿（不随仓库发布）----
 AIGC.md
 main.md

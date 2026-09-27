@@ -1,0 +1,8 @@
+{
+  "title": "管理员",
+  "pages": [
+    "admin-guide",
+    "configuration",
+    "tunnel"
+  ]
+}

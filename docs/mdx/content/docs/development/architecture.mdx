@@ -1,0 +1,385 @@
+---
+title: 架构与目录结构
+description: 技术底座、完整目录树、后端请求处理链、权限判定、数据存放与前端组织方式。
+icon: Boxes
+---
+
+面向要读代码、改代码的人。运行与部署请看 [快速开始](/docs/getting-started/quickstart)，
+接口细节看 [API 参考](/docs/api/reference)。
+
+## 技术底座
+
+| 部分 | 技术 | 关键约定 |
+|:--|:--|:--|
+| 后端 | Node.js（**ESM**，`server/package.json` 里 `"type": "module"`）+ Express 4 | 全部使用 `import` / `export`，无构建步骤即可运行 |
+| 前端 | React 19 + TypeScript + Vite 8 + Tailwind CSS v4 | 路径别名 `@` → `web/src`；组件用 shadcn CLI 生成 |
+| UI 组件底座 | `@base-ui/react`（**不是 Radix**） | `web/src/components/ui/*` 都建立在它之上 |
+| 图标 | 本地 `lucide.min.js` + `<i data-lucide>` 占位，由 `createIcons()` 渲染 | 不用 CDN，内网离线可用 |
+| 动画 | 本地 `gsap.min.js` + CSS 过渡 | 列表入场与页面入场动画 |
+| 打包 | Vite（前端）/ esbuild + pkg（后端） | esbuild 先把 ESM 打成 CJS，再由 pkg 生成可执行文件 |
+
+根 `package.json` **没有依赖**，只是一个脚本入口；依赖分别装在 `server/` 与 `web/` 两个子项目里，
+各自有独立锁文件（`lockfileVersion: '9.0'`）。
+
+<Callout type="warn" title="依赖底座容易被误判">
+网上大量 shadcn 代码片段是按 **Radix** 的 API 写的，而本项目的 `ui/*` 组件底座是
+`@base-ui/react`。直接把 Radix 写法的片段粘进来通常跑不起来，需要按 Base UI 的 API 改写。
+</Callout>
+
+## 目录结构
+
+<Files>
+  <Folder name="server" defaultOpen>
+    <File name="index.js" />
+    <File name="package.json" />
+    <Folder name="src" defaultOpen>
+      <File name="auth.js" />
+      <File name="config.js" />
+      <File name="env.js" />
+      <File name="files.js" />
+      <File name="jobs.js" />
+      <File name="logger.js" />
+      <File name="netguard.js" />
+      <File name="ratelimit.js" />
+      <File name="safety.js" />
+      <File name="status.js" />
+      <File name="store.js" />
+      <File name="tunnel.js" />
+      <File name="users.js" />
+      <Folder name="routes">
+        <File name="auth.js" />
+        <File name="fs.js" />
+        <File name="admin.js" />
+      </Folder>
+    </Folder>
+  </Folder>
+  <Folder name="web" defaultOpen>
+    <File name="index.html" />
+    <File name="vite.config.ts" />
+    <File name="components.json" />
+    <Folder name="src">
+      <File name="main.tsx" />
+      <File name="App.tsx" />
+      <File name="index.css" />
+      <Folder name="pages" />
+      <Folder name="components" />
+      <Folder name="state" />
+      <Folder name="lib" />
+    </Folder>
+  </Folder>
+  <Folder name="public">
+    <Folder name="resources" />
+  </Folder>
+  <Folder name="docs">
+    <Folder name="img" />
+    <Folder name="mdx" />
+  </Folder>
+  <Folder name="data">
+    <File name="config.json" />
+    <File name="users.json" />
+    <File name=".jwt-secret" />
+    <Folder name="files" />
+    <Folder name="logs" />
+    <Folder name="tmp" />
+  </Folder>
+  <Folder name=".github">
+    <Folder name="workflows" />
+  </Folder>
+  <File name="build-release.ps1" />
+  <File name="Auto-building.bat" />
+  <File name="package-release.ps1" />
+  <File name="security-test.ps1" />
+  <File name="smoke-test.ps1" />
+  <File name="package.json" />
+  <File name=".env.example" />
+</Files>
+
+### 各文件职责
+
+**后端 `server/src/`**
+
+| 文件 | 职责 |
+|:--|:--|
+| `auth.js` | JWT 签发与校验、CSRF、登录暴破防护 |
+| `config.js` | 运行时配置 + 权限矩阵 + 各类上限计算（**权限的唯一真相来源**） |
+| `env.js` | `.env` 加载、密钥生成、目录准备、只读映射目录解析 |
+| `files.js` | 目录列举、条目信息、递归统计、搜索、复制 / 移动 |
+| `jobs.js` | 长任务（压缩 / 解压 / 链接下载）的进度与清理 |
+| `logger.js` | JSONL 日志、查询、清空 |
+| `netguard.js` | 出站目标校验（SSRF 防护） |
+| `ratelimit.js` | 重型接口按 IP 限流中间件 |
+| `safety.js` | 路径校验、名称清洗、访客可见性 |
+| `status.js` | 服务器状态采集（含局域网地址） |
+| `store.js` | 原子写入 + 串行锁 |
+| `tunnel.js` | SSH 反向隧道生命周期 |
+| `users.js` | 成员增删改查、bcrypt 校验 |
+| `routes/auth.js` | `/api/auth/*` |
+| `routes/fs.js` | `/api/fs/*`（最大的一块） |
+| `routes/admin.js` | `/api/admin/*`（整个 router 都套了 `requireRole("superadmin")`） |
+
+**前端 `web/src/`**
+
+| 目录 | 内容 |
+|:--|:--|
+| `pages/` | 页面：浏览 / 登录 / 设置 / 预览 / 编辑 / HTML / 工具 / 关于 |
+| `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件） |
+| `state/` | 五个 Provider：auth / client-settings / clipboard / uploads / operations |
+| `lib/` | api / types / format / conflict / lucide / utils |
+
+**静态资源**：`public/resources/` 放字体、`lucide.min.js`、`gsap.min.js`、`tailwindcss.min.js`。
+
+**运行时数据**：`data/`（已 gitignore），目录在首次启动时自动创建。
+
+## 后端请求处理链
+
+`server/index.js` 的中间件顺序：
+
+```text
+关闭 x-powered-by
+  → （可选）app.set("trust proxy", env.trustProxy)
+  → GET /ping                     健康检查，纯文本 pong
+  → 请求日志中间件                打印 [REQ] 方法 路径 host ip ua（静默模式下跳过）
+  → 安全响应头中间件              nosniff / SAMEORIGIN / no-referrer / Permissions-Policy
+  → cookieParser
+  → express.json({ limit: "1mb" })
+  → socket.setNoDelay(true)       缓解隧道代理场景的缓冲问题
+  → attachAuth                    解析 Cookie 得到 req.auth = { role, username, userId }
+  → /api 上的 csrfGuard           非 GET/HEAD/OPTIONS 校验自定义头与来源
+  → GET /api/meta
+  → /api/auth  /api/fs  /api/admin
+  → /api 兜底 404 JSON
+  → express.static(WEB_DIST) + 非 /api 的 SPA fallback（带应用外壳 CSP）
+  → 统一错误处理（5xx 记日志，只回"服务器内部错误"）
+```
+
+启动时会：清空 `data/tmp/` → 建目录 → 读配置 → 若隧道已启用则拉起隧道；
+退出信号（`SIGINT` / `SIGTERM`）会先停隧道再关服务，兜底 3 秒强制退出。
+
+<Callout type="info" title="请求体上限 1MB">
+`express.json({ limit: "1mb" })` 意味着 `/api/fs/save-file`（在线编辑）能写回的文本
+**最大约 1MB**。要编辑更大的文件必须改这个上限，并同步考虑内存占用。
+</Callout>
+
+## 权限是怎么判的
+
+两级中间件（`server/src/auth.js`）：
+
+```js
+requireRole("superadmin")   // 按角色
+requirePerm("compressZip")  // 按 effectivePerms(role) 里的权限点
+```
+
+`effectivePerms(role)`（`server/src/config.js`）是**唯一的权限真相来源**：
+把 `config.json` 里的 `memberPerms` / `guestPerms` 与角色叠加，算出最终布尔表
+（例如成员的写类权限都要 `fileWrite` 为真）。前端拿到的 `perms` 就是它的输出。
+
+失败时的状态码语义（前端据此区分"要登录"与"没权限"）：
+
+| 中间件 | 访客 | 已登录但无权限 |
+|:--|:--|:--|
+| `requireRole` | `401` 请先登录 | `403` 没有权限执行此操作 |
+| `requirePerm` | `401` 请先登录 | `403` 没有权限执行此操作 |
+
+### 新增一个权限点的完整步骤
+
+<Steps>
+<Step>
+### 加默认值
+
+`server/src/config.js`：在 `DEFAULTS.memberPerms`（或 `guestPerms`）里加默认值。
+</Step>
+<Step>
+### 让它生效
+
+同文件 `effectivePerms()`：给对应角色返回这个键。
+</Step>
+<Step>
+### 保护路由
+
+目标路由加上 `requirePerm("你的键")`。
+</Step>
+<Step>
+### 补前端类型
+
+`web/src/lib/types.ts`：在 `Perms` 接口里加字段。
+</Step>
+<Step>
+### 补未登录兜底
+
+`web/src/state/auth.tsx`：在 `GUEST` 兜底常量里补一个默认值（未登录时前端要用）。
+</Step>
+<Step>
+### 加后台开关
+
+`web/src/pages/settings/index.tsx`：用 `permItem(...)` 在「权限」页加一个开关。
+</Step>
+</Steps>
+
+## 数据存放
+
+| 数据 | 位置 | 生命周期 |
+|:--|:--|:--|
+| 服务配置 | `data/config.json` | 启动时读入内存，后台修改后原子写回 |
+| 成员账号 | `data/users.json` | 同上；密码为 bcrypt 哈希 |
+| 会话密钥 | `data/.jwt-secret` | 首次生成后复用；删除即让全部会话失效 |
+| 长任务进度 | **内存** `Map` | 10 分钟 TTL，每分钟扫描清理 |
+| 登录失败计数 | **内存** `Map` | 重启清零 |
+| 限流计数 | **内存** `Map` | 重启清零 |
+| 日志 | `data/logs/zs-*.log` | 按天一个 JSONL 文件 |
+
+写入用 `store.js` 的 `withLock` + `writeJsonAtomic`（写临时文件再重命名），
+避免并发覆盖和半个文件。
+
+<Callout type="warn" title="config.json 一旦存在，就会永久覆盖代码里的默认值">
+`config.js` 启动时是 `deepMerge(structuredClone(DEFAULTS), readJsonSync(CONFIG_FILE, {}))`。
+只要 `data/config.json` 存在，里面记录的值就优先，**日后升级代码也拿不到新的 `DEFAULTS`**。
+所以要改默认体积上限之类的东西时，光改代码不够，还得顾及已存在的 `config.json`。
+反过来，若某个实例从没在后台改过配置，就不会有 `config.json`，纯用代码默认值。
+</Callout>
+
+## 长任务模型
+
+`compress` / `extract` / `download-url` 三个接口都是**先返回 `jobId` 再后台执行**：
+
+```text
+POST /api/fs/compress        → { jobId }
+   ↓ 前端每 400ms 轮询
+GET /api/fs/compress/status?job=<jobId>  → { state, percent, processed, total, processedBytes, error }
+```
+
+- 任务对象里有 `createdBy`，默认只有创建者与超管能查询（`jobStatusOwnerOnly`）；
+- 状态机：`running` → `done` / `error`；任务被清理后查询返回 `state: "gone"`；
+- 失败时（含解压中途超限）会清理临时产物——解压还会**整个删掉半成品目录**。
+
+## 想加一个接口
+
+```js
+// server/src/routes/fs.js
+router.post("/my-op", requirePerm("editFiles"), rateLimit, async (req, res, next) => {
+  try {
+    const { abs, rel } = resolveSafe(req.body?.path)   // 一定走 safety.js
+    blockSoft(rel)                                     // 只读映射目录要拦住
+    // ...业务
+    info("my_op", { msg: rel, ...actor(req) })         // 记日志
+    res.json({ ok: true })
+  } catch (err) { next(err) }
+})
+```
+
+要点：**路径一律用 `resolveSafe` / `resolveAny` 解析**（自带穿越防护），
+写操作要先 `blockSoft`，需要限流就挂 `rateLimit`，错误统一交给 `next(err)`（`httpError(status, msg)` 造错误）。
+前端在 `web/src/lib/api.ts` 里加一个薄封装即可。
+
+## 前端
+
+### Provider 嵌套
+
+```text
+ThemeProvider(zs-theme)
+└── AuthProvider            身份 + perms，30 秒轮询 /api/auth/me
+    └── ClientSettingsProvider   视图/排序偏好（localStorage: zs-client-settings）
+        └── ClipboardProvider    复制/剪切的内存剪贴板
+            └── UploadsProvider  上传任务队列与进度
+                └── OperationsProvider  压缩/解压/链接下载的轮询与进度
+                    └── TooltipProvider → BrowserRouter → Routes → Toaster
+```
+
+<Callout type="info" title="主题切换是自己实现的">
+项目**没有**用 `next-themes`（虽然它在 `package.json` 里，但全代码库零引用）。
+`web/src/components/theme-provider.tsx` 手写了 `light` / `dark` / `system` 三态、
+`matchMedia` 跟随系统、跨标签页 `storage` 事件同步，以及切换瞬间临时禁用所有 transition
+以避免闪烁。另外全局**单键 `D`** 也可以循环切换主题。
+</Callout>
+
+### 路由与页面
+
+| 路由 | 组件 | 说明 |
+|:--|:--|:--|
+| `/` | `pages/browser-page.tsx` | 文件浏览器，最大的一块 |
+| `/login` | `pages/login-page.tsx` | 登录 |
+| `/settings` | `pages/settings/index.tsx` | 设置，七个标签页全在这一个文件里 |
+| `/preview` | `pages/preview-page.tsx` | 预览（全屏，不自带外壳） |
+| `/editor` | `pages/editor-page.tsx` | 在线编辑（全屏） |
+| `/html-preview` | `pages/html-page.tsx` | HTML 沙箱预览（全屏） |
+| `/tools` | `pages/tools-page.tsx` | 单位换算 + 链接下载器 |
+| `/about` | `pages/about-page.tsx` | 关于 |
+| `*` | 重定向到 `/` | |
+
+页面外边套的是 `components/layout/app-shell.tsx`：桌面固定侧边栏 + 顶栏 + 窄屏抽屉。
+preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
+
+### 交互组件
+
+| 组件 | 作用 |
+|:--|:--|
+| `browser/dialogs.tsx` | 新建文件夹、重命名、删除确认、详细信息 |
+| `browser/conflict-dialog.tsx` | 同名处理（重命名 / 跳过 / 覆盖 / 合并 + 套用全部） |
+| `browser/dest-picker.tsx` | 「复制到…」「移动到…」的目录选择器 |
+| `browser/path-picker.tsx` | 单纯的目录选择器（工具页用它选保存位置） |
+| `browser/upload-panel.tsx` / `ops-panel.tsx` | 右下角的两个进度浮层 |
+| `browser/shortcut-editor.tsx` | `.zeropath` 快捷方式编辑 |
+| `components/icon.tsx` | 渲染 `<i data-lucide>` 占位 |
+| `lib/conflict.ts` | 冲突检测与 `名字 (1)` 生成 |
+
+### 图标与动画
+
+- `lib/lucide.ts` 提供 `initLucide()`：在 `DOMContentLoaded`、`load` 与
+  **MutationObserver 监听到新节点**时调用 `window.lucide.createIcons()`，
+  这样动态渲染出来的图标也能正确显示；
+- `animateListIn()` / `animatePageIn()` 用 GSAP 做入场动画；GSAP 不存在时**静默跳过**，不影响功能。
+
+<Callout type="warn" title="存在两套图标体系">
+应用代码走 `Icon` 组件 + 全局 `lucide.min.js` + `createIcons()` 扫描 DOM；
+但 `components/ui/*` 里有 8 个文件直接从 `lucide-react` 导入图标
+（`breadcrumb`、`checkbox`、`dialog`、`context-menu`、`dropdown-menu`、`select`、`spinner`）。
+结果是打包体积里存在两份 lucide、两套渲染时机。不致命，但属于该收敛的技术债。
+</Callout>
+
+## 约定与注意事项
+
+| 约定 | 说明 |
+|:--|:--|
+| 后端全部用 `node:` 前缀导入内置模块 | 例如 `import fs from "node:fs"` |
+| 前端只用 `@/` 别名导入 | 对应 `web/src` |
+| UI 文案 | 全部中文，不引外部文案系统 |
+| 图标与字体 | 一律走 `public/resources/`，**禁止 CDN**（内网离线可用性的前提） |
+| 阴影 | 用 `edge-highlight` / `surface-inset` 这类内阴影 + 顶部高光工具类，避免生硬投影 |
+| 颜色 | 通过 `index.css` 的 `@theme` 令牌引用，不硬编码色值 |
+| 权限判定 | **只在服务端做**；前端的隐藏/置灰只是体验优化 |
+| 路径处理 | 客户端传来的路径必须过 `safety.js`，不要自己拼字符串 |
+| 日志 | 业务动作记 `info("事件名", { msg, ...actor(req) })`，密码与令牌**绝不入库** |
+| 错误 | 业务错误用 `httpError(status, msg)` 抛，交给统一错误处理 |
+
+### 已知的小不一致
+
+以下都不影响功能，改文档或改代码时注意别被绕进去：
+
+- `package.json` 的版本是 `1.1.0`，而「关于」页显示的版本是 `1.0.0`，
+  `GET /api/meta` 返回的 `version` 也是硬编码的 `1.0.0`（在 `server/index.js` 里）；
+- `components/layout/app-shell.tsx` 里导出的 `useShellSearch` 与 `ShellContext`
+  目前没有页面在用（文件浏览器的搜索框在自己的工具栏里）；
+- `components/browser/dialogs.tsx` 里的 `PreviewDialog` 与 `EditorDialog` 已被独立的
+  `/preview`、`/editor` 页面取代，但两套实现仍然并存；
+- `components/ui/` 下的 `breadcrumb`、`input-group`、`field` 没有引用（面包屑在
+  `browser-page.tsx` 与 `dest-picker.tsx` 各手写了一遍）；
+- 依赖里装了但全代码库零引用：`next-themes`、`@fontsource-variable/inter`；
+  静态资源里 `web/public/resources/tailwindcss.min.js` 也没有引用。
+
+<Callout type="warn" title="typecheck 抓不到死代码">
+`tsconfig` 开了 `noUnusedLocals`，但它**不报未使用的 export**。
+所以上面这些死代码 `pnpm typecheck` 全绿也发现不了，只能靠人工或额外工具。
+</Callout>
+
+## 常见改动指引
+
+| 想做的事 | 改哪里 |
+|:--|:--|
+| 加一个权限开关 | 见本文「新增一个权限点的完整步骤」 |
+| 加一个接口 | `server/src/routes/*.js` + `web/src/lib/api.ts` |
+| 加一个设置项 | `server/src/config.js` 的 `DEFAULTS` → `routes/admin.js` 的 `PATCH /config` 白名单 → `web/src/lib/types.ts` → `settings/index.tsx` |
+| 改默认体积上限 | `server/src/config.js` 的 `DEFAULTS`（注意已存在的 `data/config.json` 会覆盖默认值） |
+| 加一种可预览格式 | `web/src/lib/format.ts` 的 `EXT_KIND` / `PREVIEWABLE` + `server/src/routes/fs.js` 的 `INLINE_TYPES` |
+| 加一种可编辑格式 | `web/src/pages/browser-page.tsx` 里的 `EDITABLE` 数组 |
+| 调整隧道行为 | `server/src/tunnel.js`（`buildArgs` 拼 ssh 参数） |
+| 加一个内置隧道服务商 | `tunnel.js` 的 `buildArgs` + `routes/admin.js` 的 mode 白名单 + `settings/index.tsx` 的 select 选项 |
+| 改界面配色 / 圆角 | `web/src/index.css` 的 `@theme` 与 `:root` / `.dark` 变量 |

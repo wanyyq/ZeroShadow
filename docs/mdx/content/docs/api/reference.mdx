@@ -1,0 +1,884 @@
+---
+title: API 参考
+description: ZeroShadow 全部 HTTP 接口的方法、路径、参数、权限点、返回结构与错误码速查，附 curl、PowerShell、Python 调用示例。
+icon: Cable
+---
+
+ZeroShadow 的服务端是一套纯 JSON + 文件流的 HTTP 接口，前端只是它的一层客户端。
+你可以用同一套接口写脚本、做自动化、接自己的客户端。
+
+<Callout type="info" title="对照源码阅读">
+路由在 `server/src/routes/`（`auth.js` / `fs.js` / `admin.js`），中间件与静态托管在 `server/index.js`。
+权限点的完整矩阵见 [权限与角色](/docs/guide/permissions)，行为约束与资源上限见 [安全设计](/docs/security/design)。
+</Callout>
+
+## 通用约定
+
+### 基地址与编码
+
+```text
+http://<主机>:<端口>
+```
+
+默认端口 `12345`（`.env` 的 `PORT`）。请求与响应**均为 UTF-8**；
+`Content-Type: application/json` 用于所有 JSON 接口。
+
+### 认证
+
+登录成功后服务端下发 Cookie：
+
+```text
+Set-Cookie: zs_token=<JWT>; Max-Age=...; Path=/; HttpOnly; SameSite=Lax
+```
+
+之后所有请求浏览器会自动带上它。**没有 Bearer Token 方式**，只有这个 Cookie。
+角色判定完全由服务端从 Cookie 推导，客户端无法自称身份。
+
+未登录时一律是**访客**（`guest`）身份。
+
+### 必须带的请求头（CSRF）
+
+`/api` 下所有**非** `GET` / `HEAD` / `OPTIONS` 的请求都必须带：
+
+```text
+X-Requested-With: XMLHttpRequest
+```
+
+否则返回 **403**，响应体为 `{"error":"请求校验失败"}`。
+
+此外，默认还会校验来源（可用后台开关 `csrfOriginCheck` 关闭）：
+
+- 若带 `Sec-Fetch-Site`，值必须是 `same-origin` 或 `none`；
+- 若带 `Origin`，其 host 必须与请求的 `Host` 一致。
+
+用命令行工具（curl / PowerShell / 脚本）调写接口时，**别忘了这个头**。
+
+### 错误响应
+
+统一形态：
+
+```json
+{ "error": "人类可读的中文说明" }
+```
+
+| 状态码 | 含义 |
+|:--|:--|
+| 400 | 参数或路径非法（含路径穿越、体积超限、URL 不合法） |
+| 401 | 访客尝试执行需要登录的操作 → `{"error":"请先登录"}` |
+| 403 | 已登录但权限不足 → `{"error":"没有权限执行此操作"}`；CSRF 失败 → `请求校验失败` |
+| 404 | 目标不存在；或访客访问了对其隐藏的路径（故意用 404 而不是 403） |
+| 409 | 已存在同名文件或文件夹 |
+| 413 | 上传体积超出限制 |
+| 429 | 被限流或账户被临时锁定（带 `Retry-After` 头时会给出建议等待秒数） |
+| 500 | 服务器内部错误（详情只进服务端日志） |
+
+### 路径参数的写法
+
+所有表示"网盘内路径"的参数（`path` / `paths` / `sources` / `dest`）都用**相对根目录的路径**：
+
+- 用 `/` 分隔，**不要以 `/` 开头**；
+- 根目录就是空字符串 `""`；
+- 例如 `资料/2026/报告.pdf`。
+
+服务端会做穿越校验（拒绝 `..`、NUL 字节、越界），非法路径返回 400。
+
+### 路径占位符
+
+正文里出现形如 `/api/fs/compress/status?job=<jobId>` 的写法时，`<jobId>` 是占位符，
+实际值取自 `/api/fs/compress`、`/api/fs/extract`、`/api/fs/download-url` 返回的 `jobId` 字段。
+同理 `/api/admin/members/:id`、`/api/admin/members/:id/password` 里的 `:id` 是成员 id（`uuid`）。
+
+### 权限点名称
+
+下面各节的"权限"一行使用的名称与 `data/config.json` 里的字段一致
+（`memberPerms.*` / `guestPerms.*`），对应关系见 [权限与角色](/docs/guide/permissions)。
+本节统一写作「中文名（`memberPerms.键名`）」，访客侧的对应字段是 `guestPerms.键名`。
+标 `—` 表示该接口只有角色要求、没有单独的权限开关。
+
+| 权限点 | 中文名（后台显示） | 说明 |
+|:--|:--|:--|
+| `fileWrite` | 文件操作（总开关） | 关闭后成员的所有写类权限一并失效 |
+| `browse` | 浏览目录 | 列目录、搜索 |
+| `upload` | 上传文件 | 上传接口真正校验的开关 |
+| `uploadFolders` | 上传文件夹 | **只在前端生效**，界面置灰按钮 |
+| `mkdir` | 新建文件夹 | |
+| `copy` | 复制 | |
+| `move` | 移动 | |
+| `rename` | 重命名 | |
+| `delete` | 删除 | |
+| `downloadFile` | 下载文件 | 单文件下载 / 内联预览 |
+| `downloadFolder` | 下载文件夹（打包） | 流式 ZIP |
+| `preview` | 允许预览 | 只有预览时可内联的扩展名可用 |
+| `details` | 查看详细信息 | 成员固定开启、访客固定关闭 |
+| `compressZip` | 压缩为 Zip | |
+| `extractZip` | 解压 Zip | |
+| `htmlPreview` | HTML 全屏预览 | 仅 `.html` / `.htm` |
+| `editFiles` | 在线编辑文件 | |
+| `downloadUrl` | 多线程下载器（链接下载） | |
+| `manageGuestVisibility` | 管理访客可见性 | |
+| `changePassword` | 修改密码 | 超管走 `.env` |
+
+---
+
+## 基础接口
+
+| 方法 | 路径 | 所需权限 | 作用 |
+|:--|:--|:--|:--|
+| `GET` | `/ping` | 无 | 健康检查 |
+| `GET` | `/api/meta` | 无 | 名称与版本 |
+
+### GET /ping
+
+健康检查，用于验证隧道 / 反代是否可达。
+
+- 认证：无
+- 响应：`text/plain`，内容固定为 `pong`
+
+### GET /api/meta
+
+- 认证：无
+- 响应：
+
+```json
+{ "name": "ZeroShadow", "version": "1.0.0" }
+```
+
+<Callout type="warn" title="version 字段是硬编码的">
+`version` 目前在 `server/index.js` 中硬编码，与 `package.json` 的 `1.1.0` 不一致。
+</Callout>
+
+---
+
+## 认证与账户（`/api/auth`）
+
+| 方法 | 路径 | 所需权限 | 作用 |
+|:--|:--|:--|:--|
+| `POST` | `/api/auth/login` | 无（未登录即可调用） | 登录，成功后下发 Cookie |
+| `POST` | `/api/auth/change-password` | 修改密码（`memberPerms.changePassword`） | 成员修改自己的密码 |
+| `POST` | `/api/auth/logout` | 已登录 | 登出并清除 Cookie |
+| `GET` | `/api/auth/me` | 无（未登录返回访客身份） | 查询当前身份与权限 |
+
+### POST /api/auth/login
+
+- 认证：无
+- 请求体：
+
+```json
+{ "username": "admin", "password": "……" }
+```
+
+- 成功响应（同时 `Set-Cookie`）：
+
+```json
+{ "role": "superadmin", "username": "admin" }
+```
+
+`role` 为 `superadmin` 或 `member`。
+
+- 错误：
+
+| 状态 | error | 原因 |
+|:--|:--|:--|
+| 400 | 请输入用户名和密码 | 缺字段 |
+| 400 | 用户名或密码格式不正确 | 用户名 >64 字符或密码 >256 字符 |
+| 429 | 尝试次数过多，请约 N 分钟后再试 | 命中 IP 或账户锁定 |
+| 401 | 用户名或密码错误 | 凭据不正确 |
+| 403 | 该账户已被禁用 | 成员账号被禁用 |
+
+### POST /api/auth/change-password
+
+修改**成员**自己的密码。
+
+- 认证：已登录（`superadmin` / `member`）
+- 权限：修改密码（`memberPerms.changePassword`）
+- 请求体：
+
+```json
+{ "oldPassword": "旧密码", "newPassword": "新密码" }
+```
+
+- 成功：清除 Cookie 并返回
+
+```json
+{ "ok": true, "message": "密码已修改，请重新登录" }
+```
+
+- 错误：
+  - `400 请输入旧密码和新密码`
+  - `400 新密码长度需为 6-128 位`
+  - `400 超级管理员密码请直接编辑 .env 中 SUPER_ADMIN_PASSWORD，改后重启服务生效`
+  - `403 旧密码错误`
+  - `404 用户不存在`
+
+<Callout type="info" title="超管密码走 .env">
+超管密码无法通过接口修改，必须改 `.env` 并重启服务。
+</Callout>
+
+### POST /api/auth/logout
+
+- 认证：已登录
+- 响应：`{ "ok": true }`，同时清除 Cookie
+
+### GET /api/auth/me
+
+获取当前身份与权限。前端每 30 秒轮询一次。
+
+- 认证：无（未登录返回访客身份）
+- 响应：
+
+```json
+{
+  "role": "member",
+  "username": "alice",
+  "perms": {
+    "fileWrite": true, "browse": true, "upload": true, "uploadFolders": true,
+    "downloadFile": true, "downloadFolder": true, "preview": true,
+    "copy": true, "move": true, "rename": true, "delete": true, "mkdir": true,
+    "manageGuestVisibility": true, "details": true, "htmlPreview": true,
+    "editFiles": true, "compressZip": true, "extractZip": true,
+    "downloadUrl": true, "changePassword": true
+  },
+  "uploadLimitMB": 512
+}
+```
+
+访问者未登录时 `role` 为 `guest`、`username` 为 `null`、`uploadLimitMB` 为 `0`。
+
+---
+
+## 文件操作（`/api/fs`）
+
+| 方法 | 路径 | 所需权限 | 作用 |
+|:--|:--|:--|:--|
+| `GET` | `/api/fs/list` | 浏览目录（`memberPerms.browse` / `guestPerms.browse`） | 列出目录内容 |
+| `GET` | `/api/fs/download` | 下载文件（`memberPerms.downloadFile` / `guestPerms.downloadFile`），或允许预览（`memberPerms.preview`） | 下载或内联预览单个文件 |
+| `GET` | `/api/fs/zip` | 下载文件夹（打包）（`memberPerms.downloadFolder` / `guestPerms.downloadFolder`） | 流式打包下载 |
+| `POST` | `/api/fs/mkdir` | 新建文件夹（`memberPerms.mkdir`） | 新建目录 |
+| `POST` | `/api/fs/upload` | 上传文件（`memberPerms.upload`） | 上传一个或多个文件 |
+| `POST` | `/api/fs/rename` | 重命名（`memberPerms.rename`） | 重命名文件 / 目录 |
+| `POST` | `/api/fs/delete` | 删除（`memberPerms.delete`） | 批量删除 |
+| `POST` | `/api/fs/copy` | 复制（`memberPerms.copy`） | 批量复制 |
+| `POST` | `/api/fs/move` | 移动（`memberPerms.move`） | 批量移动 |
+| `GET` | `/api/fs/stat` | 查看详细信息（`memberPerms.details`） | 查看文件 / 目录详情 |
+| `GET` | `/api/fs/search` | 浏览目录（`memberPerms.browse` / `guestPerms.browse`） | 按文件名递归搜索 |
+| `POST` | `/api/fs/guest-visibility` | 管理访客可见性（`memberPerms.manageGuestVisibility`） | 设置路径对访客隐藏 / 可见 |
+| `POST` | `/api/fs/compress` | 压缩为 Zip（`memberPerms.compressZip` / `guestPerms.compressZip`） | 启动在线压缩任务 |
+| `GET` | `/api/fs/compress/status` | 压缩为 Zip（`memberPerms.compressZip`） | 查询压缩任务进度 |
+| `POST` | `/api/fs/extract` | 解压 Zip（`memberPerms.extractZip` / `guestPerms.extractZip`） | 启动解压任务 |
+| `GET` | `/api/fs/extract/status` | 解压 Zip（`memberPerms.extractZip`） | 查询解压任务进度 |
+| `POST` | `/api/fs/save-file` | 在线编辑文件（`memberPerms.editFiles` / `guestPerms.editFiles`） | 把文本内容写回文件 |
+| `POST` | `/api/fs/download-url` | 多线程下载器（`memberPerms.downloadUrl`） | 让服务端抓取远程直链 |
+| `GET` | `/api/fs/download-url/status` | 多线程下载器（`memberPerms.downloadUrl`） | 查询链接下载任务进度 |
+
+### GET /api/fs/list
+
+列出目录内容。
+
+- 权限：浏览目录（`memberPerms.browse` / `guestPerms.browse`）
+- 查询参数：`path`（默认根目录）
+- 响应：
+
+```json
+{
+  "path": "资料",
+  "entries": [
+    { "name": "报告.pdf", "type": "file", "size": 102400, "mtime": 1767225600000, "hiddenFromGuest": false },
+    { "name": "2026", "type": "dir", "size": 0, "mtime": 1767225600000, "hiddenFromGuest": false },
+    { "name": "素材盘", "type": "dir", "size": 0, "mtime": 0, "softReadOnly": true, "hiddenFromGuest": false },
+    { "name": "官网.zeropath", "type": "shortcut", "size": 128, "mtime": 1767225600000,
+      "shortcut": { "targetType": "path", "targetUrl": "网站", "logo": "globe", "displayName": "官网" } }
+  ]
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+|:--|:--|
+| `type` | `dir` / `file` / `shortcut` |
+| `hiddenFromGuest` | **只有非访客才会看到**该字段 |
+| `softReadOnly` | 只读映射目录（`FILES_SOFT_DIR`）的条目 |
+| `shortcut.targetType` | `file` / `path` / `soft_file` / `soft_path` |
+
+- 只有**根目录**的响应会带上映射目录条目，且排在真实目录之前；
+- 访客请求时，对其隐藏的条目会被**直接过滤掉**；访问被隐藏的目录返回 404。
+
+### GET /api/fs/download
+
+下载或内联预览单个文件。
+
+- 权限：下载文件（`memberPerms.downloadFile` / `guestPerms.downloadFile`）；
+  **若只有 允许预览（`memberPerms.preview` / `guestPerms.preview`）**，则仅当扩展名属于可内联类型时被强制以内联方式返回
+- 查询参数：
+
+| 参数 | 说明 |
+|:--|:--|
+| `path` | 文件路径（**不能为空**，为空返回 400 非法路径） |
+| `inline` | 传 `1` 且扩展名可内联时，以 `Content-Disposition: inline` 返回 |
+
+- 响应：文件流。响应头包含 `Content-Type`、`Content-Disposition`（同时给 `filename` 与 UTF-8 的 `filename*`）、`Cache-Control: no-store`；
+  内联返回 `.html` / `.htm` / `.svg` 时会额外带上 `Content-Security-Policy: sandbox allow-scripts`。
+- 错误：`400 只能下载文件，文件夹请使用打包下载`、`403 没有权限下载文件`、`404 文件不存在`
+
+<Callout type="info" title="单文件下载不记日志、不限流">
+单文件下载**不记录** `download` 日志（只有真正下载才记），也**不受限流**。
+</Callout>
+
+### GET /api/fs/zip
+
+打包下载（流式 ZIP，边打边发）。
+
+- 权限：下载文件夹（打包）（`memberPerms.downloadFolder` / `guestPerms.downloadFolder`）
+- 限流：是
+- 查询参数（二选一）：
+
+| 参数 | 说明 |
+|:--|:--|
+| `path` | 单个路径（文件或目录） |
+| `paths` | JSON 数组字符串，最多 **200** 项，例如 `["a","b/c"]` |
+
+- 响应：`application/zip` 流，文件名规则：
+  - 单项目：`<名字>.zip`
+  - 多项目：`ZeroShadow-<YYYY-MM-DD>.zip`
+- 行为细节：跳过符号链接；访客包内会跳过对其隐藏的内容；空目录会补一个 `.keep`；
+  重名条目用路径（`/`→`_`）区分，仍重名则加 `_2`、`_3`…
+- 错误：`400 参数格式错误`、`400` 体积/条目数超限的具体说明、`404 没有可下载的内容`
+
+### POST /api/fs/mkdir
+
+- 权限：新建文件夹（`memberPerms.mkdir`）
+- 请求体：`{ "path": "资料", "name": "2026" }`
+- 响应：`{ "name": "2026" }`（若同名已存在，返回的名字会自动变成 `2026 (1)`）
+- 错误：名称校验失败的说明、`404 目录不存在`、`403 外部映射目录仅支持只读操作`
+
+### POST /api/fs/upload
+
+- 权限：上传文件（`memberPerms.upload`）
+- 查询参数：
+
+| 参数 | 说明 |
+|:--|:--|
+| `path` | 目标目录 |
+| `overwrite` | JSON 数组字符串，列出要**覆盖**的文件名，例如 `["a.txt"]`；不在列表里的同名文件会自动改名 |
+
+- 请求体：`multipart/form-data`，文件字段名 **`files`**（可重复）。
+  文件名里若带 `/`（浏览器上传文件夹时会这样），会被当作相对子目录，服务端自动建目录。
+- 限制：单个文件 ≤ `uploadLimitMB(role)`；单次请求 ≤ **100** 个文件、≤ 10 个非文件字段
+
+<Callout type="warn" title="uploadFolders 只在前端生效">
+服务端只校验 `upload`，「上传文件夹」对应的 `uploadFolders` 开关**目前只在前端生效**（界面会把按钮置灰），
+裸调接口时不受它限制。若需要严格限制"能不能传文件夹"，请直接关闭 `upload`。
+</Callout>
+
+- 响应：
+
+```json
+{
+  "results": [
+    { "name": "a.txt", "ok": true, "savedAs": "a.txt" },
+    { "name": "b.txt", "ok": false, "error": "超出大小限制 (512MB)" }
+  ],
+  "limitMB": 512
+}
+```
+
+- 状态码：只要**全部**失败且原因是超限时返回 **413**，否则 200。
+
+### POST /api/fs/rename
+
+- 权限：重命名（`memberPerms.rename`）
+- 请求体：`{ "path": "旧名.txt", "newName": "新名.txt", "overwrite": false, "merge": false }`
+  （`overwrite` / `merge` 仅在目标已存在时才有意义，`merge` 要求双方都是目录）
+- 响应：`{ "name": "新名.txt" }`
+- 错误：`400 非法路径` / 名称校验说明、`404 文件或目录不存在`、`409 已存在同名文件或文件夹`
+- 副作用：若被重命名的路径正好是"对访客隐藏"的记录，记录会跟着更新。
+
+### POST /api/fs/delete
+
+- 权限：删除（`memberPerms.delete`）
+- 请求体：`{ "paths": ["a.txt", "目录/b"] }`，最多 **500** 项
+- 响应：`{ "deleted": 2 }`
+- 错误：`400 参数格式错误`、`400 不能删除根目录`
+- 副作用：清理与被删路径相关的访客隐藏记录。
+
+### POST /api/fs/copy 与 POST /api/fs/move
+
+两个接口共用同一套参数与逻辑，只是模式不同。
+
+- 权限：复制（`memberPerms.copy`） / 移动（`memberPerms.move`）
+- 请求体：
+
+```json
+{ "sources": ["a.txt", "目录"], "dest": "归档", "overwrite": false, "merge": false }
+```
+
+- 响应：`{ "done": 2 }`
+- 规则：
+  - `sources` 最多 **500** 项；
+  - 不能把目录复制/移动进它自己内部 → `400 不能将文件夹移动/复制到其自身内部`；
+  - `merge` 仅当源与目标都是目录时生效，逐层合并，**同名文件以源为准**；
+  - `move` 时如果源已经在目标目录里（父目录相同），视为已完成，不报错；
+  - **`move` 的来源在只读映射目录里 → 403**；
+  - **`copy` 的来源在只读映射目录里、且 `softDirAllowCopyOut` 为假 → 403**
+    （`只读映射目录的内容不允许复制到网盘目录（可在后台设置中放开）`）；
+  - 目标本身在映射目录里 → 403 只读。
+- 副作用：`move` 时若源路径命中访客隐藏记录，记录会更新为新路径。
+
+### GET /api/fs/stat
+
+查看文件 / 目录详情。
+
+- 权限：查看详细信息（`memberPerms.details`，成员固定开启、访客关闭）
+- 限流：是
+- 查询参数：`path`
+- 响应：
+
+```json
+{
+  "name": "2026", "path": "资料/2026", "type": "dir",
+  "size": 10485760, "mtime": 1767225600000, "created": 1767225600000,
+  "hiddenFromGuest": false,
+  "files": 12, "dirs": 3, "partial": false
+}
+```
+
+- 目录会额外带 `files` / `dirs` / `partial`（`partial: true` 表示条目太多没统计完，上限约 20 万个）；
+- `path` 为空时返回根目录信息，`name` 为 `根目录`。
+
+### GET /api/fs/search
+
+按文件名递归搜索。
+
+- 权限：浏览目录（`memberPerms.browse` / `guestPerms.browse`）
+- 限流：是
+- 查询参数：`q`（**必填，≤100 字符**）、`path`（搜索起点，默认根目录）
+- 响应：
+
+```json
+{
+  "results": [
+    { "name": "报告.pdf", "type": "file", "size": 102400, "mtime": 1767225600000,
+      "path": "资料/2026/报告.pdf", "parent": "资料/2026" }
+  ]
+}
+```
+
+- 限制：最多返回 **200** 条；最多访问 **30000** 个条目；最长约 **6 秒**；
+- 匹配规则：文件名**包含**关键词（不区分大小写）；
+- 命中映射目录的结果会带 `softReadOnly: true`；访客结果里被隐藏的内容会被过滤。
+- 错误：`400 请输入搜索关键词`（`q` 为空或超过 100 字符）
+
+### POST /api/fs/guest-visibility
+
+- 认证：`superadmin` 或 `member`
+- 权限：管理访客可见性（`memberPerms.manageGuestVisibility`）
+- 请求体：`{ "path": "内部资料", "hidden": true }`
+- 响应：`{ "path": "内部资料", "hidden": true }`
+- 错误：`400 不能隐藏根目录`、`400 只能对文件夹设置访客可见性`、`404 文件或目录不存在`
+
+### POST /api/fs/compress
+
+启动在线压缩任务，**立即返回**任务 id。
+
+- 权限：压缩为 Zip（`memberPerms.compressZip` / `guestPerms.compressZip`）
+- 限流：是
+- 请求体：`{ "paths": ["目录", "a.txt"], "dest": "归档" }`
+  （`paths` ≤ **200** 项；`dest` 省略时用第一个路径所在的目录）
+- 响应：`{ "jobId": "1f2e3d..." }`
+- 限制与 `/api/fs/zip` 相同（条目数 / 单文件 / 总量）；
+  只读映射目录的**内容**同样受 `softDirAllowCopyOut` 限制，目标目录也不能是映射目录。
+
+### GET /api/fs/compress/status
+
+- 权限：压缩为 Zip（`memberPerms.compressZip`）
+- 查询参数：`job`
+  （完整写法形如 `/api/fs/compress/status?job=<jobId>`）
+- 响应：任务状态对象，见 [任务状态对象](#任务状态对象)；
+  任务不存在或不属于调用者时返回 `{ "id": "...", "state": "gone" }`。
+
+### POST /api/fs/extract
+
+启动解压任务，**立即返回**任务 id。
+
+- 权限：解压 Zip（`memberPerms.extractZip` / `guestPerms.extractZip`）
+- 限流：是
+- 请求体：`{ "path": "包.zip", "dest": "目标目录" }`（`dest` 省略时解压到 zip 所在目录）
+- 响应：`{ "jobId": "..." }`
+- 规则：只接受 `.zip`；解压到**以压缩包名命名的新文件夹**里（重名自动加 `(1)`）；
+- 错误与上限：见 [安全设计 · 资源上限](/docs/security/design)：
+  - `400 非法路径`、`400 只能解压 zip 文件`、`400 目录不存在`
+  - `400 ZIP 文件超出解压大小限制 (NMB)`
+  - `400 ZIP 内文件数超出限制 (最多 N 个)`
+  - `400 ZIP 解压后总大小 (NMB) 超出限制 (NMB)`
+  - `500 服务端未安装 unzipper 模块，请联系管理员`
+- 中途失败（含超限）会**删除已写出的半成品目录**，任务状态置为 `error`。
+
+### GET /api/fs/extract/status
+
+同上，查询解压任务状态。
+
+- 权限：解压 Zip（`memberPerms.extractZip` / `guestPerms.extractZip`）
+- 查询参数：`job`（形如 `/api/fs/extract/status?job=<jobId>`）
+- 响应：任务状态对象，见 [任务状态对象](#任务状态对象)；任务不存在或不属于调用者时 `state` 为 `gone`。
+
+### POST /api/fs/save-file
+
+把文本内容写回文件（在线编辑保存）。
+
+- 权限：在线编辑文件（`memberPerms.editFiles` / `guestPerms.editFiles`）
+- 请求体：`{ "path": "notes.md", "content": "……" }`
+- 响应：`{ "ok": true }`
+- 说明：以 UTF-8 写入；`content` 省略时写入空字符串；
+  受 `express.json` 的 **1 MB** 请求体上限约束（超限返回 413）；
+  不能写入只读映射目录（403）。
+- 这也是创建 `.zeropath` 快捷方式的底层接口。
+
+### POST /api/fs/download-url
+
+让服务端把一个远程直链抓到网盘里。
+
+- 权限：多线程下载器（`memberPerms.downloadUrl`）
+- 限流：是
+- 请求体：
+
+```json
+{ "url": "https://example.com/file.zip", "dest": "下载", "filename": "自定义名.zip" }
+```
+
+- 响应：`{ "jobId": "..." }`（真正下载在后台进行）
+- 校验（在创建任务**之前**完成，不合格直接 400）：
+
+| 情况 | 提示 |
+|:--|:--|
+| 空 | 请输入下载链接 |
+| 超过 2048 字符 | 下载链接过长 |
+| 非法 URL | URL 格式无效 |
+| 非 http/https | 仅支持 http/https 链接 |
+| URL 内含用户名密码 | 下载链接不能包含用户名或密码 |
+| 缺主机名 | URL 缺少主机名 |
+| 域名解析失败 | 无法解析该域名 |
+| 目标是内网/回环/链路本地/保留地址 | `不允许下载<原因>（<地址>）` |
+
+- 其它限制：最多 **5** 跳重定向（每跳都重新校验）、连接超时 **60** 秒、
+  体积上限 `downloadUrlMaxMB`（默认 4096MB，`0` 表示不限制）、
+  实际字节不足 `Content-Length` 的 95% 判定为失败并删除残缺文件；
+  文件名会自动清洗非法字符并处理重名。
+
+### GET /api/fs/download-url/status
+
+同上，查询链接下载任务状态。
+
+- 权限：多线程下载器（`memberPerms.downloadUrl`）
+- 查询参数：`job`（形如 `/api/fs/download-url/status?job=<jobId>`）
+- 响应：任务状态对象，见 [任务状态对象](#任务状态对象)；任务不存在或不属于调用者时 `state` 为 `gone`。
+
+---
+
+## 管理接口（`/api/admin`）
+
+<Callout type="warn" title="整组接口仅超级管理员">
+整个 `/api/admin` 路由都套了 `requireRole("superadmin")`，成员的请求一律 403，未登录一律 401。
+</Callout>
+
+| 方法 | 路径 | 所需权限 | 作用 |
+|:--|:--|:--|:--|
+| `GET` | `/api/admin/config` | 仅超级管理员 | 读取完整配置对象 |
+| `PATCH` | `/api/admin/config` | 仅超级管理员 | 局部更新配置并返回完整配置 |
+| `DELETE` | `/api/admin/hidden-paths` | 仅超级管理员 | 把路径移出"对访客隐藏"列表 |
+| `GET` | `/api/admin/members` | 仅超级管理员 | 列出全部成员 |
+| `POST` | `/api/admin/members` | 仅超级管理员 | 批量创建成员 |
+| `POST` | `/api/admin/members/batch` | 仅超级管理员 | 批量启用 / 禁用 / 删除 |
+| `POST` | `/api/admin/members/:id/password` | 仅超级管理员 | 重置某个成员的密码 |
+| `PATCH` | `/api/admin/members/:id` | 仅超级管理员 | 修改成员用户名 |
+| `GET` | `/api/admin/logs` | 仅超级管理员 | 查询日志 |
+| `DELETE` | `/api/admin/logs` | 仅超级管理员 | 清空所有日志文件 |
+| `GET` | `/api/admin/status` | 仅超级管理员 | 服务器状态 |
+| `GET` | `/api/admin/tunnel` | 仅超级管理员 | 读取隧道配置与状态 |
+| `POST` | `/api/admin/tunnel` | 仅超级管理员 | 更新隧道配置并立即生效 |
+
+### GET /api/admin/config
+
+返回完整的配置对象（字段结构见 [配置参考](/docs/admin/configuration) 的 `data/config.json` 全部字段一节）。
+
+### PATCH /api/admin/config
+
+局部更新配置，返回更新后的完整配置。
+
+- 请求体示例：
+
+```json
+{
+  "memberUploadLimitMB": 1024,
+  "rateLimitPerMin": 200,
+  "rateLimitEnabled": true,
+  "guestPerms": { "browse": true, "downloadFile": true, "downloadFolder": false, "preview": true }
+}
+```
+
+- 可更新字段：
+  - 数值（必须是 1–1048576 的**整数**，否则 400）：`superUploadLimitMB`、`memberUploadLimitMB`、
+    `zipMaxFiles`、`zipMaxSingleMB`、`zipMaxTotalMB`、`extractMaxZipMB`、`extractMaxTotalMB`、
+    `downloadUrlMaxMB`、`rateLimitPerMin`
+  - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、`csrfOriginCheck`
+  - 对象：`memberPerms`、`guestPerms`（只覆盖传入的键，值统一按布尔处理）
+- 未在此白名单里的字段（例如 `guestHiddenPaths`、`tunnel`）**无法通过这个接口改**，会被忽略。
+- 错误：`400 数值需为 1-1048576 之间的整数`、`400 参数格式错误`
+
+### DELETE /api/admin/hidden-paths
+
+把某个路径从"对访客隐藏"列表里移除。
+
+- 请求体：`{ "path": "内部资料" }`
+- 响应：更新后的完整配置
+
+<Callout type="warn" title="DELETE 也带 JSON 请求体">
+这是 `DELETE` 方法但**带 JSON 请求体**，调用时同样要带 `X-Requested-With` 头。
+</Callout>
+
+### GET /api/admin/members
+
+- 响应：
+
+```json
+{ "members": [ { "id": "uuid", "username": "alice", "disabled": false, "createdAt": "2026-01-01T00:00:00.000Z" } ] }
+```
+
+### POST /api/admin/members
+
+批量创建成员。
+
+- 请求体：`{ "users": [ { "username": "alice", "password": "123456" }, { "username": "bob", "password": "x" } ] }`
+  （数组长度 1–**200**，否则 `400 参数格式错误（单次最多 200 个）`）
+- 响应：
+
+```json
+{ "results": [ { "username": "alice", "ok": true }, { "username": "bob", "ok": false, "error": "密码长度需为 6-128 位" } ] }
+```
+
+- 单个失败的常见原因：`用户名需为 2-32 位字母、数字、_ . -`、`该用户名已被超级管理员占用`、
+  `用户名已存在`、`本次提交中用户名重复`、`密码长度需为 6-128 位`、`成员数量已达上限 500`
+
+### POST /api/admin/members/batch
+
+批量启用 / 禁用 / 删除。
+
+- 请求体：`{ "action": "enable" | "disable" | "delete", "ids": ["uuid1", "uuid2"] }`
+- 响应：`{ "count": 2 }`
+- 说明：禁用会同时让该成员的旧会话失效（`tokenVersion + 1`）。
+- 错误：`400 参数格式错误`
+
+### POST /api/admin/members/:id/password
+
+重置某个成员的密码。
+
+- 请求体：`{ "password": "新密码" }`
+- 响应：`{ "ok": true }`
+- 副作用：该成员所有旧会话立刻失效。
+- 错误：`400 密码长度需为 6-128 位`、`400 用户不存在`
+
+### PATCH /api/admin/members/:id
+
+修改成员用户名。
+
+- 请求体：`{ "username": "新用户名" }`
+- 响应：`{ "ok": true }`
+- 错误：`400 用户名需为 2-32 位字母、数字、_ . -`、`400 该用户名已被超级管理员占用`、
+  `400 用户名已存在`、`404 用户不存在`
+
+### GET /api/admin/logs
+
+查询日志。
+
+- 查询参数：
+
+| 参数 | 默认 | 说明 |
+|:--|:--|:--|
+| `limit` | 200 | 1–1000，超出会被夹取 |
+| `level` | 空（全部） | `info` / `warn` / `error` |
+| `q` | 空 | 在事件名、详情、用户名、IP、角色里做子串匹配（不区分大小写） |
+
+- 响应：
+
+```json
+{ "logs": [ { "t": "2026-01-01T12:00:00", "lvl": "info", "ev": "login_success", "msg": "", "user": "alice", "role": "member", "ip": "192.168.1.5" } ] }
+```
+
+- **最新在最前面**；只读取最近 **5** 个日志文件（按天切分）。
+
+### DELETE /api/admin/logs
+
+清空所有日志文件。
+
+- 响应：`{ "ok": true }`
+
+### GET /api/admin/status
+
+服务器状态（前端每 10 秒拉一次）。
+
+- 响应：
+
+```json
+{
+  "startedAt": 1767225600000, "uptimeSec": 3600,
+  "node": "v20.x.x", "platform": "Windows_NT 10.0.22631 (x64)", "hostname": "SERVER",
+  "port": 12345, "host": "0.0.0.0", "trustProxy": false,
+  "lan": ["192.168.1.23"],
+  "memory": { "rss": 0, "heapUsed": 0, "systemFree": 0, "systemTotal": 0 },
+  "storage": { "files": 0, "dirs": 0, "bytes": 0, "partial": false, "root": "D:\\...\\data\\files" },
+  "disk": { "free": 0, "total": 0 },
+  "tunnel": { "running": false, "url": null, "output": [], "startedAt": null, "restarts": 0, "lastExit": null }
+}
+```
+
+- `storage` 有 30 秒缓存；`disk` 取不到时是 `null`；
+- `trustProxy` 的类型取决于配置：`false`、数字、字符串或字符串数组。
+
+### GET /api/admin/tunnel
+
+- 响应：
+
+```json
+{ "config": { "enabled": false, "mode": "pinggy", "customHost": "" }, "status": { "...": "见 GET /api/admin/status 的 tunnel 字段" } }
+```
+
+### POST /api/admin/tunnel
+
+- 请求体：`{ "enabled": true, "mode": "pinggy" | "localhostrun" | "serveo" | "custom", "customHost": "user@host:22" }`
+  （`mode` 不合法时会被归一化成 `serveo`）
+- 响应：更新后的 `config` 与 `status`（服务端会等约 600 毫秒再返回，让状态有机会更新）
+- 错误：`400` + `validateCustomHost` 的提示：
+  - `请填写 SSH 目标，例如 user@example.com`
+  - `SSH 目标格式无效`
+  - `SSH 目标格式无效，仅支持 user@host 或 user@host:端口`
+- 说明：调用后会立即按新配置生效（开启、关闭或重连）。
+- 隧道各模式的差异见 [公网访问与隧道](/docs/admin/tunnel)。
+
+---
+
+## 任务状态对象
+
+`/api/fs/compress/status`、`/api/fs/extract/status`、`/api/fs/download-url/status` 返回同一结构：
+
+```json
+{
+  "id": "1f2e3d4c5b6a7988",
+  "state": "running",
+  "type": "compress",
+  "label": "资料.zip",
+  "percent": 42,
+  "processed": 21,
+  "total": 50,
+  "processedBytes": 1048576,
+  "totalBytes": 5242880,
+  "error": null,
+  "count": null
+}
+```
+
+| 字段 | 说明 |
+|:--|:--|
+| `state` | `running` / `done` / `error` / `gone`（`gone` = 任务不存在、已过期或无权查看） |
+| `type` | `compress` / `extract` / `download` |
+| `percent` | 0–100；压缩按文件条目、解压按已处理条目、链接下载按 `Content-Length` |
+| `error` | 失败原因；成功时为 `null` |
+| `count` | 解压时表示实际写出的文件数 |
+| 过期 | 任务状态保留 **10 分钟**，之后查询得到 `gone` |
+
+查询任务状态时都使用 `job` 参数：
+
+| 任务类型 | 查询地址 |
+|:--|:--|
+| 在线压缩 | `/api/fs/compress/status?job=<jobId>` |
+| 在线解压 | `/api/fs/extract/status?job=<jobId>` |
+| 链接下载 | `/api/fs/download-url/status?job=<jobId>` |
+
+---
+
+## 调用示例
+
+<Callout type="warn" title="别忘了 CSRF 头">
+所有写操作（`POST` / `PATCH` / `DELETE`）都要带 `X-Requested-With: XMLHttpRequest`，否则直接 403。
+</Callout>
+
+<Tabs items={['PowerShell', 'curl', 'Python']}>
+<Tab value="PowerShell">
+
+```powershell
+$base = "http://localhost:12345"
+$h = @{ "X-Requested-With" = "XMLHttpRequest" }
+$s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+
+# 登录（Cookie 保存在 $s 里）
+Invoke-WebRequest -UseBasicParsing -Method POST "$base/api/auth/login" -Headers $h `
+  -ContentType "application/json" -Body '{"username":"admin","password":"你的密码"}' -WebSession $s | Out-Null
+
+# 列目录（GET 不需要自定义头）
+(Invoke-WebRequest -UseBasicParsing "$base/api/fs/list?path=" -WebSession $s).Content
+
+# 新建文件夹
+Invoke-WebRequest -UseBasicParsing -Method POST "$base/api/fs/mkdir" -Headers $h `
+  -ContentType "application/json" -Body '{"path":"","name":"新目录"}' -WebSession $s
+
+# 查看服务器状态
+(Invoke-WebRequest -UseBasicParsing "$base/api/admin/status" -WebSession $s).Content
+```
+
+</Tab>
+<Tab value="curl">
+
+```bash
+BASE=http://localhost:12345
+# 登录，把 Cookie 存到 cookie.txt
+curl -s -c cookie.txt -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' \
+     -d '{"username":"admin","password":"你的密码"}' "$BASE/api/auth/login"
+
+# 列目录
+curl -s -b cookie.txt "$BASE/api/fs/list?path="
+
+# 上传文件
+curl -s -b cookie.txt -H 'X-Requested-With: XMLHttpRequest' -F 'files=@./report.pdf' \
+     "$BASE/api/fs/upload?path=%E8%B5%84%E6%96%99"
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+import time, requests
+
+BASE = "http://localhost:12345"
+s = requests.Session()
+s.headers["X-Requested-With"] = "XMLHttpRequest"
+s.post(f"{BASE}/api/auth/login", json={"username": "admin", "password": "你的密码"}).raise_for_status()
+
+job = s.post(f"{BASE}/api/fs/compress", json={"paths": ["资料"]}).json()["jobId"]
+while True:
+    st = s.get(f"{BASE}/api/fs/compress/status", params={"job": job}).json()
+    print(st["state"], st.get("percent"))
+    if st["state"] != "running":
+        break
+    time.sleep(0.5)
+```
+
+</Tab>
+</Tabs>
+
+---
+
+## 路径与状态码速查
+
+| 前缀 | 覆盖内容 | 认证要求 |
+|:--|:--|:--|
+| `/ping` | 健康检查 | 无 |
+| `/api/meta` | 名称与版本 | 无 |
+| `/api/auth` | 登录、改密、登出、查身份 | 部分 |
+| `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、链接下载 | 按权限点 |
+| `/api/admin` | 配置、成员、日志、状态、隧道 | **仅超级管理员** |
+| `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
+| 其它任意路径 | 返回前端应用（SPA fallback） | — |
+
+<Cards>
+  <Card title="权限与角色" href="/docs/guide/permissions" description="权限点默认值与依赖关系" />
+  <Card title="安全设计" href="/docs/security/design" description="限流、穿越校验与资源上限" />
+  <Card title="配置参考" href="/docs/admin/configuration" description="data/config.json 全部字段" />
+</Cards>

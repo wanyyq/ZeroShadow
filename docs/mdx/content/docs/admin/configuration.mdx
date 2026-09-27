@@ -1,0 +1,318 @@
+---
+title: 配置参考
+description: ZeroShadow 的 .env 与 data/config.json 全部变量、字段、默认值与取值范围，逐个列出，一个不漏。
+icon: KeyRound
+---
+
+ZeroShadow 只有两个配置文件：
+
+| 文件 | 位置 | 内容 | 改完要做什么 |
+|:--|:--|:--|:--|
+| **`.env`** | 运行根目录（源码运行 = 项目根目录；exe 运行 = `ZeroShadow.exe` 同目录） | 端口、监听地址、超管账号密码、会话时长、存储目录、安全开关 | **重启服务** |
+| **`data/config.json`** | 运行根目录下的 `data/` | 后台所有设置：体积上限、权限开关、隐藏列表、隧道配置 | 在**网页后台**改即可即时生效；手工编辑需**重启服务** |
+
+另外有两个由程序自动生成、**不要手工编辑**的文件：
+
+| 文件 | 内容 | 说明 |
+|:--|:--|:--|
+| `data/.jwt-secret` | 会话签名密钥（96 个十六进制字符） | 删掉后重启会自动重新生成，**所有已登录会话立即失效** |
+| `data/users.json` | 成员列表（含 bcrypt 密码哈希） | 由后台管理，不要手改 |
+
+<Callout type="warn" title="发布打包提醒">
+`.env`、`data/.jwt-secret`、`data/users.json`、`data/config.json`、`data/logs/*.log` 都属于运行期数据，`package-release.ps1` 会在打包前清理它们，并在发现残留（以及 `data/files/*`、`data/tmp/*`、任何 `.zip`）时**拒绝出包**。
+</Callout>
+
+## 一、`.env` 全部变量
+
+`.env` 一共 12 个变量，下面按用途逐组列出。
+
+### 1.1 生效顺序（重要）
+
+服务启动时会读取 `.env` 并写入 `process.env`，但有一个关键细节：
+
+<Callout type="warn" title="已经存在于系统环境变量里的键，不会被 .env 覆盖">
+也就是说优先级是 **系统环境变量 > `.env` 文件 > 代码内默认值**。如果你在 `.env` 里改了 `PORT` 却怎么都不生效，先确认系统里没有设置过同名环境变量。
+</Callout>
+
+`.env` 不存在时会被自动创建（带注释模板 + 随机超管密码）。
+
+### 1.2 服务与端口
+
+| 变量 | 默认值 | 取值范围 | 说明 |
+|:--|:--|:--|:--|
+| `PORT` | `12345` | 1–65535 | 服务端口。非法值会回退到 12345 |
+| `HOST` | `0.0.0.0` | 任意地址 | 监听地址。`0.0.0.0` = 局域网可访问；`127.0.0.1` = 仅本机 |
+
+### 1.3 超级管理员与会话
+
+| 变量 | 默认值 | 说明 |
+|:--|:--|:--|
+| `SUPER_ADMIN_USER` | `admin` | 超管用户名（前后空格会被去掉） |
+| `SUPER_ADMIN_PASSWORD` | 自动生成 | 超管密码。**留空或写 `change-me` 都会自动生成一个随机密码并回写到 `.env`** |
+| `SESSION_HOURS` | `72` | 登录会话有效期（小时），范围 1–8760 |
+
+- 密码改动需要**重启服务**；重启后超管的所有旧会话立刻失效。
+- 会话 Cookie 名为 `zs_token`，属性为 `httpOnly` + `SameSite=Lax`；通过 HTTPS 访问时会自动带 `Secure`。
+
+### 1.4 存储位置
+
+| 变量 | 默认值 | 说明 |
+|:--|:--|:--|
+| `FILES_DIR` | `./data/files` | 网盘文件的真实根目录。可以是绝对路径，例如 `D:\ZeroShadowFiles` |
+
+留空即使用默认值。目录不存在会被自动创建。
+**改这个变量只影响网盘文件的存放位置**，不影响 `data/` 下的配置、日志与临时目录。
+
+<Callout type="info" title="相对路径按进程工作目录解析">
+写成**相对路径**时按进程的当前工作目录解析（双击 exe 运行时就是 exe 所在目录），想避免歧义就写绝对路径。
+</Callout>
+
+### 1.5 外部只读映射目录 `FILES_SOFT_DIR`
+
+把服务器上任意目录挂成网盘里的"只读文件夹"，**不复制、不占空间**，适合放视频素材、软件包、镜像库。
+
+写法是一个 JSON 对象，键是网盘里显示的文件夹名，值是服务器上的真实路径：
+
+```ini
+FILES_SOFT_DIR={"软件文件夹":"D:/MyFiles","工作目录":"D:\\Program\\xxx","音乐":"C:/Users/me/Music"}
+```
+
+规则细节：
+
+| 项 | 规则 |
+|:--|:--|
+| 名称 | `1–100` 位，只能是字母、数字、下划线、中文（含扩展区汉字）、点、连字符；不能是 `.` 或 `..` |
+| 路径 | `/` 与 `\` 都行（反斜杠会被统一转成 `/`）。推荐写绝对路径；相对路径按进程的**当前工作目录**解析（双击 exe 运行时就是 exe 所在目录） |
+| 挂载位置 | 出现在网盘的**根目录**下。接口返回时映射目录排在真实目录之前，前端会再按你的排序偏好重排 |
+| 只读性 | 不能上传、新建文件夹、粘贴进去、重命名、删除、在线编辑，也不能解压到其中；尝试时会提示「外部映射目录仅支持只读操作」 |
+| 内容外流 | 默认**不能**把映射目录里的内容复制 / 压缩进网盘目录，需要超管在「设置 → 安全」打开 `softDirAllowCopyOut` |
+| 目标不存在 | 该文件夹仍会显示在根目录（大小 0），点进去会提示「目录不存在」 |
+| 越界 | 映射目录内的路径不能越出映射根（`..` 与解析后越界都会被拒绝） |
+| 访客 | 映射文件夹同样可以被单独设为"对访客隐藏" |
+| 非法写法 | JSON 解析失败、名称不合法、值不是字符串时，**整份配置视为无效并被忽略**（启动时不会挂载任何映射目录） |
+
+启动时控制台会打印已生效的映射：
+
+```text
+  外部映射:   软件文件夹, 工作目录（只读）
+```
+
+### 1.6 客户端 IP 解析 `TRUST_PROXY`
+
+| 取值 | 含义 |
+|:--|:--|
+| 不设置 / `0` / `false` / `no` / `off` | **默认**。完全不信任代理头，客户端 IP 取 TCP 连接来源 |
+| `1` / `true` / `yes` / `on` | 信任全部代理头 |
+| 数字（如 `2`） | 按"经过了几跳代理"解析 `X-Forwarded-For` |
+| `loopback` / `linklocal` / `uniquelocal` | 只信任来自本机 / 链路本地 / 私有网段的代理（隧道场景推荐 `loopback`） |
+| `10.0.0.0/8,172.16.0.0/12` | 逗号分隔的网段列表 |
+
+<Callout type="warn" title="除上表列出的形式之外，其他取值会被原样交给 Express 的 trust proxy 去解析">
+可以理解为"网段 / 预设名列表"。写错时行为不可预期，**请只用上表列出的形式**。
+</Callout>
+
+影响范围：**日志里记录的 IP** 与**按 IP 的失败限速 / 接口限流**。
+取值取舍与风险见 [公网访问与隧道](/docs/admin/tunnel#4-trust_proxy-该怎么填)。
+
+<Callout type="info" title="这个值只在启动时读取一次，改完必须重启">
+当前生效模式会打印在启动日志里，也可以在「设置 → 安全 → 客户端 IP 解析」里查看。
+</Callout>
+
+### 1.7 链接下载（多线程下载器）的安全开关
+
+以下三个开关在**每次发起下载时读取**，理论上改了不必重启（但改 `.env` 后仍建议重启以免困惑）：
+
+| 变量 | 默认 | 说明 |
+|:--|:--|:--|
+| `DOWNLOAD_URL_ALLOW_PRIVATE` | 关闭 | 设为 `1` / `true` / `yes` / `on` 时**放开全部内网地址**（内网、回环、链路本地、云元数据全部可访问）。谨慎使用 |
+| `DOWNLOAD_URL_ALLOW_HOSTS` | 无 | 逗号分隔的主机名白名单，例如 `nas.local,192.168.1.10`。**只放开列表中的主机**，比上一项安全得多 |
+| `DOWNLOAD_URL_INSECURE_TLS` | 关闭 | 跳过 TLS 证书校验。会失去中间人防护，**不推荐** |
+
+反直觉但重要的一点：**主机白名单的匹配发生在地址段校验之前**。
+也就是说写进 `DOWNLOAD_URL_ALLOW_HOSTS` 的主机，即使解析到内网地址也会被放行。
+`DOWNLOAD_URL_ALLOW_PRIVATE` 与「设置 → 安全 → 链接下载允许访问内网地址」是"任一开启即生效"的关系。
+
+启动时若放宽了限制，控制台会显式提醒：
+
+```text
+  [注意] 链接下载工具已放宽限制: 允许链接下载访问内网地址
+```
+
+### 1.8 静默模式
+
+| 变量 / 参数 | 说明 |
+|:--|:--|
+| `NOLOG=true`（也接受 `1` / `yes`） | **只写日志文件，不输出控制台** |
+| 启动参数 `-nolog` | 同上，例如 `node server/index.js -nolog` |
+
+静默模式下会一并关闭：启动横幅、每个请求的 `[REQ]` 行、以及所有 `info` / `warn` / `error` 的控制台输出。
+**日志文件始终照常写入**，可以在「设置 → 日志」里查看。
+
+<Callout type="info" title="用 pnpm 传参要注意写法">
+
+```bash
+pnpm start -- -nolog
+```
+
+</Callout>
+
+## 二、`.env` 完整示例
+
+```ini
+# ===== 服务 =====
+PORT=12345
+HOST=0.0.0.0
+
+# ===== 超级管理员 =====
+SUPER_ADMIN_USER=admin
+SUPER_ADMIN_PASSWORD=换成你自己的强密码
+
+# ===== 会话 =====
+SESSION_HOURS=72
+
+# ===== 客户端 IP（只经隧道访问时才开启）=====
+# TRUST_PROXY=loopback
+
+# ===== 存储 =====
+# FILES_DIR=D:\ZeroShadowFiles
+
+# ===== 只读映射目录 =====
+# FILES_SOFT_DIR={"软件文件夹":"D:/MyFiles","工作目录":"D:\\Program\\xxx"}
+
+# ===== 链接下载安全 =====
+# DOWNLOAD_URL_ALLOW_HOSTS=nas.local,192.168.1.10
+
+# ===== 静默 =====
+# NOLOG=true
+```
+
+## 三、`data/config.json` 全部字段
+
+`data/config.json` 由后台写入，**改完设置立刻生效**（无需重启）。
+手工编辑也可以，但要注意两点：
+
+1. 配置在**服务启动时加载一次**并常驻内存，手工改文件后必须重启才会读入；
+2. 未知字段会被**忽略**——程序只认下面列出的键（按默认值结构做深合并）。
+
+<Callout type="warn" title="config.json 与代码内默认值的关系">
+只要 `data/config.json` 存在，文件里写到的键就**永久覆盖**代码内的默认值结构（启动时按默认值结构做**深合并**）：没写到的键继续用代码内默认值，写到的键一律以文件为准；未知字段会被忽略，不会写进内存配置。
+
+想恢复出厂设置：停掉服务，删掉 `data/config.json`，再启动。
+（`Auto-building.bat` 在打包前就会删掉它，所以发布包里本来就没有这个文件。）
+</Callout>
+
+`config.json` 一共 45 个字段：9 个数值上限、5 个布尔开关、19 个成员权限、8 个访客权限、1 个访客隐藏列表、3 个隧道字段。
+
+### 3.1 数值上限
+
+| 字段 | 默认值 | 取值 | 说明 |
+|:--|:--|:--|:--|
+| `superUploadLimitMB` | `2048` | 1–1048576 | 超管单文件上传上限（MB） |
+| `memberUploadLimitMB` | `512` | 1–1048576 | 成员单文件上传上限（MB） |
+| `zipMaxFiles` | `100` | 1–1048576 | 打包最大条目数；解压时压缩包内条目数上限 |
+| `zipMaxSingleMB` | `50` | 1–1048576 | 打包时被选中文件的单文件上限；解压时单个条目的上限（超出的条目会被跳过）（MB） |
+| `zipMaxTotalMB` | `128` | 1–1048576 | 打包总量上限（MB） |
+| `extractMaxZipMB` | `128` | 1–1048576 | 被解压 `.zip` 文件本身的上限（MB） |
+| `extractMaxTotalMB` | `512` | 1–1048576 | 解压后总量上限（MB） |
+| `downloadUrlMaxMB` | `4096` | 1–1048576 | 链接下载单个文件上限（MB） |
+| `rateLimitPerMin` | `120` | 1–1048576 | 单 IP 每分钟重型操作次数 |
+
+<Callout type="info" title="数值的取值范围是 1–1048576">
+数值只能通过 `PATCH /api/admin/config` 修改，取值范围限制在 1–1048576；提交 `0` 或负数会被直接拒绝（返回 400「数值需为 1-1048576 之间的整数」），要停掉限流请直接关掉 `rateLimitEnabled`。
+</Callout>
+
+### 3.2 布尔开关
+
+| 字段 | 默认值 | 说明 |
+|:--|:--|:--|
+| `rateLimitEnabled` | `true` | 是否启用重型接口限流 |
+| `softDirAllowCopyOut` | `false` | 是否允许把只读映射目录的内容复制 / 压缩进网盘目录 |
+| `jobStatusOwnerOnly` | `true` | 作业进度是否仅创建者与超管可见 |
+| `downloadUrlAllowPrivate` | `false` | 链接下载是否允许访问内网地址 |
+| `csrfOriginCheck` | `true` | 写操作是否校验 `Origin` / `Sec-Fetch-Site` |
+
+### 3.3 成员权限 `memberPerms`
+
+`memberPerms` 有 19 个字段，**全部默认 `true`**：
+
+| 分组 | 字段 |
+|:--|:--|
+| 文件操作 | `fileWrite`（总开关）、`upload`、`uploadFolders`、`mkdir`、`copy`、`move`、`rename`、`delete` |
+| 下载与预览 | `browse`、`downloadFile`、`downloadFolder`、`preview` |
+| 高级功能 | `compressZip`、`extractZip`、`downloadUrl`、`htmlPreview`、`editFiles` |
+| 管理与账户 | `manageGuestVisibility`、`changePassword` |
+
+说明：
+
+- 除 `fileWrite` 之外的写类开关（`upload` / `uploadFolders` / `mkdir` / `copy` / `move` / `rename` / `delete`）都必须同时满足 `fileWrite = true` 才真正生效；
+- `downloadFile` / `downloadFolder` / `preview` 三个开关兼容旧配置里的 `download` 键（若存在会被当作三者的默认值）；
+- 成员没有 `details` 字段，**查看详细信息是固定开放的**。
+
+### 3.4 访客权限 `guestPerms`
+
+`guestPerms` 有 8 个字段：
+
+| 字段 | 默认值 |
+|:--|:--|
+| `browse` | `true` |
+| `downloadFile` | `true` |
+| `downloadFolder` | `true` |
+| `preview` | `true` |
+| `compressZip` | `false` |
+| `extractZip` | `false` |
+| `htmlPreview` | `false` |
+| `editFiles` | `false` |
+
+访客**没有**、也无法获得：上传、上传文件夹、新建文件夹、复制、移动、重命名、删除、查看详细信息、链接下载器、管理访客可见性、修改密码。
+
+### 3.5 访客隐藏列表 `guestHiddenPaths`
+
+字符串数组，元素是**相对网盘根目录的路径**（不带开头的 `/`），例如：
+
+```json
+"guestHiddenPaths": ["内部资料", "财务/2026"]
+```
+
+判定规则是"等于该路径或位于其路径之内"，在 Windows / macOS 上不区分大小写。
+被隐藏的项在访客侧会**完全消失**，直接访问返回 404。
+
+### 3.6 隧道配置 `tunnel`
+
+| 字段 | 默认值 | 取值 |
+|:--|:--|:--|
+| `enabled` | `false` | 是否启用公网隧道 |
+| `mode` | `"pinggy"` | `"pinggy"` / `"localhostrun"` / `"serveo"` / `"custom"` |
+| `customHost` | `""` | 仅在 `mode = "custom"` 时生效，格式 `user@host[:端口]` |
+
+服务启动时若 `enabled` 为 `true`，会自动建立隧道。四种模式的实际命令与取舍见 [公网访问与隧道](/docs/admin/tunnel)。
+
+## 四、其他运行时文件
+
+| 路径 | 说明 |
+|:--|:--|
+| `data/files/` | 网盘文件根目录（可用 `FILES_DIR` 改到别处） |
+| `data/logs/zs-YYYY-MM-DD.log` | 按天切分的 JSONL 日志；界面只读最近 5 个文件 |
+| `data/tmp/` | 上传与下载的中转目录；**每次启动会被清空** |
+| `data/.ssh-known-hosts-tunnel` | 隧道专用 `known_hosts` 文件（使用 `StrictHostKeyChecking=accept-new`，不会污染你的 `~/.ssh/known_hosts`） |
+
+## 五、备份与迁移
+
+需要备份的只有三样东西：
+
+1. **网盘文件**：`data/files/`（或 `FILES_DIR` 指向的目录）；
+2. **配置**：`.env` 与 `data/config.json`；
+3. **账号**：`data/users.json`。
+
+`data/.jwt-secret` 一起备份的话，迁移后所有人的登录状态都能保持连续；
+不备份也没关系，重新生成后大家重新登录一次即可。
+
+迁移步骤：停服务 → 拷贝上述内容到新机器 → 确保 `.env` 里的 `FILES_DIR` 指向正确路径 → 启动。
+
+## 相关页面
+
+<Cards>
+  <Card title="公网访问与隧道" href="/docs/admin/tunnel" description="四种隧道模式、TRUST_PROXY 取值与排查清单" />
+  <Card title="管理员指南" href="/docs/admin/admin-guide" description="后台设置的入口与日常运维操作" />
+  <Card title="安全设计" href="/docs/security/design" description="每个安全开关背后的机制与默认值" />
+  <Card title="API 参考" href="/docs/api/reference" description="PATCH /api/admin/config 等接口的参数与错误码" />
+</Cards>

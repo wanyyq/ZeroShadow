@@ -1,0 +1,260 @@
+---
+title: 测试脚本
+description: 冒烟测试与安全回归测试的用法、参数、断言清单，以及改脚本时必须保留的性质。
+icon: FlaskConical
+---
+
+仓库自带两个 PowerShell 测试脚本。它们的价值在于**把结论固化成可重复执行的断言**——
+改完代码跑一遍，就知道有没有退化。
+
+| 脚本 | 定位 | 断言数 | 退出码 |
+|:--|:--|:--|:--|
+| `smoke-test.ps1` | 端到端功能冒烟 | 38 项 | 失败项数量 |
+| `security-test.ps1` | 安全回归 | 16 组 | 失败项数量 |
+
+两个脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过。
+
+## 冒烟测试 `smoke-test.ps1`
+
+### 用法
+
+```powershell
+# 1) 先起服务（pnpm dev:server 或 pnpm start）
+# 2) 另开一个终端执行——端口与超管账号会自动从 .env 读取
+powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1
+
+# 也可以指定别的实例
+powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http://127.0.0.1:5179
+```
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+|:--|:--|:--|
+| `-BaseUrl` | `http://127.0.0.1:<.env 里的 PORT>` | 被测服务地址 |
+| `-Root` | 脚本所在目录 | 项目根目录，用于读 `.env` |
+| `-User` | `.env` 的 `SUPER_ADMIN_USER` | 超管用户名 |
+| `-Password` | `.env` 的 `SUPER_ADMIN_PASSWORD` | 超管密码 |
+| `-KeepScratch` | 关 | 保留测试用的临时文件 |
+
+### 覆盖范围（9 组共 38 项）
+
+1. **连通性**：`/ping`、`/api/meta`
+2. **CSRF 与认证**：无自定义头被拦（403）、错误凭据 401、超管登录成功
+3. **目录操作与路径穿越**：建目录、`../../` 被拒（400）
+4. **上传**：手工拼 multipart、上传后条目可见
+5. **访客可见性与权限边界**：隐藏文件夹、管理员可见 / 访客被过滤、访客访问隐藏目录 404、
+   访客访问 admin 接口 401、访客建目录 401、访客下载 200、访客 `me` 角色
+6. **成员生命周期**：创建、**按用户名查到 id**、登录、`uploadLimitMB` 与后台配置一致、成员访问 admin 403
+7. **文件操作**：复制 / 重命名 / 移动 / 详情（`files:2`）/ 删除
+8. **禁用成员**：禁用后会话降级为访客
+9. **ZIP 打包 / 搜索 / 日志 / 状态 / 隧道**：ZIP 响应类型、搜索结果、`login_success` 日志、
+   服务器状态、隧道状态结构
+10. **SPA 与静态资源**：首页 HTML、`/resources/lucide.min.js`（前端未构建时跳过）
+
+运行时逐项打印结果，形如 `PASS csrf-blocked` / `FAIL xxx`，最后给一行汇总：
+
+```text
+PASS ping
+PASS meta
+PASS csrf-blocked
+...
+===== 通过 38 / 失败 0 / 跳过 0 =====
+```
+
+### 行为约定
+
+这些性质是刻意设计的，改脚本时请保留：
+
+| 性质 | 为什么 |
+|:--|:--|
+| 端口与凭据从 `.env` 读，不写死 | 旧脚本写死 `http://localhost:5170` + `admin`，与根 `.env` 的 `Wangyq` 对不上，注定失败 |
+| 用 `127.0.0.1` 而不是 `localhost` | 服务端监听 `0.0.0.0`（仅 IPv4），`localhost` 在部分系统上先解析到 `::1`，会连接被拒 |
+| 全部工作在自己的随机临时目录里 | 旧脚本固定创建「公开资料」「内部资料」，与真实数据撞名，且重跑就乱 |
+| 成员按用户名查找 id，**不取 `members[0]`** | 旧脚本取 `members[0]`，在有多个成员的真实环境里会禁用错人 |
+| 错误凭据断言用**不存在的用户名** | 登录失败计数按提交的用户名累计，用超管的账号会让每跑一次就给他记一笔，多跑几轮可能把他锁在门外 |
+| 跑完自动还原现场 | 删除临时目录与临时成员；若 `config.json` 是本轮才生成且隐藏列表已清空，则删掉它恢复纯默认值状态 |
+| 断言与「后台配置」比对，而不是写死数值 | 例如 `uploadLimitMB` 与 `/api/admin/config` 的值比对，管理员调过上限也不会误报 |
+| 前端未构建时跳过 SPA 断言 | `web/dist` 不存在时后端对 `/` 返回 503，dev 模式下这是正常的，不该算失败 |
+
+### 它会改动什么
+
+<Callout type="warn" title="它会在你的网盘里真实创建 / 删除文件">
+脚本会在网盘根目录下创建一个随机命名的临时目录（形如 `_smoketest-<随机串>`），
+在其中做上传与各类文件操作，并临时创建一个成员账号——**跑完都会自动删除**。
+`data/users.json` 在测试前后应保持字节级一致。仍建议对测试实例运行。
+</Callout>
+
+### 维护提醒：这个文件必须带 UTF-8 BOM
+
+`smoke-test.ps1` 含中文字面量（目录名、文件名），而 **Windows PowerShell 5.1
+在没有 BOM 时会用 ANSI 代码页解码 `.ps1`**，中文会变成乱码，甚至整个文件无法解析
+（报 `Unexpected token '}'`）。
+
+<Callout type="error" title="用编辑器或工具改完之后请确认前 3 字节仍是 EF BB BF">
+一些编辑工具与写入 API 会静默丢掉 BOM。校验方法：
+
+```powershell
+$b = [System.IO.File]::ReadAllBytes("smoke-test.ps1")
+'{0:X2} {1:X2} {2:X2}' -f $b[0], $b[1], $b[2]   # 期望 EF BB BF
+```
+</Callout>
+
+`security-test.ps1`、`package-release.ps1`、`build-release.ps1` 刻意保持**纯 ASCII**，
+因此不需要 BOM，也不应往里加入非 ASCII 字符。
+
+## 安全回归测试 `security-test.ps1`
+
+### 用法
+
+```powershell
+# 终端 1：起一个独立实例（建议独立端口，避免打扰正在使用的服务）
+$env:HOST='127.0.0.1'; $env:PORT='5179'; node server/index.js
+
+# 终端 2
+powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl http://127.0.0.1:5179
+```
+
+<Callout type="warn" title="它按 .env 解析文件库位置，不读环境变量">
+脚本用 `Get-EnvValue -File $envFile -Key "FILES_DIR"` 定位网盘文件库，
+找不到就退回 `<项目根>/data/files`。所以**不要**只在启动服务时用环境变量覆盖 `FILES_DIR`——
+那样服务端用一套目录、测试脚本用另一套，会看到一堆莫名其妙的 404。
+两边要对齐，要么都不覆盖（都走 `data/files`），要么把 `FILES_DIR` 写进 `.env`。
+</Callout>
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+|:--|:--|:--|
+| `-BaseUrl` | `http://127.0.0.1:5179` | 被测服务地址 |
+| `-Root` | 脚本所在目录 | 项目根目录，用于读 `.env`、定位文件目录、检查源码与发布包 |
+| `-User` / `-Password` | 从 `.env` 读，回退 `admin` | 超管凭据 |
+| `-PositiveProbeUrl` | 空 | 正向下载验证的目标地址；**需要服务端用 `DOWNLOAD_URL_ALLOW_HOSTS` 放开该主机**，留空则跳过 |
+| `-LoopbackAllowlisted` | 关 | 当服务端白名单里放开了 `127.0.0.1` 时打开（`127.1` 与十进制 `2130706433` 会被 URL 解析器归一化成 `127.0.0.1`，属于合法放行） |
+| `-TrustProxyMode` | 关 | 被测服务开了 `TRUST_PROXY` 时打开，此时断言 `X-Forwarded-For` **应当**生效 |
+| `-TestLockout` | 关 | 登录锁定作用域测试，会消耗约 12 次单 IP 失败额度，**建议对全新实例运行** |
+| `-SoftDirName` | 空 | 被测服务配置的只读映射目录名，用于验证其内容不能被复制进网盘 |
+| `-TestJobOwnership` | 关 | 作业归属测试，会临时创建一个成员账号并在结束时删除 |
+| `-KeepScratch` | 关 | 保留测试用的临时目录（默认跑完删掉） |
+
+### 退出码
+
+| 退出码 | 含义 |
+|:--|:--|
+| `0` | 全部通过 |
+| `1` | 连不上服务 |
+| `2` | 超管登录失败 |
+| 其它 | 失败项数量 |
+
+### 16 组断言
+
+| 组 | 主题 |
+|:--|:--|
+| 1 | 传输层加固（CSRF、响应头、CSP、Permissions-Policy、跨站来源拦截） |
+| 2 | 认证与授权（错误密码、超管登录、匿名访问 admin 接口） |
+| 3 | 路径穿越（4 种写法） |
+| 4 | 访客授权必须跟随管理端开关（开 → 允许，关 → 全部拒绝，再恢复） |
+| 5 | SSRF 过滤（12 种写法）+ 可选的 5b 正向下载 |
+| 6 | HTML / SVG 预览不得在应用源下执行（响应头 + 前端源码里的 `sandbox` 实际取值） |
+| 7 | 既有防护不退化（zip-slip、合法条目仍能解出） |
+| 8 | 凭据与发布卫生（弱口令检查、发布包不得含 `.env`、路径分隔符必须可移植、门禁脚本能干净跑完） |
+| 9 | 客户端 IP 解析（按 `TRUST_PROXY` 断言 `X-Forwarded-For` 是否生效） |
+| 10 | 登录锁定作用域（可选） |
+| 11 | 解压保护（声明超限直接拒绝；中途失败不留半成品） |
+| 12 | 重型接口限流 |
+| 13 | 只读映射目录（内容不可复制进网盘） |
+| 14 | 作业状态归属 |
+| 15 | 访客可见性随重命名同步 |
+| 16 | 路径解析加固 |
+
+### 它会临时改动什么
+
+- 第 4 组会改访客权限开关，第 11 组会改解压总量上限，第 12 组会改限流阈值——
+  都在各自段落结束时**还原成你原来的值**；
+- `-TestJobOwnership` 会临时创建一个成员账号并在结束时删除；
+- 除此之外不动用户与发布包。
+
+<Callout type="info" title="第 8 组的两项断言依赖仓库状态，不是代码问题">
+- **「发布包不得含 `.env`」**：读的是仓库根目录的 `ZeroShadow-Release.zip`。如果这个归档是
+  在密钥门禁机制建立之前产出的，里面可能真的带着 `.env` 与 `data/.jwt-secret`。删掉旧归档即可。
+- **「门禁脚本能干净跑完」**：以 `-NoZip -DryRun` 跑 `package-release.ps1`，断言退出码为 0。
+  如果 `ZeroShadow-Release/` 目录里还有 `data/files/*`、`data/tmp/*` 或任何 `.zip`
+  （例如那是一个**正在使用的**部署目录），门禁会**正确地**拒绝并退出 2。
+
+这两项失败说明工作区需要清理，而不是代码有缺陷。
+</Callout>
+
+## 提交前自查
+
+<Steps>
+<Step>
+### 静态检查
+
+```bash
+pnpm typecheck
+pnpm lint
+```
+</Step>
+<Step>
+### 前端能构建
+
+```bash
+pnpm build
+```
+
+确认产出了 `web/dist/index.html`。
+</Step>
+<Step>
+### 安全回归
+
+起一个独立实例跑 `security-test.ps1`，**退出码为 0**。
+</Step>
+<Step>
+### 冒烟测试
+
+需要的话跑 `smoke-test.ps1`（**退出码为 0**），跑完后
+`git status` 与 `data/` 应无残留。
+</Step>
+<Step>
+### 打包链路
+
+改了打包相关脚本时，跑一遍 `build-release.ps1 -Targets windows-x64`，
+确认归档命名、内容与门禁都符合预期。
+</Step>
+<Step>
+### 同步文档
+
+涉及安全相关改动时，同步更新 [安全设计](/docs/security/design) 与对应的测试断言。
+</Step>
+<Step>
+### 别把凭据提交进去
+
+确认没有把 `.env`、`data/` 提交进仓库（`.gitignore` 已经忽略，别用 `-f` 强行加）。
+</Step>
+<Step>
+### 检查 BOM
+
+若用编辑器或工具改过 `smoke-test.ps1`，确认它仍然带 UTF-8 BOM。
+</Step>
+</Steps>
+
+<Callout type="info" title="已被跟踪但又被 gitignore 的文件">
+`.gitignore` 只对**未被跟踪**的文件生效。用下面这条命令可以列出「已跟踪却符合忽略规则」
+的文件（本仓库当前有 4 个）：
+
+```powershell
+git ls-files -i -c --exclude-standard
+```
+
+当前命中这 4 个：
+
+| 文件 | 说明 |
+|:--|:--|
+| `server/ZeroShadow.exe` | 约 40 MB 的打包产物 |
+| `server/dist/server-bundle.cjs` | esbuild 产物 |
+| `AIGC.md` | 设计工作稿 |
+| `main.md` | 需求工作稿 |
+
+要让忽略规则真正生效，需要 `git rm --cached <文件>` 把它们移出索引。
+注意这**不会**减小历史体积——要真正瘦身得用 `git filter-repo` 重写历史。
+</Callout>
