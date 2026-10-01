@@ -130,6 +130,9 @@ const PREVIEWABLE = new Set([
   "mp4", "webm", "mov", "mkv", "wmv", "flv", "3gp", "m4v",
   "mp3", "wav", "ogg", "flac", "m4a", "aac",
   "pdf",
+  // html/htm 必须在这里：browser-page 双击时先判 previewType()，再分流到 /html-preview。
+  // 漏了它们会让那条分支变成死代码 —— 有下载权限的人双击 html 会直接开始下载。
+  "html", "htm",
   "txt", "md", "json", "log", "csv", "js", "ts", "css", "py", "yml", "yaml", "xml", "ini", "conf",
   "rst", "adoc", "tex", "bat", "ps1", "vbs", "lua", "rb", "php", "pl", "sql",
   "toml", "properties", "graphql", "rtf", "org", "cmake", "gradle",

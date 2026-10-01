@@ -57,6 +57,9 @@ export function initLucide() {
 
 export function animateListIn(container: HTMLElement | null) {
   if (!container || !window.gsap) return
+  // 「减少动画」由 client-settings 写在 <html data-reduce-motion> 上：
+  // CSS 压不掉 GSAP 设的 inline 样式，必须在这里主动跳过
+  if (document.documentElement.dataset.reduceMotion === "1") return
   const items = container.querySelectorAll("[data-animate-item]")
   if (!items.length || items.length > 80) return
   try {
@@ -75,6 +78,7 @@ export function animateListIn(container: HTMLElement | null) {
 
 export function animatePageIn(el: HTMLElement | null) {
   if (!el || !window.gsap) return
+  if (document.documentElement.dataset.reduceMotion === "1") return
   try {
     window.gsap.from(el, {
       opacity: 0,

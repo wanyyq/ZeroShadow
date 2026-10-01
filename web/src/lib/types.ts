@@ -312,6 +312,10 @@ export type BackupsResponse = Record<string, BackupEntry[]>
 export interface UploadResult {
   results: { name: string; ok: boolean; savedAs?: string; error?: string }[]
   limitMB: number
+  /** 命中「单请求文件数上限」时由服务端置位（前端据此提示并分片上传） */
+  truncated?: boolean
+  /** 服务端当前的单请求文件数上限，前端分片大小与它保持一致 */
+  maxFilesPerRequest?: number
 }
 
 export type OpType = "compress" | "extract" | "download"

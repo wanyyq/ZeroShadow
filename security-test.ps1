@@ -433,7 +433,13 @@ if (Test-Path $releaseZip) {
 }
 
 $gate = Join-Path $Root "package-release.ps1"
-if (Test-Path $gate) {
+$gateDir = Join-Path $Root "ZeroShadow-Release"
+if (-not (Test-Path $gateDir)) {
+  # The gate only has something to judge when a release directory exists.
+  # Asserting on a missing directory would report "exit 1 = directory not found"
+  # as a hygiene failure, which is not what this check is about.
+  Note "no release directory present - skipping the packaging secret gate"
+} elseif (Test-Path $gate) {
   $null = & powershell -NoProfile -ExecutionPolicy Bypass -File $gate -ReleaseDir "ZeroShadow-Release" -NoZip -DryRun 2>&1
   Check "release packaging secret gate runs clean" ($LASTEXITCODE -eq 0) ("gate exited " + $LASTEXITCODE)
 }
@@ -444,7 +450,7 @@ Section "9. Client IP resolution (rate limiting and logs)"
 $spoofedIp = "203.0.113.7"
 $r = Invoke-Api -Method GET -Path ("/api/fs/download?path=" + $guestProbePath) -Session $session -ExtraHeaders @{ "X-Forwarded-For" = $spoofedIp }
 $loggedIp = ""
-$logs = Invoke-Api -Method GET -Path "/api/admin/logs?limit=60" -Session $session
+$logs = Invoke-Api -Method GET -Path "/api/admin/logs?limit=60&stats=0" -Session $session
 try {
   $entry = ($logs.body | ConvertFrom-Json).logs | Where-Object { $_.ev -eq "download" } | Select-Object -First 1
   if ($entry) { $loggedIp = [string]$entry.ip }
@@ -668,6 +674,77 @@ foreach ($reserved in @("constructor", "toString", "__proto__", "hasOwnProperty"
   $r = Invoke-Api -Method GET -Path ("/api/fs/list?path=" + $reserved)
   Check ("reserved name handled without a server error: " + $reserved) ($r.code -ne 500 -and $r.code -ne 502) ("got " + $r.code)
 }
+
+# ---------------------------------------------------------------------------
+Section "17. Upload / archive / log-query regressions"
+# ---------------------------------------------------------------------------
+
+# stats.users is keyed by username and usernames may differ only by case
+# (Wangyq vs wangyq). Windows PowerShell's ConvertFrom-Json treats those as
+# duplicate keys and throws, which silently broke the section 9 assertion.
+# stats=0 must therefore be able to omit the aggregate entirely.
+$r = Invoke-Api -Method GET -Path "/api/admin/logs?limit=5" -Session $session
+Check "log query returns aggregated stats by default" ($r.code -eq 200 -and $r.body -match '"stats"') ("got " + $r.code)
+$r = Invoke-Api -Method GET -Path "/api/admin/logs?limit=5&stats=0" -Session $session
+Check "log query omits stats when stats=0" ($r.code -eq 200 -and $r.body -match '"logs"' -and $r.body -notmatch '"stats"') ("got " + $r.code)
+
+function Send-MultipartUpload {
+  param([string]$RelPath, [string]$Body, [string]$Query)
+  $boundary = [guid]::NewGuid().ToString("N")
+  $nl = "`r`n"
+  $sb = New-Object System.Text.StringBuilder
+  [void]$sb.Append("--" + $boundary + $nl)
+  [void]$sb.Append('Content-Disposition: form-data; name="files"; filename="' + $RelPath + '"' + $nl)
+  [void]$sb.Append("Content-Type: text/plain" + $nl + $nl)
+  [void]$sb.Append($Body + $nl)
+  [void]$sb.Append("--" + $boundary + "--" + $nl)
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($sb.ToString())
+  $uri = $BaseUrl + "/api/fs/upload?path=" + $Query
+  return Invoke-WebRequest -UseBasicParsing -Method POST -Uri $uri -WebSession $session `
+    -Headers @{ "X-Requested-With" = "XMLHttpRequest" } `
+    -ContentType ("multipart/form-data; boundary=" + $boundary) -Body $bytes
+}
+
+# Folder upload must keep the relative path: busboy strips it unless
+# preservePath is enabled, which silently flattened every folder upload.
+$r = Send-MultipartUpload -RelPath "UpFolder/Sub/deep.txt" -Body "nested-body" -Query $scratchName
+$uploadBody = [string]$r.Content
+Check "folder upload keeps the nested relative path" ($uploadBody -match "UpFolder/Sub/deep.txt") ("body: " + $uploadBody)
+Check "upload response advertises the per-request file cap" ($uploadBody -match "maxFilesPerRequest") ("body: " + $uploadBody)
+$nestedFile = Join-Path $filesDir ($scratchName + "\UpFolder\Sub\deep.txt")
+Check "folder upload created the nested directory on disk" (Test-Path -LiteralPath $nestedFile) ("missing " + $nestedFile)
+
+# Folder level overwrite/merge are expressed as the file's relative path; the
+# server must match it as well as a bare basename, otherwise both options are
+# silent no-ops that leave a "name (1)" duplicate behind.
+$overwrite = [uri]::EscapeDataString('["UpFolder/Sub/deep.txt"]')
+$r = Send-MultipartUpload -RelPath "UpFolder/Sub/deep.txt" -Body "replaced-body" -Query ($scratchName + "&overwrite=" + $overwrite)
+$nestedContent = if (Test-Path -LiteralPath $nestedFile) { [string](Get-Content -LiteralPath $nestedFile -Raw) } else { "" }
+Check "folder-level overwrite replaces the nested file" ($nestedContent -match "replaced-body") ("content: " + $nestedContent)
+Check "folder-level overwrite leaves no duplicate copy" (-not (Test-Path -LiteralPath (Join-Path $filesDir ($scratchName + "\UpFolder\Sub\deep (1).txt")))) "a duplicate copy was created"
+
+# Copy/move use targetNames so the conflict dialog's "rename" option works.
+# It used to rename the SOURCE path on the client, so the server always 404ed.
+$null = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{ path = ($scratchName + "/src.txt"); content = "source" }
+$null = Invoke-Api -Method POST -Path "/api/fs/mkdir" -Session $session -Body @{ path = $scratchName; name = "dest" }
+$null = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{ path = ($scratchName + "/dest/src.txt"); content = "existing" }
+$r = Invoke-Api -Method POST -Path "/api/fs/copy" -Session $session -Body @{
+  sources     = @($scratchName + "/src.txt")
+  dest        = ($scratchName + "/dest")
+  targetNames = @{ ($scratchName + "/src.txt") = "src (1).txt" }
+}
+$renamedCopy = Join-Path $filesDir ($scratchName + "\dest\src (1).txt")
+Check "copy honours targetNames (conflict rename)" ($r.code -eq 200 -and (Test-Path -LiteralPath $renamedCopy)) ("got " + $r.code + " " + $r.body)
+
+# save-file carries a whole file body, so its JSON limit is raised well above
+# the global 1 MB; before that fix a 2 MB file could not be saved at all and
+# express.json answered with the English "request entity too large".
+$twoMb = "a" * (2 * 1024 * 1024)
+$r = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{ path = ($scratchName + "/big.txt"); content = $twoMb }
+Check "save-file accepts a 2 MB body (limit raised above the global 1 MB)" ($r.code -eq 200) ("got " + $r.code + " " + $r.body)
+$bigFile = Join-Path $filesDir ($scratchName + "\big.txt")
+$bigSize = if (Test-Path -LiteralPath $bigFile) { (Get-Item -LiteralPath $bigFile).Length } else { -1 }
+Check "save-file wrote the complete body (atomic replace)" ($bigSize -eq (2 * 1024 * 1024)) ("size " + $bigSize)
 
 # ---------------------------------------------------------------------------
 # cleanup

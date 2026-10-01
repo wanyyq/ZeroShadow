@@ -12,7 +12,6 @@ import { effectivePerms, downloadUrlLimitBytes, getConfig, saveConfig, uploadLim
 import {
   getSoftDirEntries,
   guestBlocked,
-  isExactHidden,
   isHiddenFromGuest,
   isSameOrInside,
   isSoftPath,
@@ -219,7 +218,9 @@ router.get("/download", async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path))
     if (!resolved.rel) throw httpError(400, "非法路径")
-    if (!resolved.isSoft && guestBlocked(req, resolved.rel)) throw httpError(404, "文件不存在")
+    // 只读映射目录同样要尊重「对访客隐藏」：旧实现用 `!isSoft` 跳过了这一步，
+    // 于是访客只要猜到隐藏软目录里的完整文件名就能下载。
+    if (guestBlocked(req, resolved.rel)) throw httpError(404, "文件不存在")
     assertContextVisible(req, resolved.rel)
     const stat = await assertExists(resolved.abs)
     if (!stat.isFile()) throw httpError(400, "只能下载文件，文件夹请使用打包下载")
@@ -227,7 +228,10 @@ router.get("/download", async (req, res, next) => {
     const name = path.basename(resolved.abs)
     const ext = path.extname(name).slice(1).toLowerCase()
     const extKey = ext || name.toLowerCase()
-    const perms = effectivePerms(req.auth.role)
+    // 必须用 attachContext 算好的 req.perms：它已经把当前小组的收窄算进去了。
+    // 旧实现重新调用 effectivePerms(role) 且漏传 req.group，导致小组关掉
+    // downloadFile/preview 后这里仍然按全局权限放行。
+    const perms = req.perms || effectivePerms(req.auth.role, req.group)
 
     if (!perms.downloadFile) {
       if (!perms.preview || !INLINE_TYPES.has(extKey)) {
@@ -251,19 +255,57 @@ router.get("/download", async (req, res, next) => {
     }
     if (!useInline) info("download", { msg: resolved.rel, ...actor(req) })
     res.sendFile(resolved.abs, { dotfiles: "allow", cacheControl: false }, (err) => {
-      if (err && !res.headersSent) next(err)
+      if (!err) return
+      // 头已发出时不能再走错误中间件（会二次写头）；必须主动销毁连接，
+      // 否则 send 只 emit('error') 而不结束响应，客户端会一直挂到超时。
+      if (res.headersSent) res.destroy()
+      else next(err)
     })
   } catch (err) {
     next(err)
   }
 })
 
-async function collectZipItems(rels, forGuest, req) {
+/**
+ * 打包/统计共用的可见性判定：访客看 guestHiddenPaths，登录用户看小组上下文可见范围
+ * （含 defaultVisibility 与小组黑名单）。递归打包时必须逐层应用，否则被隐藏目录里的
+ * 内容会照样被打进 zip —— /list 看不到、打包却能拿到，可见性就形同虚设。
+ */
+function zipVisibility(req) {
+  const forGuest = req.auth.role === "guest"
+  return {
+    forGuest,
+    visible(rel) {
+      if (!rel) return true
+      if (forGuest && isHiddenFromGuest(rel)) return false
+      return contextVisible(req, rel)
+    },
+  }
+}
+
+/**
+ * 重命名 / 移动之后同步 guestHiddenPaths：命中的条目（等于该路径或位于其内部）都要把
+ * 前缀整体替换成新位置。旧实现只处理「精确等于」的条目，于是重命名父目录后配置里会
+ * 残留旧路径，新位置对访客直接可见 —— 隐藏设置静默失效。
+ */
+async function remapHiddenPaths(fromRel, toRel) {
+  if (!fromRel || samePath(fromRel, toRel)) return
+  const hidden = getConfig().guestHiddenPaths || []
+  if (!hidden.some((h) => isSameOrInside(h, fromRel))) return
+  await saveConfig((draft) => {
+    draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) => {
+      if (!isSameOrInside(h, fromRel)) return h
+      const suffix = h.length > fromRel.length ? h.slice(fromRel.length).replace(/^\/+/, "") : ""
+      return suffix ? joinRel(toRel, suffix) : toRel
+    })
+  })
+}
+
+async function collectZipItems(rels, vis) {
   const items = []
   for (const rel of rels) {
     if (!rel) continue
-    if (!isSoftPath(rel) && forGuest && isHiddenFromGuest(rel)) continue
-    if (req && !contextVisible(req, rel)) continue
+    if (!vis.visible(rel)) continue
     const resolved = resolveAny(rel)
     const stat = await statSafe(resolved.abs)
     if (!stat || stat.isSymbolicLink()) continue
@@ -272,54 +314,48 @@ async function collectZipItems(rels, forGuest, req) {
   return items
 }
 
-async function countZipFilesAndSize(items, forGuest) {
-  let fileCount = 0
-  let totalSize = 0
+/**
+ * 只累加文件数/字节数：与 archiver 的 entries.total 口径一致，
+ * 旧实现把目录也算一个条目，导致进度条永远到不了上限、最后直接跳到 100%。
+ */
+async function scanDirForZip(dirAbs, dirRel, vis, acc) {
+  let dirents
+  try {
+    dirents = await fs.promises.readdir(dirAbs, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const d of dirents) {
+    const abs = path.join(dirAbs, d.name)
+    const entryRel = joinRel(dirRel, d.name)
+    if (!vis.visible(entryRel)) continue
+    const stat = await statSafe(abs)
+    if (!stat || stat.isSymbolicLink()) continue
+    if (stat.isDirectory()) {
+      await scanDirForZip(abs, entryRel, vis, acc)
+    } else if (stat.isFile()) {
+      acc.count += 1
+      acc.bytes += stat.size
+    }
+  }
+}
+
+async function countZipFilesAndSize(items, vis) {
+  const acc = { count: 0, bytes: 0 }
   for (const item of items) {
     if (item.isDir) {
-      const scan = await scanDirForZip(item.abs, forGuest)
-      fileCount += scan.count
-      totalSize += scan.bytes
+      await scanDirForZip(item.abs, item.rel, vis, acc)
     } else {
-      fileCount += 1
-      totalSize += item.size
+      acc.count += 1
+      acc.bytes += item.size
     }
   }
-  return { fileCount, totalSize }
+  return { fileCount: acc.count, totalSize: acc.bytes }
 }
 
-async function scanDirForZip(dirAbs, _forGuest) {
-  let count = 0
-  let bytes = 0
-  const stack = [dirAbs]
-  while (stack.length) {
-    const cur = stack.pop()
-    let dirents
-    try {
-      dirents = await fs.promises.readdir(cur, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const d of dirents) {
-      const abs = path.join(cur, d.name)
-      if (d.isDirectory()) {
-        stack.push(abs)
-        count += 1
-      } else if (d.isFile()) {
-        count += 1
-        try {
-          const st = await statSafe(abs)
-          if (st) bytes += st.size
-        } catch { /* skip */ }
-      }
-    }
-  }
-  return { count, bytes }
-}
-
-async function validateZipLimits(items, forGuest) {
+async function validateZipLimits(items, vis) {
   const limits = zipLimits()
-  const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest)
+  const { fileCount, totalSize } = await countZipFilesAndSize(items, vis)
   if (fileCount > limits.maxFiles) {
     throw httpError(400, `打包文件数 (${fileCount}) 超出限制 (最多 ${limits.maxFiles} 个)`)
   }
@@ -333,21 +369,30 @@ async function validateZipLimits(items, forGuest) {
   }
 }
 
-async function addDirToArchive(archive, dirAbs, dirRel, zipBase, forGuest) {
-  const dirents = await fs.promises.readdir(dirAbs, { withFileTypes: true })
-  if (!dirents.length) archive.append(Buffer.alloc(0), { name: `${zipBase}/.keep` })
+async function addDirToArchive(archive, dirAbs, dirRel, zipBase, vis) {
+  let dirents
+  try {
+    dirents = await fs.promises.readdir(dirAbs, { withFileTypes: true })
+  } catch {
+    dirents = []
+  }
+  let added = 0
   for (const dirent of dirents) {
     const entryRel = joinRel(dirRel, dirent.name)
-    if (forGuest && isHiddenFromGuest(entryRel)) continue
+    if (!vis.visible(entryRel)) continue
     const abs = path.join(dirAbs, dirent.name)
     const stat = await statSafe(abs)
     if (!stat || stat.isSymbolicLink()) continue
     if (stat.isDirectory()) {
-      await addDirToArchive(archive, abs, entryRel, `${zipBase}/${dirent.name}`, forGuest)
+      added += 1
+      await addDirToArchive(archive, abs, entryRel, `${zipBase}/${dirent.name}`, vis)
     } else if (stat.isFile()) {
+      added += 1
       archive.file(abs, { name: `${zipBase}/${dirent.name}` })
     }
   }
+  // 目录为空、或内容全被可见性过滤掉时补一个占位，避免该目录在 zip 里彻底消失
+  if (added === 0) archive.append(Buffer.alloc(0), { name: `${zipBase}/.keep` })
 }
 
 router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, next) => {
@@ -368,10 +413,10 @@ router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, ne
       rels = [normRel(req.query.path)]
     }
 
-    const forGuest = req.auth.role === "guest"
-    const items = await collectZipItems(rels, forGuest, req)
+    const vis = zipVisibility(req)
+    const items = await collectZipItems(rels, vis)
     if (!items.length) throw httpError(404, "没有可下载的内容")
-    await validateZipLimits(items, forGuest)
+    await validateZipLimits(items, vis)
 
     const zipName =
       items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
@@ -405,7 +450,7 @@ router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, ne
         }
       }
       if (item.isDir) {
-        await addDirToArchive(archive, item.abs, item.rel, entryName, forGuest)
+        await addDirToArchive(archive, item.abs, item.rel, entryName, vis)
       } else {
         archive.file(item.abs, { name: entryName })
       }
@@ -435,6 +480,10 @@ router.post("/mkdir", requirePerm("mkdir"), async (req, res, next) => {
   }
 })
 
+// 单次上传请求的文件数上限（busboy 的 files 限制）。超过的部分会被 busboy 直接跳过
+// 且只发一次 filesLimit 事件，因此前端必须按这个值分片，否则文件会静默丢失。
+const MAX_FILES_PER_REQUEST = 100
+
 router.post("/upload", requirePerm("upload"), async (req, res, next) => {
   let destAbs
   let destRel
@@ -463,24 +512,35 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
   const tmpFiles = []
   const results = []
   let responded = false
+  let hitFileLimit = false
 
   const finish = async (aborted) => {
     if (responded) return
     responded = true
     if (aborted) {
-      await Promise.all(tmpFiles.map((t) => fs.promises.rm(t.tmp, { force: true })))
+      await Promise.all(tmpFiles.map((t) => fs.promises.rm(t.tmp, { force: true }).catch(() => {})))
       return
     }
     const saved = []
     for (const item of tmpFiles) {
+      const displayName = item.relDir ? `${item.relDir}/${item.name}` : item.name
       if (item.tooLarge) {
-        const displayName = item.relDir ? `${item.relDir}/${item.name}` : item.name
         results.push({ name: displayName, ok: false, error: `超出大小限制 (${limitMB}MB)` })
-        await fs.promises.rm(item.tmp, { force: true })
+        await fs.promises.rm(item.tmp, { force: true }).catch(() => {})
+        continue
+      }
+      if (item.saveError) {
+        results.push({ name: displayName, ok: false, error: item.saveError })
+        await fs.promises.rm(item.tmp, { force: true }).catch(() => {})
         continue
       }
       try {
-        const shouldOverwrite = overwriteNames.includes(item.name)
+        // 目录按需创建：中断或失败时不会留下空目录树（旧实现一收到文件就 mkdirSync）
+        await fs.promises.mkdir(item.uploadDir, { recursive: true })
+        // overwrite 既支持「文件 basename」（单文件上传），也支持「相对路径」
+        // （文件夹级覆盖 —— 前端把整个目录下每个文件的相对路径都列出来）。
+        const relPath = item.relDir ? `${item.relDir}/${item.name}` : item.name
+        const shouldOverwrite = overwriteNames.includes(item.name) || overwriteNames.includes(relPath)
         let finalName
         if (shouldOverwrite) {
           const targetPath = path.join(item.uploadDir, item.name)
@@ -491,11 +551,12 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
           finalName = await uniqueName(item.uploadDir, item.name)
           await moveEntry(item.tmp, path.join(item.uploadDir, finalName))
         }
-        saved.push(item.relDir ? `${item.relDir}/${finalName}` : finalName)
-        results.push({ name: item.relDir ? `${item.relDir}/${item.name}` : item.name, ok: true, savedAs: item.relDir ? `${item.relDir}/${finalName}` : finalName })
+        const savedRel = item.relDir ? `${item.relDir}/${finalName}` : finalName
+        saved.push(savedRel)
+        results.push({ name: displayName, ok: true, savedAs: savedRel })
       } catch {
-        results.push({ name: item.name, ok: false, error: "保存失败" })
-        await fs.promises.rm(item.tmp, { force: true })
+        results.push({ name: displayName, ok: false, error: "保存失败" })
+        await fs.promises.rm(item.tmp, { force: true }).catch(() => {})
       }
     }
     if (saved.length) {
@@ -505,7 +566,13 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
       })
     }
     const anyTooLarge = results.some((r) => !r.ok && r.error?.includes("超出"))
-    res.status(anyTooLarge && !saved.length ? 413 : 200).json({ results, limitMB })
+    res.status(anyTooLarge && !saved.length ? 413 : 200).json({
+      results,
+      limitMB,
+      // 命中单请求文件数上限；busboy 不告知被跳过的具体数量
+      truncated: hitFileLimit,
+      maxFilesPerRequest: MAX_FILES_PER_REQUEST,
+    })
   }
 
   let bb
@@ -513,7 +580,10 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
     bb = Busboy({
       headers: req.headers,
       defParamCharset: "utf8",
-      limits: { fileSize: limitBytes, files: 100, fields: 10 },
+      // 必须开启：文件夹上传靠 filename 携带的相对路径还原目录结构，
+      // busboy 默认会把它 basename 掉，下面的 dirParts/relDir 就成了死代码。
+      preservePath: true,
+      limits: { fileSize: limitBytes, files: MAX_FILES_PER_REQUEST, fields: 10 },
     })
   } catch {
     return next(httpError(400, "上传请求格式错误"))
@@ -527,11 +597,22 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
     const name = sanitizeFileName(baseName)
     const relDir = dirParts.map((d) => sanitizeFileName(d)).filter(Boolean).join("/")
     const uploadDir = relDir ? path.join(destAbs, relDir) : destAbs
-    fs.mkdirSync(uploadDir, { recursive: true })
     const tmp = path.join(TMP_DIR, `up-${crypto.randomBytes(8).toString("hex")}`)
-    const item = { name, uploadDir, relDir, tmp, tooLarge: false }
+    const item = { name, uploadDir, relDir, tmp, tooLarge: false, saveError: null }
     tmpFiles.push(item)
     const ws = fs.createWriteStream(tmp)
+    let writeFailed = false
+    // 目标流出错（磁盘写满 ENOSPC、权限不足、TMP_DIR 被删）必须在这里吞掉：
+    // pipe 不会自动关闭出错的目标流，未处理的 'error' 事件会升级成未捕获异常并
+    // 直接终止整个进程，局域网内所有人同时断线。
+    ws.on("error", (err) => {
+      writeFailed = true
+      item.saveError = err && err.code === "ENOSPC" ? "服务器磁盘空间不足" : "写入失败"
+      stream.unpipe(ws)
+      ws.destroy()
+      stream.resume()
+      fs.promises.rm(tmp, { force: true }).catch(() => {})
+    })
     stream.on("limit", () => {
       item.tooLarge = true
       stream.unpipe(ws)
@@ -540,24 +621,29 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
       stream.resume()
     })
     const done = new Promise((resolve) => {
+      let settled = false
+      const settle = () => { if (!settled) { settled = true; resolve() } }
       stream.on("end", () => {
-        if (!item.tooLarge) ws.end(resolve)
-        else resolve()
+        if (item.tooLarge || writeFailed) settle()
+        else ws.end(settle)
       })
       stream.on("error", () => {
         ws.destroy()
-        resolve()
+        settle()
       })
+      ws.on("close", settle)
     })
     stream.pipe(ws)
     pending.push(done)
   })
+  bb.on("filesLimit", () => { hitFileLimit = true })
   bb.on("close", async () => {
     await Promise.all(pending)
     finish(false).catch(next)
   })
-  bb.on("error", () => finish(true))
-  req.on("aborted", () => finish(true))
+  // 清理失败不能变成未捕获异常，客户端也不能干等到超时
+  bb.on("error", () => { finish(true).catch(() => {}) })
+  req.on("aborted", () => { finish(true).catch(() => {}) })
   req.pipe(bb)
 })
 
@@ -590,13 +676,7 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
       await fs.promises.rename(abs, target)
     }
     const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""
-    if (isExactHidden(rel)) {
-      await saveConfig((draft) => {
-        draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) =>
-          samePath(h, rel) ? joinRel(parentRel, newName) : h
-        )
-      })
-    }
+    await remapHiddenPaths(rel, joinRel(parentRel, newName))
     info("rename", { msg: `${rel} → ${newName}`, ...actor(req) })
     res.json({ name: newName })
   } catch (err) {
@@ -665,6 +745,12 @@ async function transfer(req, res, next, mode) {
     }
     const overwrite = !!req.body?.overwrite
     const merge = !!req.body?.merge
+    // 冲突处理里选「重命名」时，前端传的是「原始来源路径 + 期望的目标名」。
+    // 旧实现把来源路径直接改成新名字再发过来，服务端 assertExists 必然 404，
+    // 于是「重命名」这个选项 100% 失败，还会留下一半已完成的结果。
+    const rawTargets = req.body?.targetNames
+    const targetNames =
+      rawTargets && typeof rawTargets === "object" && !Array.isArray(rawTargets) ? rawTargets : {}
     const dest = resolveSafe(req.body?.dest)
     blockSoft(dest.rel)
     assertContextVisible(req, dest.rel)
@@ -677,38 +763,40 @@ async function transfer(req, res, next, mode) {
       assertContextVisible(req, src.rel)
       if (!src.rel) throw httpError(400, "非法来源")
       const stat = await assertExists(src.abs)
-      if (
-        stat.isDirectory() &&
-        (dest.rel === src.rel || dest.rel.startsWith(src.rel + "/"))
-      ) {
+      // 用大小写不敏感比较：Windows 上 URL 里的路径大小写常与磁盘不一致，
+      // 裸串比较会漏判，导致「把文件夹复制进它自己」。
+      if (stat.isDirectory() && isSameOrInside(dest.rel, src.rel)) {
         throw httpError(400, "不能将文件夹移动/复制到其自身内部")
       }
+      const srcName = path.basename(src.abs)
+      let wanted = srcName
+      const wantRaw = targetNames[src.rel]
+      if (typeof wantRaw === "string" && wantRaw.trim() && !samePath(wantRaw.trim(), srcName)) {
+        const invalid = validateName(wantRaw.trim())
+        if (invalid) throw httpError(400, invalid)
+        wanted = wantRaw.trim()
+      }
       const srcParent = src.rel.includes("/") ? src.rel.slice(0, src.rel.lastIndexOf("/")) : ""
-      if (mode === "move" && srcParent === dest.rel) {
-        done.push(path.basename(src.abs))
+      // 同目录内移动且没有要求改名 → 空操作（旧实现会生成一个 "x (1)" 副本）
+      if (mode === "move" && samePath(wanted, srcName) && samePath(srcParent, dest.rel)) {
+        done.push(srcName)
         continue
       }
-      const srcName = path.basename(src.abs)
-      const target = path.join(dest.abs, srcName)
+      const target = path.join(dest.abs, wanted)
       const destStat = await statSafe(target)
       if (merge && stat.isDirectory() && destStat && destStat.isDirectory()) {
         await mergeFolder(src.abs, target, mode)
-        done.push(srcName)
+        done.push(wanted)
         continue
       }
       if (overwrite) {
         await fs.promises.rm(target, { recursive: true, force: true })
       }
-      const finalName = overwrite ? srcName : await uniqueName(dest.abs, srcName)
+      const finalName = overwrite ? wanted : await uniqueName(dest.abs, wanted)
       const finalTarget = path.join(dest.abs, finalName)
       if (mode === "copy") await copyEntry(src.abs, finalTarget)
       else await moveEntry(src.abs, finalTarget)
-      if (mode === "move" && isExactHidden(src.rel)) {
-        const newRel = joinRel(dest.rel, finalName)
-        await saveConfig((draft) => {
-          draft.guestHiddenPaths = draft.guestHiddenPaths.map((h) => (samePath(h, src.rel) ? newRel : h))
-        })
-      }
+      if (mode === "move") await remapHiddenPaths(src.rel, joinRel(dest.rel, finalName))
       done.push(finalName)
     }
     info(mode, { msg: `${done.join(", ")} → ${dest.rel || "/"}`, ...actor(req) })
@@ -775,6 +863,8 @@ router.post(
     try {
       const { abs, rel } = resolveSafe(req.body?.path)
       if (!rel) throw httpError(400, "不能隐藏根目录")
+      // 小组可见范围之外的目录不该被设置访客隐藏标记：与其它写端点保持一致
+      assertContextVisible(req, rel)
       const stat = await assertExists(abs)
       if (!stat.isDirectory()) throw httpError(400, "只能对文件夹设置访客可见性")
       const hidden = !!req.body?.hidden
@@ -793,12 +883,16 @@ router.post(
   }
 )
 
-async function runCompressJob(job, items, paths, destAbs, req) {
+async function runCompressJob(job, items, paths, destAbs, req, vis) {
   const outName = items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
   const finalName = await uniqueName(destAbs, outName)
   const outFile = path.join(destAbs, finalName)
   const ws = fs.createWriteStream(outFile)
   const archive = archiver("zip", { zlib: { level: 5 } })
+  // 失败标志：任一流的 error 都会让 finished 提前 resolve，旧实现因此仍然调用
+  // finishJob({state:"done"})，前端提示「压缩完成」却留下损坏/0 字节的 zip。
+  let failure = null
+  const markFailure = (err) => { if (!failure) failure = err || new Error("压缩失败") }
   archive.on("progress", (p) => {
     patchJob(job.id, {
       processed: p.entries.processed,
@@ -806,8 +900,8 @@ async function runCompressJob(job, items, paths, destAbs, req) {
       percent: p.entries.total ? Math.min(99, Math.round((p.entries.processed / p.entries.total) * 100)) : 0,
     })
   })
-  archive.on("error", (err) => failJob(job.id, err))
-  ws.on("error", (err) => failJob(job.id, err))
+  archive.on("error", (err) => { markFailure(err); failJob(job.id, err) })
+  ws.on("error", (err) => { markFailure(err); failJob(job.id, err) })
   const finished = new Promise((resolve) => {
     ws.on("close", resolve)
     archive.on("error", resolve)
@@ -833,13 +927,20 @@ async function runCompressJob(job, items, paths, destAbs, req) {
       }
     }
     if (item.isDir) {
-      await addDirToArchive(archive, item.abs, item.rel, entryName, req.auth.role === "guest")
+      await addDirToArchive(archive, item.abs, item.rel, entryName, vis)
     } else {
       archive.file(item.abs, { name: entryName })
     }
   }
-  await archive.finalize().catch((err) => failJob(job.id, err))
+  await archive.finalize().catch((err) => { markFailure(err); failJob(job.id, err) })
   await finished
+  if (failure) {
+    // 删掉半成品：目标目录里不该出现一个打不开的 zip
+    await ws.destroy()
+    await fs.promises.rm(outFile, { force: true }).catch(() => {})
+    failJob(job.id, failure)
+    return
+  }
   try {
     finishJob(job.id, { state: "done" })
     info("compress", { msg: `${joinRel(paths[0] ? path.dirname(paths[0]) : "", finalName)}`, ...actor(req) })
@@ -859,18 +960,18 @@ router.post("/compress", requirePerm("compressZip"), rateLimit, async (req, res,
     blockSoft(dest.rel)
     assertContextVisible(req, dest.rel)
     await assertDir(dest.abs)
-    const forGuest = req.auth.role === "guest"
+    const vis = zipVisibility(req)
     const sourceRels = paths.map((p) => normRel(p))
     for (const rel of sourceRels) blockSoftCopyOut(rel)
-    const items = await collectZipItems(sourceRels, forGuest, req)
+    const items = await collectZipItems(sourceRels, vis)
     if (!items.length) throw httpError(404, "没有可压缩的内容")
-    await validateZipLimits(items, forGuest)
-    const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest)
+    await validateZipLimits(items, vis)
+    const { fileCount, totalSize } = await countZipFilesAndSize(items, vis)
     const label = items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
     const job = createJob("compress", { label, total: fileCount, totalBytes: totalSize })
     job.createdBy = req.auth.username || "guest"
     res.json({ jobId: job.id })
-    void runCompressJob(job, items, paths, dest.abs, req).catch((err) => { failJob(job.id, err) })
+    void runCompressJob(job, items, paths, dest.abs, req, vis).catch((err) => { failJob(job.id, err) })
   } catch (err) { next(err) }
 })
 
@@ -988,22 +1089,47 @@ router.get("/extract/status", requirePerm("extractZip"), (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+/**
+ * 在线编辑单次可提交的最大正文（字节）。index.js 用它给 /api/fs/save-file
+ * 单独放宽 express.json 的 limit —— 其余接口仍然保持 1MB。
+ */
+export const SAVE_FILE_MAX_BYTES = 16 * 1024 * 1024
+
 router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
+  let tmp = null
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
     assertContextVisible(req, rel)
     if (!rel) throw httpError(400, "非法路径")
-    const content = String(req.body?.content || "")
-    await fs.promises.writeFile(abs, content, "utf8")
+    const content = String(req.body?.content ?? "")
+    const bytes = Buffer.byteLength(content, "utf8")
+    if (bytes > SAVE_FILE_MAX_BYTES) {
+      throw httpError(413, `内容过大（${Math.round(bytes / 1024 / 1024)}MB），在线编辑上限 ${SAVE_FILE_MAX_BYTES / 1024 / 1024}MB`)
+    }
+    // 原子替换：先写同目录临时文件再 rename。直接 writeFile 到目标时，
+    // 写盘中断（进程被杀/断电/磁盘满）会把原文件截断成半个。
+    tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.${process.pid}.${Date.now()}.tmp`)
+    await fs.promises.writeFile(tmp, content, "utf8")
+    try {
+      await fs.promises.rename(tmp, abs)
+    } catch {
+      // Windows 上 rename 覆盖已存在文件可能失败，退化为先删目标再改名
+      await fs.promises.rm(abs, { force: true })
+      await fs.promises.rename(tmp, abs)
+    }
+    tmp = null
     info("save_file", { msg: rel, ...actor(req) })
     res.json({ ok: true })
   } catch (err) {
     next(err)
+  } finally {
+    if (tmp) await fs.promises.rm(tmp, { force: true }).catch(() => {})
   }
 })
 
-// ============ 多线程下载器 ============
+// ============ 链接下载器（download-url）============
+// 单流顺序下载 + 逐跳重新校验重定向目标（不是多线程分段下载）。
 // 出站目标校验（DNS 解析 + 地址段判断）与"固定已校验 IP"的连接方式都在
 // netguard.js 中实现，详见该文件头部说明。
 const DOWNLOAD_TIMEOUT_MS = 60000

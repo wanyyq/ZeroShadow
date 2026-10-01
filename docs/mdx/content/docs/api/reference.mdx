@@ -8,7 +8,8 @@ ZeroShadow 的服务端是一套纯 JSON + 文件流的 HTTP 接口，前端只�
 你可以用同一套接口写脚本、做自动化、接自己的客户端。
 
 <Callout type="info" title="对照源码阅读">
-路由在 `server/src/routes/`（`auth.js` / `fs.js` / `admin.js`），中间件与静态托管在 `server/index.js`。
+路由在 `server/src/routes/`（`auth.js` / `fs.js` / `admin.js` / `avatars.js` / `todos.js` / `groups.js`），
+请求上下文（小组与有效权限）在 `server/src/context.js`，中间件与静态托管在 `server/index.js`。
 权限点的完整矩阵见 [权限与角色](/docs/zeroshadow/guide/permissions)，行为约束与资源上限见 [安全设计](/docs/zeroshadow/security/design)。
 </Callout>
 
@@ -35,6 +36,23 @@ Set-Cookie: zs_token=<JWT>; Max-Age=...; Path=/; HttpOnly; SameSite=Lax
 角色判定完全由服务端从 Cookie 推导，客户端无法自称身份。
 
 未登录时一律是**访客**（`guest`）身份。
+
+### 小组上下文（可选）
+
+登录**成员**可以在顶栏选择一个小组成员身份，用它把权限与可见范围**收窄**。接口侧只有两种传法：
+
+| 传法 | 适用场景 |
+|:--|:--|
+| 请求头 `X-ZS-Group: <小组 id>` | 普通 `fetch` 请求（含 `/api/fs/upload` 的 XHR 上传） |
+| 查询参数 `?group=<小组 id>` | `<img>` / `<video>` / 直接下载这类**无法自定义请求头**的请求 |
+
+规则：
+
+- 传了不存在的小组、或调用者不属于该小组（访客、超管之外的非本组成员）时，服务端**静默回退到默认上下文**，不会报错——
+  避免泄露小组结构；
+- 超管可以传任意小组 id；
+- 小组权限与全局 `memberPerms` **逐项取与**：小组只能让权限变少，永远不能变多；
+- 回退或未指定时，`GET /api/auth/me` 的 `groupId` 是 `"default"`、`group` 是 `null`。
 
 ### 必须带的请求头（CSRF）
 
@@ -66,11 +84,17 @@ X-Requested-With: XMLHttpRequest
 | 400 | 参数或路径非法（含路径穿越、体积超限、URL 不合法） |
 | 401 | 访客尝试执行需要登录的操作 → `{"error":"请先登录"}` |
 | 403 | 已登录但权限不足 → `{"error":"没有权限执行此操作"}`；CSRF 失败 → `请求校验失败` |
-| 404 | 目标不存在；或访客访问了对其隐藏的路径（故意用 404 而不是 403） |
+| 404 | 目标不存在；访客访问了对其隐藏的路径、或成员访问了**当前小组不可见**的路径（都故意用 404 而不是 403） |
 | 409 | 已存在同名文件或文件夹 |
-| 413 | 上传体积超出限制 |
+| 413 | 上传体积超出限制，或在线编辑正文超过 16MB |
 | 429 | 被限流或账户被临时锁定（带 `Retry-After` 头时会给出建议等待秒数） |
 | 500 | 服务器内部错误（详情只进服务端日志） |
+
+<Callout type="info" title="单个请求的意外异常不会拖垮服务">
+`server/index.js` 注册了进程级的 `unhandledRejection` / `uncaughtException` 兜底，
+只把异常写进日志（事件名分别是 `unhandled_rejection` / `uncaught_exception`）而**不退出进程**——
+本项目没有 Docker / pm2 之类的进程管理，退出就等于局域网内所有人同时断线。
+</Callout>
 
 ### 路径参数的写法
 
@@ -86,7 +110,11 @@ X-Requested-With: XMLHttpRequest
 
 正文里出现形如 `/api/fs/compress/status?job=<jobId>` 的写法时，`<jobId>` 是占位符，
 实际值取自 `/api/fs/compress`、`/api/fs/extract`、`/api/fs/download-url` 返回的 `jobId` 字段。
-同理 `/api/admin/members/:id`、`/api/admin/members/:id/password` 里的 `:id` 是成员 id（`uuid`）。
+同理：
+
+- `/api/admin/members/:id`、`/api/admin/members/:id/password` 里的 `:id` 是成员 id（`uuid`）；
+- `/api/admin/groups/:id`、`/api/groups/:id` 里的 `:id` 是小组 id（`uuid`）；
+- `/api/avatars/:owner` 里的 `:owner` 是头像标识：成员是 `u-<userId>`，超管是 `_superadmin`。
 
 ### 权限点名称
 
@@ -118,6 +146,13 @@ X-Requested-With: XMLHttpRequest
 | `manageGuestVisibility` | 管理访客可见性 | |
 | `changePassword` | 修改密码 | 超管走 `.env` |
 
+<Callout type="info" title="成员的实际权限还可能被小组收窄">
+`memberPerms` 只是**全局上限**。成员带小组上下文请求时，实际生效的是
+`effectivePerms(role, group)`：把上表与所选小组的 `perms` 逐项取与。
+所以"全局开着"不等于"这个成员现在就能用"；反过来，小组里关掉的项一定会被拒绝。
+超管不受小组限制，权限固定全开。
+</Callout>
+
 ---
 
 ## 基础接口
@@ -146,7 +181,7 @@ X-Requested-With: XMLHttpRequest
 <Callout type="info" title="version 是写死的，改版本号要动三处">
 `version` 与根 `package.json` 一致，但它是**写死**在代码里的，并没有从 `package.json` 读取。
 发版时三处必须同步修改：根 `package.json`、`server/index.js` 里的 `/api/meta`、
-以及「关于」页的 `web/src/pages/about-page.tsx`（`VERSION` 常量）。
+以及「软件开源信息」页的 `web/src/pages/about-page.tsx`（`VERSION` 常量）。
 </Callout>
 
 ---
@@ -158,7 +193,8 @@ X-Requested-With: XMLHttpRequest
 | `POST` | `/api/auth/login` | 无（未登录即可调用） | 登录，成功后下发 Cookie |
 | `POST` | `/api/auth/change-password` | 修改密码（`memberPerms.changePassword`） | 成员修改自己的密码 |
 | `POST` | `/api/auth/logout` | 已登录 | 登出并清除 Cookie |
-| `GET` | `/api/auth/me` | 无（未登录返回访客身份） | 查询当前身份与权限 |
+| `GET` | `/api/auth/me` | 无（未登录返回访客身份） | 查询当前身份、权限与小组上下文 |
+| `GET` | `/api/auth/groups` | 无（未登录返回空列表） | 当前可切换的小组列表 |
 
 ### POST /api/auth/login
 
@@ -223,7 +259,7 @@ X-Requested-With: XMLHttpRequest
 
 ### GET /api/auth/me
 
-获取当前身份与权限。前端每 30 秒轮询一次。
+获取当前身份、权限与小组上下文。前端每 30 秒轮询一次。
 
 - 认证：无（未登录返回访客身份）
 - 响应：
@@ -232,6 +268,7 @@ X-Requested-With: XMLHttpRequest
 {
   "role": "member",
   "username": "alice",
+  "userId": "0f2c…",
   "perms": {
     "fileWrite": true, "browse": true, "upload": true, "uploadFolders": true,
     "downloadFile": true, "downloadFolder": true, "preview": true,
@@ -240,15 +277,40 @@ X-Requested-With: XMLHttpRequest
     "editFiles": true, "compressZip": true, "extractZip": true,
     "downloadUrl": true, "changePassword": true
   },
-  "uploadLimitMB": 512
+  "uploadLimitMB": 512,
+  "groupId": "default",
+  "group": null
 }
 ```
 
-访问者未登录时 `role` 为 `guest`、`username` 为 `null`、`uploadLimitMB` 为 `0`。
+访问者未登录时 `role` 为 `guest`、`username` 为 `null`、`userId` 为 `null`、`uploadLimitMB` 为 `0`。
+
+`perms` 是**已经算进小组收窄**的结果；带小组请求时 `groupId` 是小组 id、`group` 是
+`{ id, name, color, leaders }`（只含公开字段），回退到默认上下文时分别是 `"default"` 与 `null`。
+
+### GET /api/auth/groups
+
+当前用户可以切换的小组（顶栏小组选择器的数据源）。
+
+- 认证：无
+- 响应：
+
+```json
+{
+  "groups": [
+    { "id": "…", "name": "设计组", "color": "#5b8def", "leaders": ["成员 id"] }
+  ]
+}
+```
+
+- 超管返回**全部**小组；成员只返回自己所属的小组；访客是 `{ "groups": [] }`。
+- 只回传公开字段，不含成员名单与权限细节；要读完整小组结构需要管理接口。
 
 ---
 
 ## 文件操作（`/api/fs`）
+
+`/api/fs/*` 这一组负责文件与目录：列目录、上传下载、打包压缩、在线编辑与链接下载。
 
 | 方法 | 路径 | 所需权限 | 作用 |
 |:--|:--|:--|:--|
@@ -320,6 +382,9 @@ X-Requested-With: XMLHttpRequest
 
 - 响应：文件流。响应头包含 `Content-Type`、`Content-Disposition`（同时给 `filename` 与 UTF-8 的 `filename*`）、`Cache-Control: no-store`；
   内联返回 `.html` / `.htm` / `.svg` 时会额外带上 `Content-Security-Policy: sandbox allow-scripts`。
+- 权限判定用的是**当前小组收窄后**的权限（`req.perms`），所以小组关掉 `downloadFile` / `preview` 后这里一样会被拦；
+- 「对访客隐藏」的检查**同时覆盖只读映射目录**：访客即使猜到隐藏软目录里的完整文件名，也会得到 `404 文件不存在`；
+- 路径落在当前小组可见范围之外时同样返回 `404 文件不存在`。
 - 错误：`400 只能下载文件，文件夹请使用打包下载`、`403 没有权限下载文件`、`404 文件不存在`
 
 <Callout type="info" title="单文件下载不记日志、不限流">
@@ -342,8 +407,9 @@ X-Requested-With: XMLHttpRequest
 - 响应：`application/zip` 流，文件名规则：
   - 单项目：`<名字>.zip`
   - 多项目：`ZeroShadow-<YYYY-MM-DD>.zip`
-- 行为细节：跳过符号链接；访客包内会跳过对其隐藏的内容；空目录会补一个 `.keep`；
-  重名条目用路径（`/`→`_`）区分，仍重名则加 `_2`、`_3`…
+- 行为细节：跳过符号链接；**访客对其隐藏的目录、成员当前小组不可见的目录，都会被递归跳过**
+  （不只是顶层：隐藏目录里的子目录与文件同样不会进包，`/list` 看不到的东西打包也拿不到）；
+  空目录会补一个 `.keep`；重名条目用路径（`/`→`_`）区分，仍重名则加 `_2`、`_3`…
 - 错误：`400 参数格式错误`、`400` 体积/条目数超限的具体说明、`404 没有可下载的内容`
 
 ### POST /api/fs/mkdir
@@ -361,11 +427,15 @@ X-Requested-With: XMLHttpRequest
 | 参数 | 说明 |
 |:--|:--|
 | `path` | 目标目录 |
-| `overwrite` | JSON 数组字符串，列出要**覆盖**的文件名，例如 `["a.txt"]`；不在列表里的同名文件会自动改名 |
+| `overwrite` | JSON 数组字符串，列出要**覆盖**的条目，例如 `["a.txt","素材/logo.png"]`。**每一项既可以是文件 basename，也可以是相对目标目录的路径**；不在列表里的同名文件会自动改名成 `名字 (1).ext` |
 
 - 请求体：`multipart/form-data`，文件字段名 **`files`**（可重复）。
-  文件名里若带 `/`（浏览器上传文件夹时会这样），会被当作相对子目录，服务端自动建目录。
-- 限制：单个文件 ≤ `uploadLimitMB(role)`；单次请求 ≤ **100** 个文件、≤ 10 个非文件字段
+- **文件夹上传会保留目录结构**：服务端解析 multipart 时开启了 `preservePath`，
+  文件名里携带的相对路径（形如 `dir/sub/file.txt`）会被逐层还原成真实子目录并按需创建。
+  路径段同样会过文件名清洗；响应里每一项的 `name` / `savedAs` 都带相对路径。
+- 限制：单个文件 ≤ `uploadLimitMB(role)`；单次请求 ≤ **100** 个文件（`MAX_FILES_PER_REQUEST`）、≤ 10 个非文件字段。
+- **超过 100 个文件必须分批**：busboy 命中 `files` 上限后会**跳过**超出的部分，
+  且只发一次 `filesLimit` 事件（不告知被跳过的数量），所以响应里的 `truncated` 只是一个布尔标记。
 
 <Callout type="warn" title="uploadFolders 只在前端生效">
 服务端只校验 `upload`，「上传文件夹」对应的 `uploadFolders` 开关**目前只在前端生效**（界面会把按钮置灰），
@@ -378,13 +448,32 @@ X-Requested-With: XMLHttpRequest
 {
   "results": [
     { "name": "a.txt", "ok": true, "savedAs": "a.txt" },
-    { "name": "b.txt", "ok": false, "error": "超出大小限制 (512MB)" }
+    { "name": "assets/logo.png", "ok": true, "savedAs": "assets/logo.png" },
+    { "name": "c.txt", "ok": false, "error": "超出大小限制 (NMB)" }
   ],
-  "limitMB": 512
+  "limitMB": 512,
+  "truncated": false,
+  "maxFilesPerRequest": 100
 }
 ```
 
+| 响应字段 | 说明 |
+|:--|:--|
+| `results[].name` | 提交时的名字；文件夹上传时是**相对路径**（如 `assets/logo.png`） |
+| `results[].savedAs` | 实际落盘的相对路径（被自动改名时与 `name` 不同） |
+| `results[].ok` | 该文件是否成功 |
+| `results[].error` | 失败原因（超限时形如 `超出大小限制 (NMB)`，例如成员默认上限下是 `超出大小限制 (512MB)`；还可能是「保存失败」「服务器磁盘空间不足」）。临时文件写入失败（例如磁盘写满、`ENOSPC`）只让**这一个文件**失败（`ok: false` + 原因），不会影响整批 |
+| `limitMB` | 当前角色的单文件上限（MB） |
+| `truncated` | 本次是否**命中过**单请求文件数上限（有文件被跳过） |
+| `maxFilesPerRequest` | 服务端的单请求文件数上限，当前是 `100` |
+
 - 状态码：只要**全部**失败且原因是超限时返回 **413**，否则 200。
+
+<Callout type="info" title="客户端已经替你分批">
+Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依次上传，并把各批的 `results` 合并后
+只弹一条提示（部分失败时形如「已上传 N 个，M 个失败」）。
+自己写脚本时请照做：看到 `truncated: true` 就说明这一批超了，被丢弃的部分要重新补传。
+</Callout>
 
 ### POST /api/fs/rename
 
@@ -393,7 +482,8 @@ X-Requested-With: XMLHttpRequest
   （`overwrite` / `merge` 仅在目标已存在时才有意义，`merge` 要求双方都是目录）
 - 响应：`{ "name": "新名.txt" }`
 - 错误：`400 非法路径` / 名称校验说明、`404 文件或目录不存在`、`409 已存在同名文件或文件夹`
-- 副作用：若被重命名的路径正好是"对访客隐藏"的记录，记录会跟着更新。
+- 副作用：隐藏记录会**整体重映射**——被重命名的路径本身，以及隐藏列表里所有"位于它之内"的条目，
+  前缀都会被替换成新路径，所以重命名父目录后子目录仍然保持隐藏。
 
 ### POST /api/fs/delete
 
@@ -411,20 +501,36 @@ X-Requested-With: XMLHttpRequest
 - 请求体：
 
 ```json
-{ "sources": ["a.txt", "目录"], "dest": "归档", "overwrite": false, "merge": false }
+{
+  "sources": ["a.txt", "目录"],
+  "dest": "归档",
+  "overwrite": false,
+  "merge": false,
+  "targetNames": { "a/b.txt": "b (1).txt" }
+}
 ```
 
-- 响应：`{ "done": 2 }`
+| 字段 | 说明 |
+|:--|:--|
+| `sources` | 来源相对路径数组，最多 **500** 项 |
+| `dest` | 目标目录 |
+| `overwrite` | 目标已存在同名项时是否直接覆盖 |
+| `merge` | 源与目标**都是目录**时逐层合并（同名文件以源为准） |
+| `targetNames` | **可选**。对象，键是**来源相对路径**，值是**期望的目标名**，例如 `{"a/b.txt":"b (1).txt"}`。用于冲突处理里选「重命名」时：把"原始来源 + 新名字"直接告诉服务端，而不是把来源路径改成新名字（那样源文件根本不存在）。值为空串、或与原名等价时按不改名处理 |
+
+- 响应：`{ "done": 2 }`（成功处理的条目数）
 - 规则：
   - `sources` 最多 **500** 项；
   - 不能把目录复制/移动进它自己内部 → `400 不能将文件夹移动/复制到其自身内部`；
   - `merge` 仅当源与目标都是目录时生效，逐层合并，**同名文件以源为准**；
-  - `move` 时如果源已经在目标目录里（父目录相同），视为已完成，不报错；
+  - `move` 时如果源已经在目标目录里（父目录相同）且没有要求改名，视为已完成，不报错；
   - **`move` 的来源在只读映射目录里 → 403**；
   - **`copy` 的来源在只读映射目录里、且 `softDirAllowCopyOut` 为假 → 403**
     （`只读映射目录的内容不允许复制到网盘目录（可在后台设置中放开）`）；
-  - 目标本身在映射目录里 → 403 只读。
-- 副作用：`move` 时若源路径命中访客隐藏记录，记录会更新为新路径。
+  - 目标本身在映射目录里 → 403 只读；
+  - 来源或目标落在当前小组可见范围之外 → `404 文件或目录不存在`；
+  - `targetNames` 里的新名字同样要过名称校验（非法时 `400` 并给出原因）。
+- 副作用：`move` 时命中访客隐藏记录的路径会**连同整棵子树**重映射到新位置。
 
 ### GET /api/fs/stat
 
@@ -476,6 +582,8 @@ X-Requested-With: XMLHttpRequest
 - 权限：管理访客可见性（`memberPerms.manageGuestVisibility`）
 - 请求体：`{ "path": "内部资料", "hidden": true }`
 - 响应：`{ "path": "内部资料", "hidden": true }`
+- 规则：目标必须落在调用者**当前小组的可见范围**内——范围之外的路径会被当成不存在，
+  与其它写端点保持一致（不是"看不见却改得动"）。
 - 错误：`400 不能隐藏根目录`、`400 只能对文件夹设置访客可见性`、`404 文件或目录不存在`
 
 ### POST /api/fs/compress
@@ -489,6 +597,11 @@ X-Requested-With: XMLHttpRequest
 - 响应：`{ "jobId": "1f2e3d..." }`
 - 限制与 `/api/fs/zip` 相同（条目数 / 单文件 / 总量）；
   只读映射目录的**内容**同样受 `softDirAllowCopyOut` 限制，目标目录也不能是映射目录。
+- **可见性是递归生效的**：与打包下载共用同一套判定——访客对 `guestHiddenPaths` 命中的目录、
+  成员对当前小组不可见的目录，其**子目录与文件**都不会进包，也不会被统计；
+- 进度统计**只数文件**（目录不计入条目数），所以百分比与最终条目数一致；
+- **失败的压缩不会留下垃圾**：一旦写出过程中出错，任务状态是 `state: "error"`（带失败原因），
+  同时会把已经写出的那个 `.zip` **删掉**，而不是留下一个打不开的压缩包。
 
 ### GET /api/fs/compress/status
 
@@ -530,9 +643,14 @@ X-Requested-With: XMLHttpRequest
 - 权限：在线编辑文件（`memberPerms.editFiles` / `guestPerms.editFiles`）
 - 请求体：`{ "path": "notes.md", "content": "……" }`
 - 响应：`{ "ok": true }`
-- 说明：以 UTF-8 写入；`content` 省略时写入空字符串；
-  受 `express.json` 的 **1 MB** 请求体上限约束（超限返回 413）；
-  不能写入只读映射目录（403）。
+- 说明：以 UTF-8 写入；`content` 省略时写入空字符串。
+- **请求体上限单独放宽到 16 MB**：`server/index.js` 给这个端点挂了
+  `express.json({ limit: SAVE_FILE_MAX_BYTES })`（`16 * 1024 * 1024`，定义在 `server/src/routes/fs.js`），
+  **其余接口仍然是 1 MB**。超过上限返回 **413**，文案是 `内容过大（NMB），在线编辑上限 16MB`。
+- **写入是原子替换**：先在同目录写临时文件，成功后再 `rename` 覆盖目标，
+  所以进程被杀 / 断电 / 磁盘写满都不会把原文件截断成半个（Windows 上 `rename` 覆盖失败时
+  退化为"先删目标再改名"）；任何一步失败都会清理临时文件。
+- 不能写入只读映射目录（403）；路径落在当前小组可见范围之外返回 `404 文件或目录不存在`。
 - 这也是创建 `.zeropath` 快捷方式的底层接口。
 
 ### POST /api/fs/download-url
@@ -592,8 +710,18 @@ X-Requested-With: XMLHttpRequest
 | `POST` | `/api/admin/members/batch` | 仅超级管理员 | 批量启用 / 禁用 / 删除 |
 | `POST` | `/api/admin/members/:id/password` | 仅超级管理员 | 重置某个成员的密码 |
 | `PATCH` | `/api/admin/members/:id` | 仅超级管理员 | 修改成员用户名 |
-| `GET` | `/api/admin/logs` | 仅超级管理员 | 查询日志 |
+| `GET` | `/api/admin/groups` | 仅超级管理员 | 小组列表 + 组长能力清单 + 成员名单 |
+| `POST` | `/api/admin/groups` | 仅超级管理员 | 新建小组 |
+| `PATCH` | `/api/admin/groups/:id` | 仅超级管理员 | 更新小组（名称 / 颜色 / 权限 / 可见范围 / 组长能力 / 成员） |
+| `POST` | `/api/admin/groups/:id/members` | 仅超级管理员 | 增加或移除小组成员 |
+| `DELETE` | `/api/admin/groups/:id` | 仅超级管理员 | 删除小组（该组待办转为全体可见） |
+| `GET` | `/api/admin/logs` | 仅超级管理员 | 查询日志（可按天、级别、审计、关键词） |
 | `DELETE` | `/api/admin/logs` | 仅超级管理员 | 清空所有日志文件 |
+| `GET` | `/api/admin/metrics` | 仅超级管理员 | 系统指标与请求指标 |
+| `GET` | `/api/admin/metrics/history` | 仅超级管理员 | 读取某一天的指标样本 |
+| `GET` | `/api/admin/backups` | 仅超级管理员 | 列出四个受管文件的备份 |
+| `POST` | `/api/admin/backups` | 仅超级管理员 | 立即创建一次快照 |
+| `POST` | `/api/admin/backups/restore` | 仅超级管理员 | 用某份快照回滚某个文件 |
 | `GET` | `/api/admin/status` | 仅超级管理员 | 服务器状态 |
 | `GET` | `/api/admin/tunnel` | 仅超级管理员 | 读取隧道配置与状态 |
 | `POST` | `/api/admin/tunnel` | 仅超级管理员 | 更新隧道配置并立即生效 |
@@ -617,14 +745,22 @@ X-Requested-With: XMLHttpRequest
 }
 ```
 
-- 可更新字段：
-  - 数值（必须是 1–1048576 的**整数**，否则 400）：`superUploadLimitMB`、`memberUploadLimitMB`、
+- 可更新字段（白名单，未列出的字段会被**忽略**）：
+  - 数值（必须是整数，且在各字段的上下限内，越界返回 400）：`superUploadLimitMB`、`memberUploadLimitMB`、
     `zipMaxFiles`、`zipMaxSingleMB`、`zipMaxTotalMB`、`extractMaxZipMB`、`extractMaxTotalMB`、
-    `downloadUrlMaxMB`、`rateLimitPerMin`
-  - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、`csrfOriginCheck`
+    `downloadUrlMaxMB`、`rateLimitPerMin`、`avatarMaxKB`、`backupKeep`、`logRetentionDays`、
+    `metricsRetentionDays`、`metricsMemMinutes`、`slowRequestMs`
+  - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、
+    `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`
   - 对象：`memberPerms`、`guestPerms`（只覆盖传入的键，值统一按布尔处理）
-- 未在此白名单里的字段（例如 `guestHiddenPaths`、`tunnel`）**无法通过这个接口改**，会被忽略。
-- 错误：`400 数值需为 1-1048576 之间的整数`、`400 参数格式错误`
+  - 对象：`defaultVisibility`——传 `{ "whitelist": [...], "blacklist": [...] }` **整体替换**
+    （只认 `whitelist` / `blacklist` 两个数组；内部会清洗、去重，每份最多 200 条）
+- 各数值字段的上下限见 [配置参考](/docs/zeroshadow/admin/configuration) 的「数值类字段」表。
+- 未在此白名单里的字段（`guestHiddenPaths`、`tunnel`）**无法通过这个接口改**：
+  前者走 `/api/fs/guest-visibility` 与 `DELETE /api/admin/hidden-paths`，后者走 `/api/admin/tunnel`。
+- 错误：字段级错误形如 `400 <字段名> 需为 <最小值>-<最大值> 之间的整数`
+  （例如 `400 logRetentionDays 需为 1-3650 之间的整数`、`400 avatarMaxKB 需为 1-10240 之间的整数`）；
+  结构错误是 `400 defaultVisibility 参数格式错误`、`400 参数格式错误`
 
 ### DELETE /api/admin/hidden-paths
 
@@ -687,6 +823,64 @@ X-Requested-With: XMLHttpRequest
 - 错误：`400 用户名需为 2-32 位字母、数字、_ . -`、`400 该用户名已被超级管理员占用`、
   `400 用户名已存在`、`404 用户不存在`
 
+### GET /api/admin/groups
+
+管理员视角的小组列表。
+
+- 响应：
+
+```json
+{
+  "groups": [
+    {
+      "id": "…", "name": "设计组", "color": "#5b8def",
+      "members": ["成员 id"], "leaders": ["成员 id"],
+      "perms": { "fileWrite": true, "upload": true, "downloadFile": false },
+      "whitelist": ["项目A"], "blacklist": ["机密"],
+      "leaderCaps": { "viewMembers": true, "manageTodo": true, "editMemberAvatar": false, "manageMembers": false },
+      "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "leaderCaps": ["viewMembers", "manageTodo", "editMemberAvatar", "manageMembers"],
+  "members": [ { "id": "…", "username": "alice", "disabled": false, "createdAt": "…" } ]
+}
+```
+
+`leaderCaps` 顶层字段是**可用能力清单**（给界面渲染开关用），每个小组里的 `leaderCaps` 才是实际取值。
+
+### POST /api/admin/groups
+
+新建小组。
+
+- 请求体：`{ "name": "设计组", "color": "#5b8def", "members": [], "leaders": [], "perms": {}, "whitelist": [], "blacklist": [], "leaderCaps": {} }`
+  （字段都可选；`perms` 未给的键默认 `true`）
+- 响应：`{ "group": { …完整小组对象… } }`
+- 错误：`400 名称不能为空`、`400 名称仅支持中英文、数字、空格与 _ . -（1-40 位）`、
+  `400 小组名称已存在`（不区分大小写）、`400 小组数量已达上限 200`
+
+### PATCH /api/admin/groups/:id
+
+部分更新一个小组。`name` / `color` / `perms` / `whitelist` / `blacklist` / `leaderCaps` /
+`members` / `leaders` 都可以单独传。
+
+- 响应：`{ "group": { …完整小组对象… } }`
+- 说明：`perms` 是与现有值**合并**（只覆盖传入的键）；`members` 是**整体覆盖**；
+  被移出小组的人会自动卸任组长；颜色只接受 `#rrggbb` 形式，非法值忽略。
+- 组长自助那条 `PATCH /api/groups/:id` 只能改 `whitelist` / `blacklist`；
+  这里的 `PATCH /api/admin/groups/:id` 能改全部字段。
+- 错误：`404 小组不存在`、`400 小组名称已存在`、名称校验错误同上
+
+### POST /api/admin/groups/:id/members
+
+- 请求体：`{ "ids": ["uuid"], "action": "add" | "remove" }`
+- 响应：`{ "group": { … } }`
+- 错误：`404 小组不存在`、`400 参数格式错误`（`ids` 不是数组）
+
+### DELETE /api/admin/groups/:id
+
+- 响应：`{ "ok": true }`
+- 副作用：该小组的待办**转为全体可见**（不是删除），成员与可见范围一并消失。
+
 ### GET /api/admin/logs
 
 查询日志。
@@ -695,23 +889,100 @@ X-Requested-With: XMLHttpRequest
 
 | 参数 | 默认 | 说明 |
 |:--|:--|:--|
-| `limit` | 200 | 1–1000，超出会被夹取 |
+| `limit` | 200 | 1–2000，超出会被夹取 |
 | `level` | 空（全部） | `info` / `warn` / `error` |
 | `q` | 空 | 在事件名、详情、用户名、IP、角色里做子串匹配（不区分大小写） |
+| `days` | 5 | 读取最近几天的日志文件，1–90，超出会被夹取 |
+| `audit` | 空 | 传 `1` 或 `true` 时只返回**审计事件**（登录、权限、配置这类动作） |
+| `stats` | 空 | 传 `0` 或 `false` 时**不返回** `stats` 对象，响应只有 `{ logs }` |
 
-- 响应：
+- 响应（默认带统计）：
 
 ```json
-{ "logs": [ { "t": "2026-01-01T12:00:00", "lvl": "info", "ev": "login_success", "msg": "", "user": "alice", "role": "member", "ip": "192.168.1.5" } ] }
+{
+  "logs": [ { "t": "2026-01-01T12:00:00", "lvl": "info", "ev": "login_success", "msg": "", "user": "alice", "role": "member", "ip": "192.168.1.5" } ],
+  "stats": {
+    "total": 1,
+    "byLevel": { "info": 1, "warn": 0, "error": 0 },
+    "topEvents": [ { "event": "login_success", "count": 1 } ],
+    "byDay": { "2026-01-01": 1 },
+    "users": { "alice": 1 }
+  }
+}
 ```
 
-- **最新在最前面**；只读取最近 **5** 个日志文件（按天切分）。
+- 传 `stats=0`（或 `stats=false`）时只返回 `{ "logs": [...] }`。
+  这样既省掉聚合开销，也避开一个真实的坑：`stats.users` 以用户名为键，而用户名可能**只有大小写不同**
+  （例如 `Wangyq` 与 `wangyq`），Windows PowerShell 的 `ConvertFrom-Json` 会把它们判成重复键并直接报错。
+- **最新在最前面**；日志按天切分，超过 `logRetentionDays` 的文件会被定时清理。
+- 审计事件行会多一个 `"audit": true` 字段（界面里事件名前有盾牌图标）。
 
 ### DELETE /api/admin/logs
 
 清空所有日志文件。
 
 - 响应：`{ "ok": true }`
+- 副作用：会记一条 `logs_clear` 审计日志。
+
+### GET /api/admin/metrics
+
+系统指标与请求指标（前端每 10 秒拉一次）。
+
+- 响应：
+
+```json
+{
+  "mem": [ { "t": 1767225600000, "cpu": 3.2, "memUsedPct": 41.5, "rssMB": 88, "heapUsedMB": 30, "freeMB": 8000, "totalMB": 16000, "diskFreeMB": 120000, "diskTotalMB": 500000, "files": 1200, "dirs": 90, "bytes": 104857600 } ],
+  "latest": { "…": "同 mem 数组的最后一项" },
+  "requests": {
+    "qps": 0.42,
+    "lastMinute": { "total": 25, "s2": 24, "s3": 0, "s4": 1, "s5": 0, "slow": 2 },
+    "series": [ { "t": 1767225600000, "total": 25, "s4": 1, "s5": 0, "slow": 2 } ],
+    "slow": [ { "method": "GET", "path": "/api/fs/zip", "status": 200, "ms": 1830 } ],
+    "totals": { "requests": 1000, "errors": 3 }
+  },
+  "config": { "memMinutes": 15, "sampleMs": 60000 }
+}
+```
+
+- `mem` 是内存里的环形采样，长度由 `metricsMemMinutes`（默认 15）决定；
+- `requests.lastMinute` 是最近一分钟的计数（`s2` / `s3` / `s4` / `s5` 是状态码区间，`slow` 是慢请求数）；
+- `requests.slow` 最多保留 50 条，且是**最新的在前**；
+- 关掉 `requestMetricsEnabled` 后不再累计请求指标（`requests` 里的计数会停在关闭前）。
+
+### GET /api/admin/metrics/history
+
+```text
+GET /api/admin/metrics/history?date=2026-01-01
+```
+
+- 查询参数：`date`，格式必须是 `YYYY-MM-DD`，否则 `400 日期格式无效`
+- 响应：`{ "date": "2026-01-01", "samples": [ …同 mem 里的采样对象… ] }`，最多返回当天最后 **1440** 条；
+  文件不存在时返回空数组（不算错误）。
+
+### GET /api/admin/backups
+
+- 响应：`{ "backups": { "config.json": [ { "id": "20260101-120000-ab12", "mtime": 1767225600000, "size": 2048 } ], "…": [] } }`
+- 受管文件只有四个：`config.json`、`users.json`、`groups.json`、`todos.json`。
+
+### POST /api/admin/backups
+
+立即对四个受管文件做一次快照。
+
+- 响应：`{ "ok": true, "count": 4, "backups": { …同 GET… } }`（`count` 是实际创建了几份，
+  文件不存在时不会创建）
+- 说明：`backupEnabled` 为 `false` 时不会产生快照（`count` 为 0）。
+
+### POST /api/admin/backups/restore
+
+用某份快照覆盖当前文件。
+
+- 请求体：`{ "name": "config.json", "id": "20260101-120000-ab12" }`
+- 响应：`{ "ok": true, "name": "config.json", "id": "…" }`
+- 说明：**回滚前会先给当前文件自动快照一份**（`snapshotFileAbs`），所以改错了还能再退回来；
+  `config.json` / `users.json` / `groups.json` / `todos.json` 回滚后会**立即重载内存态**（无需重启）。
+- 错误：`400 不支持恢复该文件`（`name` 不在受管列表里）、`400 备份标识无效`（`id` 含路径分隔符或不以 `.json` 结尾）、
+  `404 备份不存在`、`400 该备份已损坏，无法恢复`（快照本身不是合法 JSON）
 
 ### GET /api/admin/status
 
@@ -737,7 +1008,8 @@ X-Requested-With: XMLHttpRequest
 
 ### GET /api/admin/tunnel
 
-- 响应：
+- 响应：`{ "config": { "enabled": false, "mode": "pinggy", "customHost": "" }, "status": { ... } }`
+  （`status` 就是 `GET /api/admin/status` 里的 `tunnel` 字段）
 
 ```json
 { "config": { "enabled": false, "mode": "pinggy", "customHost": "" }, "status": { "...": "见 GET /api/admin/status 的 tunnel 字段" } }
@@ -747,13 +1019,229 @@ X-Requested-With: XMLHttpRequest
 
 - 请求体：`{ "enabled": true, "mode": "pinggy" | "localhostrun" | "serveo" | "custom", "customHost": "user@host:22" }`
   （`mode` 不合法时会被归一化成 `serveo`）
-- 响应：更新后的 `config` 与 `status`（服务端会等约 600 毫秒再返回，让状态有机会更新）
+- 响应：`{ "config": { ... }, "status": { ... } }`（服务端会等约 600 毫秒再返回，让状态有机会更新）
 - 错误：`400` + `validateCustomHost` 的提示：
   - `请填写 SSH 目标，例如 user@example.com`
   - `SSH 目标格式无效`
   - `SSH 目标格式无效，仅支持 user@host 或 user@host:端口`
 - 说明：调用后会立即按新配置生效（开启、关闭或重连）。
 - 隧道各模式的差异见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
+
+---
+
+## 小组自助（`/api/groups`）
+
+这一组是给**组长**用的：超管在小组里勾选 `leaderCaps` 之后，组长可以在「团队」页自助管理本组。
+整个 router 要求 `superadmin` 或 `member`，**访客一律 401**；小组配置存在 `data/groups.json`。
+
+| 方法 | 路径 | 所需能力 | 作用 |
+|:--|:--|:--|:--|
+| `GET` | `/api/groups` | — | 我作为组长（或超管）可管理的小组 |
+| `GET` | `/api/groups/:id/members` | `viewMembers` | 查看本组成员 |
+| `POST` | `/api/groups/:id/members` | `manageMembers` | 增加 / 移除本组成员 |
+| `PATCH` | `/api/groups/:id` | `manageMembers` | 调整本组可见范围 |
+
+### GET /api/groups
+
+- 响应：`{ "groups": [ 小组对象 ], "allMembers": [ 成员对象 ] }`，完整结构如下：
+
+```json
+{
+  "groups": [
+    {
+      "id": "…", "name": "设计组", "color": "#5b8def",
+      "leaderCaps": { "viewMembers": true, "manageTodo": true, "editMemberAvatar": false, "manageMembers": false },
+      "isLeader": true, "canViewMembers": true, "canManageMembers": false, "canManageTodo": true,
+      "whitelist": [], "blacklist": [],
+      "memberCount": 3,
+      "members": [ { "id": "…", "username": "alice", "disabled": false, "createdAt": "…" } ]
+    }
+  ],
+  "allMembers": [ { "id": "…", "username": "bob", "disabled": false, "createdAt": "…" } ]
+}
+```
+
+- 超管返回全部小组；成员只返回"自己是组长、且至少开启了一项能力"的小组；
+- `canViewMembers` / `canManageMembers` / `canManageTodo` 是服务端算好的布尔值，界面据此决定显示哪些控件；
+- 没有 `viewMembers` 时 `members` 是**空数组**（成员名单根本不下发）。
+
+### GET /api/groups/:id/members
+
+- 需要：`viewMembers`
+- 响应：`{ "members": [ { "id", "username", "disabled", "createdAt" } ] }`
+- 错误：`404 小组不存在`、`403 没有权限`（不是本组组长）、`403 组长未获授权查看成员`
+
+### POST /api/groups/:id/members
+
+- 需要：`manageMembers`
+- 请求体：`{ "ids": ["uuid1", "uuid2"], "action": "add" | "remove" }`（`action` 省略即 `add`）
+- 响应：`{ "group": { 小组对象 } }`（结构与 `GET /api/groups` 里的单项一致）
+- 说明：添加时会逐个校验成员存在；移除成员会**同时取消其组长身份**。
+- 错误：`404 小组不存在`、`403 没有权限管理该小组成员`、`400 包含不存在的成员`
+
+### PATCH /api/groups/:id
+
+- 需要：`manageMembers`
+- 请求体：`{ "whitelist": ["项目A"], "blacklist": ["机密"] }`（至少给一个）
+- 响应：`{ "group": { 小组对象 } }`
+- 说明：**组长只能改可见范围**；组名、颜色、权限收窄与 `leaderCaps` 始终归超管（走 `/api/admin/groups/:id`）。
+- 错误：`404 小组不存在`、`403 没有权限调整该小组可见范围`、`400 没有可更新的字段`
+
+---
+
+## 团队待办（`/api/todos`）
+
+整个 router 要求登录（`superadmin` / `member`），**访客一律 401**。
+`todoEnabled` 为 `false` 时读取返回空列表、写入直接 403；数据存在 `data/todos.json`，**上限 5000 条**。
+
+具体来说：`todoEnabled = false` 时列表只返回 `{ "todos": [], "enabled": false }`（就这两个字段），
+新建（`POST /api/todos`）与编辑（`PATCH`）返回 `403 Todo 功能已关闭`；
+标记完成与删除不查这个开关，仍按各自的权限执行。
+
+| 方法 | 路径 | 作用 |
+|:--|:--|:--|
+| `GET` | `/api/todos` | 列出我可见的待办 |
+| `POST` | `/api/todos` | 新建待办 |
+| `PATCH` | `/api/todos/:id` | 修改待办 |
+| `POST` | `/api/todos/:id/done` | 标记完成 / 未完成 |
+| `DELETE` | `/api/todos/:id` | 删除待办 |
+
+### 可见性模型
+
+| 字段 | 取值 | 含义 |
+|:--|:--|:--|
+| `scope` | `all` | 全体成员可见（**只有超管能创建**） |
+| | `group` | 指定小组的成员可见（配合 `groupId`） |
+| | `member` | 指定成员可见（配合 `memberId`） |
+| `priority` | `high` / `normal` / `low` | 默认 `normal` |
+
+能看到一条待办的人 = **创建者 / 超管 / 相关小组的组长（已开 `manageTodo`）/ 下发范围内的成员**。
+每条待办返回时都带三个服务端算好的布尔值：`canEdit`、`canComplete`、`canManage`；
+`allowAssigneeEdit` 为 `true` 时，范围内成员也能编辑内容。
+
+### GET /api/todos
+
+- 查询参数：
+
+| 参数 | 默认 | 说明 |
+|:--|:--|:--|
+| `status` | `all` | `all` / `open`（未完成）/ `done`（已完成） |
+| `scope` | `all` | `all` / `group` / `member` |
+| `q` | 空 | 在**标题与备注**里做不区分大小写的子串匹配 |
+
+- 响应：
+
+```json
+{
+  "todos": [
+    {
+      "id": "…", "title": "整理素材", "note": "", "priority": "normal", "dueAt": null,
+      "scope": "group", "groupId": "…", "memberId": "",
+      "done": false, "doneAt": null, "doneBy": null, "allowAssigneeEdit": false,
+      "createdBy": "admin", "createdById": null, "createdByRole": "superadmin",
+      "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z",
+      "groupName": "设计组", "memberName": "",
+      "canEdit": true, "canComplete": true, "canManage": true
+    }
+  ],
+  "enabled": true,
+  "canCreateAll": true,
+  "leaderGroups": [ { "id": "…", "name": "设计组" } ],
+  "members": [ { "id": "…", "username": "alice" } ]
+}
+```
+
+- 排序：未完成在前；有 `dueAt` 的按日期升序（没填的排在最后）；日期相同按 `high` → `normal` → `low`；
+- 关闭 `todoEnabled` 时列表直接返回空数组 + `enabled: false`（响应里只有 `{ "todos": [], "enabled": false }` 这两个字段）；
+- `canCreateAll` 表示调用者能否下发「全体」待办（只有超管为 `true`）；
+- `leaderGroups` 是调用者**作为组长且开启 `manageTodo`** 的小组（用于「下发范围」下拉），
+  `members` 是所有成员的 `id` / `username`。
+
+### POST /api/todos
+
+- 请求体：`{ "title": "整理素材", "note": "", "priority": "normal", "dueAt": null, "allowAssigneeEdit": false, "scope": "group", "groupId": "…" }`
+- 响应：`{ "todo": { …待办对象… } }`
+- 校验：
+  - `400 标题不能为空且不超过 200 字`；备注最长 2000 字（超长会被**截断**，不报错）；
+  - `403 只有超级管理员可以创建全体 Todo`（`scope: "all"` 时）；
+  - `400 小组不存在` / `400 成员不存在` / `400 作用域无效`；
+  - `403 没有权限向该小组下发 Todo` / `403 没有权限向该成员下发 Todo`；
+  - `403 Todo 功能已关闭`；
+  - 待办总数上限 **5000**，超出时 `400 Todo 数量已达上限 5000`。
+
+### PATCH /api/todos/:id
+
+- 请求体：`title` / `note` / `priority` / `dueAt` 是**内容字段**（有编辑权即可改）；
+  `scope` / `groupId` / `memberId` / `allowAssigneeEdit` **只有管理者**能改，且会重新校验下发目标。
+- 响应：`{ "todo": { … } }`
+- 错误：`404 Todo 不存在`、`403 没有权限编辑该 Todo`、`400 没有可更新的字段`、`403 Todo 功能已关闭`
+
+### POST /api/todos/:id/done
+
+- 请求体：`{ "done": true }`；**省略 `done` 时取反**当前状态
+- 响应：`{ "todo": { … } }`（完成时记录 `doneAt` 与 `doneBy`）
+- 错误：`404 Todo 不存在`、`403 没有权限完成该 Todo`
+
+### DELETE /api/todos/:id
+
+- 需要：创建者 / 超管 / 相关组长（即 `canManage` 为真）
+- 响应：`{ "ok": true }`
+- 错误：`404 Todo 不存在`、`403 没有权限删除该 Todo`
+
+---
+
+## 头像（`/api/avatars`）
+
+头像统一存成 **128×128 的 WebP**，位置是 `data/avatars/<owner>.webp`：
+成员是 `u-<成员 id>`，超管是 `_superadmin`。`avatarEnabled` 为 `false` 时上传接口直接 403。
+
+| 方法 | 路径 | 作用 |
+|:--|:--|:--|
+| `GET` | `/api/avatars` | 列出全部头像的 owner 与 md5 |
+| `GET` | `/api/avatars/:owner` | 取某个头像的图片本体 |
+| `POST` | `/api/avatars/me` | 上传 / 替换**自己**的头像 |
+| `POST` | `/api/avatars/:owner` | 上传 / 替换指定 owner 的头像（超管，或开启 `editMemberAvatar` 的组长） |
+| `DELETE` | `/api/avatars/:owner` | 删除头像（回落到用户名首字的默认头像） |
+
+### GET /api/avatars
+
+- 认证：`superadmin` 或 `member`
+- 响应：`{ "avatars": [ { "owner": "u-…", "md5": "…", "size": 4096, "updatedAt": 1767225600000 } ], "enabled": true }`
+- 前端靠 `md5` 判断要不要重新下载（配合 IndexedDB 缓存），所以这个接口只回元数据。
+
+### GET /api/avatars/:owner
+
+- 认证：`superadmin` 或 `member`
+- 响应：`image/webp` 图片流，带 `Cache-Control: no-cache` 与 `ETag: "<md5>"`；
+  请求头带 `If-None-Match: "<md5>"` 且命中时返回 **304**（不重复传图片）。
+- 错误：`400 头像标识无效`、`404 头像不存在`
+
+### POST /api/avatars/me
+
+- 请求体：**裸二进制**（`Content-Type: image/webp` 或 `application/octet-stream`），传输层上限 2MB；
+  写操作同样要带自定义头 `X-Requested-With: XMLHttpRequest`。
+- 响应：`{ "owner": "u-3f1c…", "md5": "9a1…", "size": 4213 }`
+- 服务端**只校验与落盘**，不做图像处理：浏览器负责把任意图片裁成 128×128 的 WebP。
+- 错误：`403 头像功能已关闭`、`400 无法确定账户标识`、`400 头像标识无效`、
+  `400 头像内容为空`、`413 头像体积超出限制（最大 NKB）`、
+  `400 仅支持 WebP 格式头像`、`400 头像尺寸必须为 128×128（当前 W×H）`
+
+### POST /api/avatars/:owner
+
+- 权限：超管可改任意合法 owner；成员只能改自己（`u-<自己的 id>`），
+  或（在某个自己当组长、且开启 `editMemberAvatar` 的小组里）本组成员的头像。
+- 其余与 `POST /api/avatars/me` 相同，额外错误：`403 没有权限修改该头像`
+
+### DELETE /api/avatars/:owner
+
+- 权限：同上
+- 响应：`{ "ok": true }`（原本就不存在也返回成功）
+- 错误：`400 头像标识无效`、`403 没有权限修改该头像`
+
+<Callout type="info" title="体积上限来自 avatarMaxKB">
+上面的 `200KB` 是默认值，取自 `data/config.json` 的 `avatarMaxKB`，错误文案里的数字会跟着配置变化；
+传输层的硬上限固定是 **2MB**，用于尽早掐断超大请求体。
+</Callout>
 
 ---
 
@@ -785,6 +1273,10 @@ X-Requested-With: XMLHttpRequest
 | `error` | 失败原因；成功时为 `null` |
 | `count` | 解压时表示实际写出的文件数 |
 | 过期 | 任务状态保留 **10 分钟**，之后查询得到 `gone` |
+
+失败语义：**压缩出错时任务落到 `error` 并带上 `error` 文案，同时删除已写出的 `.zip`**；
+解压出错（含中途超过总量上限）会删掉半成品目录；链接下载失败会删掉残缺文件。
+所以看到 `done` 就一定是完整产物，不存在"提示完成但文件打不开"的情况。
 
 查询任务状态时都使用 `job` 参数：
 
@@ -873,9 +1365,12 @@ while True:
 |:--|:--|:--|
 | `/ping` | 健康检查 | 无 |
 | `/api/meta` | 名称与版本 | 无 |
-| `/api/auth` | 登录、改密、登出、查身份 | 部分 |
-| `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、链接下载 | 按权限点 |
-| `/api/admin` | 配置、成员、日志、状态、隧道 | **仅超级管理员** |
+| `/api/auth` | 登录、改密、登出、查身份、我可见的小组 | 部分 |
+| `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、链接下载 | 按权限点（含小组收窄） |
+| `/api/admin` | 配置、成员、小组、日志、指标、备份、状态、隧道 | **仅超级管理员** |
+| `/api/groups` | 组长自助：本组成员与可见范围 | 登录成员（受 `leaderCaps` 约束） |
+| `/api/todos` | 团队待办 | 登录成员（受 `todoEnabled` 约束） |
+| `/api/avatars` | 头像读写 | 登录成员 |
 | `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
 | 其它任意路径 | 返回前端应用（SPA fallback） | — |
 

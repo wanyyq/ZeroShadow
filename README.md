@@ -117,6 +117,7 @@
 ### 客户端体验
 
 - 列表 / 网格两种视图，名称 / 大小 / 修改时间排序，文件夹置顶
+- 桌面侧边栏可一键折叠为仅图标（带动画，选择会记住），窄屏自动改用抽屉
 - 浅色 / 深色 / 跟随系统三态主题，按 `D` 键快速切换
 - 常用快捷键：`F2` 重命名、`Delete` 删除、`Ctrl/⌘ + A/C/X/V` 全选 / 复制 / 剪切 / 粘贴、`Enter` 打开
 - 窄屏自适应，手机浏览器同样可上传下载；面包屑、悬浮信息卡、右键菜单一应俱全
@@ -196,7 +197,7 @@ pnpm dev:web      # 终端 2：前端 Vite 开发服务器，默认 5173
 | [快速开始](docs/快速开始.md) | 安装、启动、首次登录、局域网 / 公网访问、从 exe 发布包运行 |
 | [使用手册](docs/使用手册.md) | 界面导览、上传下载、预览、在线编辑、搜索、压缩解压、快捷方式、链接下载器 |
 | [权限与角色](docs/权限与角色.md) | 三种角色的完整权限矩阵与每一项权限的实际效果 |
-| [管理员指南](docs/管理员指南.md) | 设置页七个标签页逐项说明：状态、日志、成员、权限、安全、公网、外观 |
+| [管理员指南](docs/管理员指南.md) | 设置页九个标签页逐项说明：外观、状态、日志与指标、成员、小组、权限、数据与保留、安全、公网 |
 | [配置参考](docs/配置参考.md) | `.env` 全部变量、`data/config.json` 全部字段、默认值与取值范围 |
 | [公网访问与隧道](docs/公网访问与隧道.md) | 四种隧道模式、`TRUST_PROXY` 正确用法、公网部署注意事项 |
 | [安全设计](docs/安全设计.md) | 认证、CSRF、路径安全、SSRF 防护、沙箱、限流、日志与密钥卫生 |
@@ -292,7 +293,7 @@ ZeroShadow/
 ├── build-release.ps1       # 多平台构建编排（本地与 CI 共用；产物 ZeroShadow-<版本>-<平台>.zip）
 ├── Auto-building.bat       # Windows 一键打包（build-release.ps1 的薄封装）
 ├── package-release.ps1     # 发布打包 + 文档暂存 + 密钥门禁
-├── security-test.ps1       # 安全回归测试（16 组断言）
+├── security-test.ps1       # 安全回归测试（17 组断言）
 ├── smoke-test.ps1          # 冒烟测试（38 项断言，跑完自动还原现场）
 └── .github/workflows/      # GitHub Actions：五平台 node18 自动编译
 ```
@@ -307,7 +308,7 @@ ZeroShadow/
 ## 开发与测试
 
 ```bash
-pnpm typecheck              # 前端类型检查（tsc --noEmit）
+pnpm typecheck              # 前端类型检查（tsc -p tsconfig.app.json + tsconfig.node.json）
 pnpm lint                   # 前端代码检查（eslint）
 cd server && pnpm bundle    # 后端打包为单个 CJS（esbuild，供 pkg 使用）
 ```
@@ -325,7 +326,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
 
 覆盖 CSRF 拦截、登录、目录创建、路径穿越拦截、上传、访客隐藏文件夹、访客权限边界、
 成员创建与登录、复制 / 重命名 / 移动 / 详情 / 删除、禁用成员后会话失效、ZIP 打包、
-搜索、日志、服务器状态、隧道状态、SPA 与静态资源等 **9 组共 38 项断言**。
+搜索、日志、服务器状态、隧道状态、SPA 与静态资源等 **10 组共 38 项断言**。
 
 脚本的行为约定：
 
@@ -344,7 +345,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
 
 ### 安全回归测试
 
-`security-test.ps1` 把安全审计结论固化成可重复执行的断言，共 16 组：
+`security-test.ps1` 把安全审计结论固化成可重复执行的断言，共 17 组：
 
 ```powershell
 # 1) 起一个测试实例（建议独立端口，避免打扰正在使用的服务）
@@ -356,7 +357,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 
 覆盖：传输层加固、认证与授权、路径穿越、访客开关语义、SSRF 12 种写法、HTML/SVG 沙箱、
 zip-slip、凭据与发布卫生、客户端 IP 解析、登录锁定、解压上限与清理、限流、只读映射目录、
-作业归属、访客可见性随重命名同步、路径解析加固。**退出码 = 失败项数量，0 表示全部通过。**
+作业归属、访客可见性随重命名同步、路径解析加固、上传与归档回归（文件夹目录结构、分批上限、
+相对路径覆盖、`targetNames` 重命名、在线编辑上限与原子写）。**退出码 = 失败项数量，0 表示全部通过。**
 
 可选参数：`-PositiveProbeUrl`（正向下载验证，需服务端用 `DOWNLOAD_URL_ALLOW_HOSTS` 放开该主机）、
 `-LoopbackAllowlisted`、`-TrustProxyMode`、`-TestLockout`（会消耗 IP 失败额度，建议对全新实例运行）、

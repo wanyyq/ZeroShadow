@@ -87,12 +87,27 @@ export function ShortcutEditorDialog({
       const fileName = name.trim().endsWith(".zeropath") ? name.trim() : `${name.trim()}.zeropath`
       const destPath = currentPath ? `${currentPath}/${fileName}` : fileName
 
-      // If editing existing, delete old file first
-      if (editingExisting && entry) {
-        try { await api.post("/fs/delete", { paths: [joinPath(currentPath, entry.name)] }) } catch { /* ignore */ }
+      // 先写新文件、成功之后再删旧文件。
+      // 旧实现是「先删后写」，且删除失败被静默吞掉：只要写入这一步失败
+      // （名称非法 / 权限 / 网络中断），旧快捷方式就已经被删了 —— 凭空消失。
+      await api.post("/fs/save-file", { path: destPath, content })
+
+      const oldPath = entry ? joinPath(currentPath, entry.name) : ""
+      const sameTarget = !!entry && oldPath.toLowerCase() === destPath.toLowerCase()
+      if (editingExisting && entry && !sameTarget) {
+        try {
+          await api.post("/fs/delete", { paths: [oldPath] })
+        } catch (err) {
+          // 新文件已经写好，旧文件没删掉：如实告知，不假装完全成功
+          toast.warning("快捷方式已保存，但旧的同名文件未能删除", {
+            description: (err as Error).message,
+          })
+          onOpenChange(false)
+          onDone()
+          return
+        }
       }
 
-      await api.post("/fs/save-file", { path: destPath, content })
       toast.success(editingExisting ? "快捷方式已更新" : "快捷方式已创建")
       onOpenChange(false)
       onDone()

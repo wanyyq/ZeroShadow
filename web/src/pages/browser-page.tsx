@@ -11,7 +11,7 @@ import { ShortcutEditorDialog } from "@/components/browser/shortcut-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
@@ -27,8 +27,8 @@ import { useClipboard } from "@/state/clipboard"
 import { useUploads } from "@/state/uploads"
 import { useOperations } from "@/state/operations"
 import { cn } from "@/lib/utils"
-import { detectConflicts } from "@/lib/conflict"
-import type { ConflictItem } from "@/lib/conflict"
+import { CONFLICT_CANCELLED, detectConflicts } from "@/lib/conflict"
+import type { ConflictResolution } from "@/lib/conflict"
 
 const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", member: "团队成员", guest: "访客" }
 
@@ -36,6 +36,14 @@ type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 
 function noPermToast() { toast.warning("此功能您没权限") }
 function noPermSoftToast() { toast.warning("外部映射目录仅支持只读操作") }
+
+/** 复制纯文本并给出反馈；隐私模式等场景下 navigator.clipboard 可能不可用 */
+function copyText(text: string, okMsg: string) {
+  void navigator.clipboard?.writeText(text).then(
+    () => toast.success(okMsg),
+    () => toast.error("复制失败，请手动选择文本")
+  )
+}
 
 // 文件夹上传时，把 webkitRelativePath 写回 File.name，便于服务端还原目录结构
 function withRelativePath(f: File): File {
@@ -72,34 +80,46 @@ export function BrowserPage() {
   const [dragOver, setDragOver] = React.useState(false)
   const [searchText, setSearchText] = React.useState("")
   const listRef = React.useRef<HTMLDivElement>(null)
-  const lastIndexRef = React.useRef(-1)
+  const lastAnchorRef = React.useRef<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const folderInputRef = React.useRef<HTMLInputElement>(null)
 
   const [conflictOpen, setConflictOpen] = React.useState(false)
   const [conflictNames, setConflictNames] = React.useState<string[]>([])
   const [conflictDirs, setConflictDirs] = React.useState<Set<string>>(new Set())
-  const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
+  const conflictResolveRef = React.useRef<((items: ConflictResolution) => void) | null>(null)
 
   const [shortcutOpen, setShortcutOpen] = React.useState(false)
   const [shortcutEntry, setShortcutEntry] = React.useState<Entry | null>(null)
-  const [emptyMenuPos, setEmptyMenuPos] = React.useState<{ x: number; y: number } | null>(null)
 
+  // 请求序号：快速连续切目录时，先发出的慢响应会覆盖后发出的结果，
+  // 表现为「面包屑已经是 B，列表还是 A」并且 loading 提前结束。只认最新一次。
+  const reqSeqRef = React.useRef(0)
   const refresh = React.useCallback(() => {
+    const seq = ++reqSeqRef.current
+    const stale = () => seq !== reqSeqRef.current
     setLoading(true)
     if (query) {
       api.get<{ results: SearchResult[] }>("/fs/search", { q: query, path: "" })
-        .then((d) => setResults(d.results))
-        .catch((err) => toast.error((err as Error).message))
-        .finally(() => setLoading(false))
+        .then((d) => { if (!stale()) setResults(d.results) })
+        .catch((err) => { if (!stale()) toast.error((err as Error).message) })
+        .finally(() => { if (!stale()) setLoading(false) })
     } else {
       api.get<{ path: string; entries: Entry[] }>("/fs/list", { path })
-        .then((d) => { setEntries(d.entries); requestAnimationFrame(() => animateListIn(listRef.current)) })
-        .catch((err) => { toast.error((err as Error).message); setEntries([]) })
-        .finally(() => setLoading(false))
+        .then((d) => {
+          if (stale()) return
+          setEntries(d.entries)
+          requestAnimationFrame(() => animateListIn(listRef.current))
+        })
+        .catch((err) => {
+          if (stale()) return
+          toast.error((err as Error).message)
+          setEntries([])
+        })
+        .finally(() => { if (!stale()) setLoading(false) })
     }
     setSelected(new Set())
-    lastIndexRef.current = -1
+    lastAnchorRef.current = null
     // groupContextId 变化时需要重新拉取（小组上下文收窄可见范围），虽未在函数体内直接引用
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, query, groupContextId])
@@ -116,7 +136,11 @@ export function BrowserPage() {
     setParams({})
   }, [groupContextId, setParams])
   React.useEffect(() => uploads.onCompleted((dest) => dest === path && refresh()), [uploads, path, refresh])
-  React.useEffect(() => operations.onCompleted((job) => job.type === "extract" && job.status === "done" && refresh()), [operations, refresh])
+  // 压缩产物与解压结果都直接落在当前目录，两者完成后都要刷新列表
+  React.useEffect(
+    () => operations.onCompleted((job) => job.status === "done" && (job.type === "extract" || job.type === "compress") && refresh()),
+    [operations, refresh]
+  )
 
   const sorted = React.useMemo(() => {
     const list = [...entries]
@@ -198,8 +222,11 @@ export function BrowserPage() {
   const select = (entry: Entry, index: number, e: React.MouseEvent) => {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (e.shiftKey && lastIndexRef.current >= 0) {
-        const [from, to] = [Math.min(lastIndexRef.current, index), Math.max(lastIndexRef.current, index)]
+      // 锚点用「名称」而不是下标：改变排序后下标会失效，shift 连选会圈出错误范围
+      const anchorName = lastAnchorRef.current
+      const anchorIndex = anchorName ? sorted.findIndex((s) => s.name === anchorName) : -1
+      if (e.shiftKey && anchorIndex >= 0) {
+        const [from, to] = [Math.min(anchorIndex, index), Math.max(anchorIndex, index)]
         for (let i = from; i <= to; i += 1) next.add(sorted[i].name)
       } else if (e.ctrlKey || e.metaKey) {
         if (next.has(entry.name)) next.delete(entry.name); else next.add(entry.name)
@@ -208,7 +235,7 @@ export function BrowserPage() {
       }
       return next
     })
-    if (!e.shiftKey) lastIndexRef.current = index
+    if (!e.shiftKey) lastAnchorRef.current = entry.name
   }
 
   const selectedEntries = sorted.filter((e) => selected.has(e.name))
@@ -232,6 +259,7 @@ export function BrowserPage() {
     toast.info(`已${mode === "copy" ? "复制" : "剪切"} ${targets.length} 项`)
   }
 
+  const pastingRef = React.useRef(false)
   const doPaste = async () => {
     if (!clipboard.mode || !clipboard.items.length) return
     if (isCurrentSoft) return noPermSoftToast()
@@ -239,41 +267,56 @@ export function BrowserPage() {
     const names = clipboard.items.map((i) => i.name)
     const dirNames = new Set(clipboard.items.filter((i) => i.type === "dir").map((i) => i.name))
     resolveConflicts(names, dirNames, async (resolved) => {
+      // 用户取消了冲突处理：必须原样中止。旧实现把它当成「没有冲突」，
+      // 于是点取消反而照常执行 —— 剪切模式下文件是真的会被移走的。
+      if (resolved === CONFLICT_CANCELLED) return
       const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
       const overwrite = resolved.some((r) => r.action === "overwrite")
       const renameMap = new Map(resolved.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
       const mergeSet = new Set(resolved.filter((r) => r.action === "merge").map((r) => r.name))
       const sources: string[] = []
       const mergeSources: string[] = []
+      const targetNames: Record<string, string> = {}
       for (const item of clipboard.items) {
         if (skipSet.has(item.name)) continue
         if (mergeSet.has(item.name)) {
           mergeSources.push(item.path)
           continue
         }
-        if (renameMap.has(item.name)) {
-          const resolvedName = renameMap.get(item.name)!
-          const parent = item.path.includes("/") ? item.path.slice(0, item.path.lastIndexOf("/")) : ""
-          sources.push(parent ? `${parent}/${resolvedName}` : resolvedName)
-        } else {
-          sources.push(item.path)
-        }
+        sources.push(item.path)
+        // 「重命名」交给服务端做：把期望的目标名作为映射传过去，
+        // 而不是把来源路径改成新名字（那样源文件根本不存在，必然 404）。
+        const renamed = renameMap.get(item.name)
+        if (renamed) targetNames[item.path] = renamed
       }
+      if (pastingRef.current) return
       const apiPath = `/fs/${clipboard.mode === "copy" ? "copy" : "move"}`
+      const promises: Promise<unknown>[] = []
+      if (sources.length) {
+        promises.push(api.post(apiPath, {
+          sources,
+          dest: path,
+          ...(overwrite ? { overwrite: true } : {}),
+          ...(Object.keys(targetNames).length ? { targetNames } : {}),
+        }))
+      }
+      if (mergeSources.length) {
+        promises.push(api.post(apiPath, { sources: mergeSources, dest: path, merge: true }))
+      }
+      if (promises.length === 0) return
+      pastingRef.current = true
       try {
-        const promises: Promise<unknown>[] = []
-        if (sources.length) {
-          promises.push(api.post(apiPath, { sources, dest: path, ...(overwrite ? { overwrite: true } : {}) }))
-        }
-        if (mergeSources.length) {
-          promises.push(api.post(apiPath, { sources: mergeSources, dest: path, merge: true }))
-        }
-        if (promises.length === 0) return
         await Promise.all(promises)
         toast.success(clipboard.mode === "copy" ? "复制完成" : "移动完成")
         if (clipboard.mode === "cut") clipboard.clear()
+      } catch (err) {
+        toast.error((err as Error).message)
+      } finally {
+        pastingRef.current = false
+        // 成败都要刷新：失败前可能已经有部分条目完成，旧实现不刷新，
+        // 用户会看到「报错但目录里多了一半文件」。
         refresh()
-      } catch (err) { toast.error((err as Error).message) }
+      }
     })
   }
 
@@ -319,7 +362,7 @@ export function BrowserPage() {
   )
 
   const resolveConflicts = React.useCallback(
-    (names: string[], dirNames: Set<string>, onResolved: (items: ConflictItem[]) => void) => {
+    (names: string[], dirNames: Set<string>, onResolved: (items: ConflictResolution) => void) => {
       const conflicts = detectConflicts(names, existingNames)
       if (conflicts.length === 0) {
         onResolved([])
@@ -370,38 +413,40 @@ export function BrowserPage() {
         }
         if (me.perms.uploadFolders) {
           resolveConflicts([...rootFolders], existingDirNames, (resolved) => {
+            if (resolved === CONFLICT_CANCELLED) return
             const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
             if (skipSet.size === rootFolders.size) return
-            const overwriteSet = new Set(resolved.filter((r) => r.action === "overwrite").map((r) => r.name))
+            // 文件夹级的「覆盖 / 合并」都表示：同名文件用新版本替换，其余原样写入。
+            // 旧实现把顶层文件夹名塞进 overwrite 列表，而服务端只拿它匹配文件 basename，
+            // 于是两个选项都静默失效 —— 同名文件被存成了 "x (1).txt"。
+            const replaceRoots = new Set(
+              resolved.filter((r) => r.action === "overwrite" || r.action === "merge").map((r) => r.name)
+            )
             const renameMap = new Map(resolved.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
-            const mergeSet = new Set(resolved.filter((r) => r.action === "merge").map((r) => r.name))
             const overwriteNames: string[] = []
             const processed: File[] = []
             for (const f of files) {
               const slash = f.name.indexOf("/")
               const root = slash > 0 ? f.name.slice(0, slash) : f.name
               if (skipSet.has(root)) continue
-              if (mergeSet.has(root)) { processed.push(f); continue }
-              if (renameMap.has(root)) {
-                const rest = slash > 0 ? f.name.slice(slash) : ""
-                processed.push(new File([f], renameMap.get(root)! + rest, { type: f.type, lastModified: f.lastModified }))
-                overwriteNames.push(renameMap.get(root)!)
-              } else if (overwriteSet.has(root)) {
-                processed.push(f)
-                overwriteNames.push(root)
-              } else {
-                processed.push(f)
+              if (renameMap.has(root) && slash > 0) {
+                processed.push(new File([f], renameMap.get(root)! + f.name.slice(slash), { type: f.type, lastModified: f.lastModified }))
+                continue
               }
+              processed.push(f)
+              // 传完整相对路径：服务端会同时按 basename 与相对路径匹配，
+              // 命中的替换、未命中的本来就写不冲突
+              if (replaceRoots.has(root)) overwriteNames.push(f.name)
             }
             if (processed.length === 0) return
-            const merged = mergeSet.size > 0
-            uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : merged ? { overwrite: ["__merge__"] } : undefined)
+            uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : undefined)
           })
           return
         }
       }
       const names = files.map((f) => f.name)
       resolveConflicts(names, new Set(), (resolved) => {
+        if (resolved === CONFLICT_CANCELLED) return
         if (!resolved.length) {
           uploads.start(path, files)
           return
@@ -423,7 +468,7 @@ export function BrowserPage() {
         uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : undefined)
       })
     },
-    [path, me.perms.upload, resolveConflicts, uploads]
+    [path, me.perms.upload, me.perms.uploadFolders, resolveConflicts, uploads]
   )
 
   const onDrop = (e: React.DragEvent) => {
@@ -463,9 +508,14 @@ export function BrowserPage() {
     else setParams(path ? { path } : {})
   }
 
-  // 快捷键
+  // 快捷键。
+  // 用 ref 保存「最新一版」handler、监听器只绑定一次：旧实现把 handler 直接绑在 window
+  // 上，依赖数组是 [selected, sorted, me.perms] 而漏了 clipboard —— 于是 Ctrl+C 之后
+  // 立刻按 Ctrl+V，跑的还是复制之前那一版闭包（里面 clipboard.mode 仍是 null），
+  // 表现为「快捷键时灵时不灵」，而工具栏上的粘贴按钮却正常。
+  const keyHandlerRef = React.useRef<(e: KeyboardEvent) => void>(() => {})
   React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    keyHandlerRef.current = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       const key = e.key.toLowerCase()
       const mod = e.ctrlKey || e.metaKey
@@ -486,7 +536,7 @@ export function BrowserPage() {
       if (mod && key === "a") {
         e.preventDefault()
         setSelected(new Set(sorted.map((en) => en.name)))
-        lastIndexRef.current = sorted.length - 1
+        lastAnchorRef.current = sorted.length ? sorted[sorted.length - 1].name : null
       }
       if (mod && key === "c" && selected.size > 0) {
         e.preventDefault()
@@ -510,9 +560,12 @@ export function BrowserPage() {
         }
       }
     }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [selected, sorted, me.perms])
+  })
+  React.useEffect(() => {
+    const listener = (e: KeyboardEvent) => keyHandlerRef.current(e)
+    window.addEventListener("keydown", listener)
+    return () => window.removeEventListener("keydown", listener)
+  }, [])
 
   const crumbs = path ? path.split("/") : []
 
@@ -589,15 +642,45 @@ export function BrowserPage() {
         </ContextMenuItem>
       )
     }
+    // 文件也要能「打开」—— 旧菜单只有文件夹才有这一项
+    if (entry.type === "file" && single) {
+      items.push(
+        <ContextMenuItem key="openFile" onClick={() => handleOpenFile(entry)}>
+          <Icon name="external-link" /> 打开
+        </ContextMenuItem>
+      )
+    }
+    items.push(
+      <ContextMenuSub key="copyAs">
+        <ContextMenuSubTrigger>
+          <Icon name="clipboard-copy" /> 复制…
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuItem onClick={() => copyText(targets.map((t) => displayName(t)).join("\n"), "已复制名称")}>
+            复制名称
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => copyText(targets.map((t) => joinPath(path, t.name)).join("\n"), "已复制相对路径")}>
+            复制相对路径
+          </ContextMenuItem>
+          {single && entry.type === "file" && (
+            <ContextMenuItem onClick={() => copyText(new URL(downloadUrl(joinPath(path, entry.name)), window.location.origin).href, "已复制下载链接")}>
+              复制下载链接
+            </ContextMenuItem>
+          )}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    )
     items.push(<ContextMenuSeparator key="s1" />)
     items.push(
       <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
         <Icon name="copy" /> 复制
+        <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
       </ContextMenuItem>
     )
     items.push(
       <ContextMenuItem key="cut" disabled={!me.perms.move || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.move) noPermToast(); else doClipboard("cut", targets) }}>
         <Icon name="scissors" /> 剪切
+        <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
       </ContextMenuItem>
     )
     if (me.perms.copy) {
@@ -614,6 +697,7 @@ export function BrowserPage() {
       items.push(
         <ContextMenuItem key="rename" disabled={!me.perms.rename || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.rename) noPermToast(); else openDialog("rename", entry) }}>
           <Icon name="pencil-line" /> 重命名
+          <ContextMenuShortcut>F2</ContextMenuShortcut>
         </ContextMenuItem>
       )
     }
@@ -636,6 +720,92 @@ export function BrowserPage() {
     items.push(
       <ContextMenuItem key="delete" variant="destructive" disabled={!me.perms.delete || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.delete) noPermToast(); else { setSelected(new Set(targets.map((t) => t.name))); openDialog("delete", entry) } }}>
         <Icon name="trash-2" /> 删除
+        <ContextMenuShortcut>Delete</ContextMenuShortcut>
+      </ContextMenuItem>
+    )
+    return items
+  }
+
+  // ---------- 空白处右键菜单（挂在列表容器上的那个 ContextMenu） ----------
+  const buildEmptyMenuItems = () => {
+    const items: React.ReactNode[] = []
+    const canPaste = !!clipboard.mode && clipboard.items.length > 0 && !isCurrentSoft
+    items.push(
+      <ContextMenuItem key="upload" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else fileInputRef.current?.click() }}>
+        <Icon name="upload" /> 上传文件
+      </ContextMenuItem>,
+      <ContextMenuItem key="uploadFolder" disabled={!canUpload || !me.perms.uploadFolders} onClick={() => { if (!canUpload) noPermToast(); else folderInputRef.current?.click() }}>
+        <Icon name="folder-up" /> 上传文件夹
+      </ContextMenuItem>,
+      <ContextMenuItem key="mkdir" disabled={!canMkdir} onClick={() => { if (!canMkdir) noPermToast(); else openDialog("newFolder") }}>
+        <Icon name="folder-plus" /> 新建文件夹
+      </ContextMenuItem>,
+      <ContextMenuItem key="paste" disabled={!canPaste} onClick={() => { if (!canPaste) noPermToast(); else void doPaste() }}>
+        <Icon name="clipboard-paste" /> 粘贴{clipboard.items.length ? ` ${clipboard.items.length} 项` : ""}
+        <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+      </ContextMenuItem>
+    )
+    items.push(<ContextMenuSeparator key="s1" />)
+    items.push(
+      <ContextMenuItem key="selectAll" disabled={!sorted.length} onClick={() => {
+        setSelected(new Set(sorted.map((e) => e.name)))
+        lastAnchorRef.current = sorted.length ? sorted[sorted.length - 1].name : null
+      }}>
+        <Icon name="square-check-big" /> 全选
+        <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
+      </ContextMenuItem>,
+      <ContextMenuItem key="invert" disabled={!sorted.length} onClick={() => setSelected((prev) => new Set(sorted.filter((e) => !prev.has(e.name)).map((e) => e.name)))}>
+        <Icon name="square-dashed" /> 反选
+      </ContextMenuItem>,
+      <ContextMenuItem key="clearSel" disabled={!selected.size} onClick={() => setSelected(new Set())}>
+        <Icon name="x" /> 取消选择
+      </ContextMenuItem>
+    )
+    items.push(<ContextMenuSeparator key="s2" />)
+    items.push(
+      <ContextMenuItem key="refresh" onClick={refresh}>
+        <Icon name="refresh-cw" /> 刷新
+      </ContextMenuItem>,
+      <ContextMenuSub key="sort">
+        <ContextMenuSubTrigger>
+          <Icon name="arrow-up-down" /> 排序方式
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuItem onClick={() => settings.update({ sortBy: "name" })}>按名称</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ sortBy: "size" })}>按大小</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ sortBy: "mtime" })}>按修改时间</ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => settings.update({ sortDir: settings.sortDir === "asc" ? "desc" : "asc" })}>
+            {settings.sortDir === "asc" ? "改为降序" : "改为升序"}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ foldersFirst: !settings.foldersFirst })}>
+            {settings.foldersFirst ? "停用文件夹置顶" : "启用文件夹置顶"}
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>,
+      <ContextMenuSub key="view">
+        <ContextMenuSubTrigger>
+          <Icon name="layout-grid" /> 视图
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuItem onClick={() => settings.update({ view: "list" })}>列表</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ view: "grid" })}>网格</ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    )
+    items.push(<ContextMenuSeparator key="s3" />)
+    items.push(
+      <ContextMenuItem key="zipHere" disabled={!me.perms.downloadFolder || !path} onClick={() => { if (!me.perms.downloadFolder) noPermToast(); else triggerDownload(zipUrl([path])).catch(() => {}) }}>
+        <Icon name="folder-archive" /> 打包下载当前目录
+      </ContextMenuItem>,
+      <ContextMenuItem key="shortcut" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else { setShortcutEntry(null); setShortcutOpen(true) } }}>
+        <Icon name="link" /> 创建快捷方式
+      </ContextMenuItem>,
+      <ContextMenuItem key="copyPath" onClick={() => copyText(path ? `/${path}` : "/", "已复制当前路径")}>
+        <Icon name="clipboard-copy" /> 复制当前路径
+      </ContextMenuItem>,
+      <ContextMenuItem key="details" onClick={() => { setDialogEntry(null); setDialog("details") }}>
+        <Icon name="info" /> 此目录详情
       </ContextMenuItem>
     )
     return items
@@ -692,7 +862,7 @@ export function BrowserPage() {
                   ref={dblClickRef(entry)}
                   data-animate-item
                   className={cn(
-                    "group flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 transition-colors select-none",
+                    "group dense-row flex cursor-default items-center gap-3 rounded-md px-2 transition-colors select-none",
                     isSelected ? "bg-accent" : "hover:bg-muted/70"
                   )}
                   onClick={(e) => select(entry, index, e)}
@@ -836,21 +1006,19 @@ export function BrowserPage() {
             </div>
           )}
 
-          {/* 文件列表（填满高度） */}
-          <div
-            ref={listRef}
-            className={cn("edge-highlight relative flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card", dragOver && "border-ring")}
-            onClick={(e) => { if (e.target === e.currentTarget) setSelected(new Set()) }}
-            onContextMenu={(e) => {
-              const targetEl = e.target as HTMLElement
-              const isBg = targetEl === e.currentTarget || targetEl.className?.includes?.("flex-1") || targetEl.tagName === "svg"
-              if (isBg) {
-                e.preventDefault()
-                e.stopPropagation()
-                setEmptyMenuPos({ x: e.clientX, y: e.clientY })
+          {/* 文件列表（填满高度）。整块挂一个 ContextMenu：行自带的菜单会 stopPropagation，
+              所以空白处右键自然落到这里 —— 不必再靠 className 猜「是不是背景」 */}
+          <ContextMenu>
+            <ContextMenuTrigger
+              render={
+                <div className={cn("edge-highlight relative flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card", dragOver && "border-ring")} />
               }
-            }}
-          >
+            >
+              <div
+                ref={listRef}
+                className="flex min-h-0 flex-1 flex-col"
+                onClick={(e) => { if (e.target === e.currentTarget) setSelected(new Set()) }}
+              >
             {dragOver && (
               <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/80">
                 <div className="flex items-center gap-2 text-sm font-medium"><Icon name="upload" className="size-5" /> 松开以上传到当前文件夹</div>
@@ -890,7 +1058,10 @@ export function BrowserPage() {
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">{sorted.map(renderCard)}</div>
               </div>
               )}
-          </div>
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-56">{buildEmptyMenuItems()}</ContextMenuContent>
+          </ContextMenu>
         </div>
       </div>
 
@@ -922,7 +1093,7 @@ export function BrowserPage() {
       />
       <ConflictDialog
         open={conflictOpen}
-        onOpenChange={(o) => { setConflictOpen(o); if (!o) conflictResolveRef.current?.([]) }}
+        onOpenChange={(o) => { setConflictOpen(o); if (!o && conflictResolveRef.current) { conflictResolveRef.current(CONFLICT_CANCELLED); conflictResolveRef.current = null } }}
         conflicts={conflictNames}
         existingNames={existingNames}
         directoryNames={conflictDirs}
@@ -935,94 +1106,7 @@ export function BrowserPage() {
         currentPath={path}
         onDone={refresh}
       />
-      {emptyMenuPos && (
-        <EmptySpaceMenu
-          pos={emptyMenuPos}
-          onClose={() => setEmptyMenuPos(null)}
-          onRefresh={refresh}
-          onCreateShortcut={() => { setShortcutEntry(null); setShortcutOpen(true); setEmptyMenuPos(null) }}
-          onDetails={() => { setDialog("details"); setDialogEntry(null); setEmptyMenuPos(null) }}
-          sortDir={settings.sortDir}
-          foldersFirst={settings.foldersFirst}
-          onSortBy={(by) => { settings.update({ sortBy: by as "name" | "size" | "mtime" }); setEmptyMenuPos(null) }}
-          onSortDirToggle={() => { settings.update({ sortDir: settings.sortDir === "asc" ? "desc" : "asc" }); setEmptyMenuPos(null) }}
-          onFoldersFirstToggle={() => { settings.update({ foldersFirst: !settings.foldersFirst }); setEmptyMenuPos(null) }}
-        />
-      )}
     </AppShell>
-  )
-}
-
-function EmptySpaceMenu({
-  pos, onClose, onRefresh, onCreateShortcut, onDetails,
-  sortDir, foldersFirst, onSortBy, onSortDirToggle, onFoldersFirstToggle,
-}: {
-  pos: { x: number; y: number }
-  onClose: () => void
-  onRefresh: () => void
-  onCreateShortcut: () => void
-  onDetails: () => void
-  sortDir: string
-  foldersFirst: boolean
-  onSortBy: (by: string) => void
-  onSortDirToggle: () => void
-  onFoldersFirstToggle: () => void
-}) {
-  React.useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const menu = document.querySelector("[data-empty-context-menu]")
-      if (menu && !menu.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [onClose])
-
-  const x = Math.min(pos.x, window.innerWidth - 180)
-  const y = Math.min(pos.y, window.innerHeight - 300)
-
-  return (
-    <div
-      data-empty-context-menu
-      className="fixed z-50 max-h-(--available-height) min-w-36 overflow-x-hidden overflow-y-auto rounded-md bg-popover/70 p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 backdrop-blur-2xl backdrop-saturate-150"
-      style={{ left: x, top: y }}
-    >
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onCreateShortcut(); onClose() }}>
-        <Icon name="link" className="size-4" /> 创建快捷方式
-      </button>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onRefresh(); onClose() }}>
-        <Icon name="refresh-cw" className="size-4" /> 刷新
-      </button>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onDetails(); onClose() }}>
-        <Icon name="info" className="size-4" /> 此目录详情
-      </button>
-      <div className="-mx-1 my-1 h-px bg-foreground/5" />
-      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">排序方式</div>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onSortBy("name"); onClose() }}>
-        <Icon name="arrow-up-a-z" className="size-4" /> 按名称
-      </button>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onSortBy("size"); onClose() }}>
-        <Icon name="arrow-up-1-0" className="size-4" /> 按大小
-      </button>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onSortBy("mtime"); onClose() }}>
-        <Icon name="clock" className="size-4" /> 按修改时间
-      </button>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onSortDirToggle(); onClose() }}>
-        <Icon name={sortDir === "asc" ? "arrow-down" : "arrow-up"} className="size-4" />
-        {sortDir === "asc" ? "改为降序" : "改为升序"}
-      </button>
-      <button className="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-foreground/10"
-        onClick={() => { onFoldersFirstToggle(); onClose() }}>
-        <Icon name={foldersFirst ? "check" : "minus"} className="size-4" />
-        文件夹置顶
-      </button>
-    </div>
   )
 }
 

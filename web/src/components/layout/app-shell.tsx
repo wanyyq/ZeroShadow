@@ -3,6 +3,7 @@ import * as React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Icon } from "@/components/icon"
@@ -11,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
 import { useGroups } from "@/state/groups"
+import { useClientSettings } from "@/state/client-settings"
 import { cn } from "@/lib/utils"
 import { api, uploadAvatar } from "@/lib/api"
 import { ownerForMe, primeAvatar } from "@/lib/avatar-cache"
@@ -26,9 +28,94 @@ function navItems(loggedIn: boolean) {
   items.push(
     { path: "/tools", icon: "wrench", label: "工具" },
     { path: "/settings", icon: "settings", label: "设置" },
-    { path: "/about", icon: "info", label: "关于" }
+    { path: "/about", icon: "info", label: "软件开源信息" }
   )
   return items
+}
+
+// 桌面侧边栏的折叠状态现在由 ClientSettingsProvider 统一持有
+// （键 zs-client-settings.sidebarCollapsed），这样「设置 → 外观」也能改它，
+// 并且会从旧的 zs-sidebar-collapsed 键自动迁移。
+
+/** 复制纯文本并给出反馈；隐私模式等场景下 navigator.clipboard 可能不可用 */
+function copyLink(text: string, okMsg: string) {
+  void navigator.clipboard?.writeText(text).then(
+    () => toast.success(okMsg),
+    () => toast.error("复制失败，请手动复制")
+  )
+}
+
+/**
+ * 侧边栏统一行（品牌、导航、折叠按钮共用）。
+ *
+ * 对齐的关键：图标固定放在 32px 的槽里、外层 px-2、间距 gap-2.5 —— 三者对所有行一致，
+ * 所以展开时所有文字都从同一条竖线开始，折叠时所有图标都落在栏的水平中心。
+ * 旧实现里品牌用的是 gap-2.5 + 32px 图标、导航用的是 gap-3 + 18px 图标，
+ * 折叠时品牌还留着 gap，于是文字与图标都对不齐。
+ *
+ * 右键菜单挂在外面那层 div 上（而不是 render 到 button 上）：Base UI 的 render 合并
+ * 有可能吞掉 render 元素上的 React 事件，导航点击不能冒这个风险。
+ */
+function SidebarRow({
+  icon, label, collapsed, active, onClick, danger, contextItems,
+}: {
+  icon: string
+  label: string
+  collapsed: boolean
+  active?: boolean
+  onClick: () => void
+  danger?: boolean
+  contextItems?: React.ReactNode
+}) {
+  const button = (
+    <button
+      type="button"
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex w-full items-center rounded-lg text-sm transition-colors duration-150 outline-none",
+        "focus-visible:ring-3 focus-visible:ring-ring/50",
+        collapsed ? "mx-auto size-9 justify-center gap-0" : "gap-2.5 px-2 py-1.5",
+        danger
+          ? "text-destructive hover:bg-destructive/10"
+          : active
+            ? "bg-accent font-medium text-foreground"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+      )}
+    >
+      <span className="flex size-8 shrink-0 items-center justify-center">
+        <Icon name={icon} className="size-[18px]" />
+      </span>
+      <span className={cn("truncate transition-all duration-200 ease-out", collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100")}>
+        {label}
+      </span>
+    </button>
+  )
+
+  if (!contextItems) return button
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={<div className={cn(collapsed ? "mx-auto w-9" : "w-full")} />}>
+        {button}
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">{contextItems}</ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+/** 导航项的右键菜单：新标签页打开 / 复制链接 */
+function navContextItems(path: string, label: string) {
+  return [
+    <ContextMenuItem key="newtab" onClick={() => window.open(path, "_blank", "noopener")}>
+      <Icon name="external-link" /> 在新标签页打开
+    </ContextMenuItem>,
+    <ContextMenuItem key="copy" onClick={() => copyLink(new URL(path, window.location.origin).href, `已复制「${label}」的链接`)}>
+      <Icon name="clipboard-copy" /> 复制链接
+    </ContextMenuItem>,
+  ]
 }
 
 interface ShellContextValue {
@@ -178,7 +265,7 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
 }
 
 function GroupSwitcher() {
-  const { groups, currentId, setCurrent } = useGroups()
+  const { groups, currentId, setCurrent, refresh: refreshGroups } = useGroups()
   const { me, refresh } = useAuth()
   const navigate = useNavigate()
   if (me.role === "guest") return null
@@ -189,8 +276,13 @@ function GroupSwitcher() {
   }
   const label = currentId === "default" ? "默认" : groups.find((g) => g.id === currentId)?.name || "默认"
   return (
-    <Select value={currentId} onValueChange={onChange}>
-      <SelectTrigger className="h-8 w-28 text-xs sm:w-32" size="sm" title="切换小组上下文">
+    <Select
+      value={currentId}
+      onValueChange={onChange}
+      // 打开时重拉一次列表：否则在「设置 → 小组」里刚建/删的小组，要刷新整页才会出现在这里
+      onOpenChange={(open) => { if (open) void refreshGroups() }}
+    >
+      <SelectTrigger className="h-8 w-28 text-xs sm:w-32" size="sm" title="切换小组身份">
         <Icon name="layers" className="size-3.5 shrink-0" />
         <SelectValue render={(_p, s) => <>{s.value === "default" ? "默认" : groups.find((g) => g.id === s.value)?.name || "默认"}</>}>{label}</SelectValue>
       </SelectTrigger>
@@ -210,11 +302,16 @@ function GroupSwitcher() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { me, logout } = useAuth()
+  const { me, logout, refresh } = useAuth()
   const { theme, setTheme } = useTheme()
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [userCardOpen, setUserCardOpen] = React.useState(false)
   const [searchText, setSearchText] = React.useState("")
+  const { sidebarCollapsed: collapsed, update: updateSettings } = useClientSettings()
+
+  const toggleCollapsed = React.useCallback(() => {
+    updateSettings({ sidebarCollapsed: !collapsed })
+  }, [updateSettings, collapsed])
 
   const isActive = (path: string) => {
     if (path === "/") return location.pathname === "/"
@@ -245,17 +342,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </form>
   )
 
-  const sidebarNav = (
-    <div className="flex flex-col gap-1">
+  // 导航行：折叠时只留图标（窄屏抽屉传 false，始终完整显示）
+  const sidebarNav = (isCollapsed: boolean) => (
+    <div className="flex flex-col gap-0.5">
       {navItems(me.role !== "guest").map((item) => (
-        <button key={item.path} onClick={() => { navigate(item.path); setMobileOpen(false) }}
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150",
-            isActive(item.path) ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          <Icon name={item.icon} className="size-[18px] shrink-0" /> {item.label}
-        </button>
+        <SidebarRow
+          key={item.path}
+          icon={item.icon}
+          label={item.label}
+          collapsed={isCollapsed}
+          active={isActive(item.path)}
+          onClick={() => { navigate(item.path); setMobileOpen(false) }}
+          contextItems={navContextItems(item.path, item.label)}
+        />
       ))}
     </div>
   )
@@ -263,19 +362,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ShellContext.Provider value={{ searchText, searchEl, onSearchChange: setSearchText }}>
       <div className="flex h-dvh overflow-hidden">
-        {/* 桌面侧边栏 */}
-        <aside className="hidden h-full w-48 shrink-0 flex-col border-r border-border/40 sm:flex">
-          <div className="flex flex-1 flex-col overflow-y-auto px-2 pt-4">
-            <div className="mb-6 flex items-center gap-2.5 px-3">
+        {/* 桌面侧边栏（可折叠为仅图标；窄屏隐藏，改用下方抽屉） */}
+        <aside
+          className={cn(
+            "hidden h-full shrink-0 flex-col overflow-hidden border-r border-border/40 transition-[width] duration-200 ease-out sm:flex",
+            collapsed ? "w-14" : "w-48"
+          )}
+        >
+          <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-3">
+            {/* 品牌：与导航行共用同一套栅格（32px 图标槽 + gap-2.5 + px-2），保证文字与图标都对齐 */}
+            <div
+              className={cn(
+                "mb-3 flex items-center rounded-lg",
+                collapsed ? "mx-auto size-9 justify-center gap-0" : "gap-2.5 px-2 py-1.5"
+              )}
+            >
               <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <Icon name="hard-drive" className="size-4" />
               </span>
-              <div>
-                <p className="text-sm font-semibold leading-tight">Wangyq</p>
+              <div className={cn("min-w-0 transition-all duration-200 ease-out", collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100")}>
+                <p className="text-sm leading-tight font-semibold">Wangyq</p>
                 <p className="text-[10px] leading-tight text-muted-foreground">ZeroShadow</p>
               </div>
             </div>
-            {sidebarNav}
+            {sidebarNav(collapsed)}
+          </div>
+
+          {/* 折叠开关：与导航行同栅格 —— 展开时和导航左对齐，折叠时图标落在同一竖线上 */}
+          <div className="shrink-0 border-t border-border/40 px-2 py-2">
+            <SidebarRow
+              icon={collapsed ? "panel-left-open" : "panel-left-close"}
+              label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+              collapsed={collapsed}
+              onClick={toggleCollapsed}
+            />
           </div>
         </aside>
 
@@ -297,24 +417,51 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="hidden flex-1 sm:block" />
+            {/* 居右顺序固定为：主题切换 → 身份（小组）切换 → 用户头像 + 名字 */}
             <div className="ml-auto flex items-center gap-1">
-              <GroupSwitcher />
-              <button onClick={cycleTheme} title={theme === "light" ? "浅色" : theme === "dark" ? "深色" : "跟随系统"}
-                className="hidden rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex">
+              <button
+                onClick={cycleTheme}
+                title={theme === "light" ? "当前：浅色（点击切换）" : theme === "dark" ? "当前：深色（点击切换）" : "当前：跟随系统（点击切换）"}
+                aria-label="切换主题"
+                className="hidden rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex"
+              >
                 <Icon name={themeIcon} className="size-[18px]" />
               </button>
+              <GroupSwitcher />
               {me.role === "guest" ? (
                 <Button size="sm" variant="ghost" onClick={() => navigate("/login")}>
                   <Icon name="log-in" className="size-3.5" /> 登录
                 </Button>
               ) : (
-                <button
-                  onClick={() => setUserCardOpen(true)}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-muted"
-                >
-                  <Avatar owner={ownerForMe(me)} name={me.username} size={24} />
-                  <span className="hidden sm:inline text-muted-foreground">{me.username}</span>
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger
+                    render={<div className="flex items-center" />}
+                  >
+                    <button
+                      onClick={() => setUserCardOpen(true)}
+                      title={`${me.username}（${ROLE_LABEL[me.role] || me.role}）`}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+                    >
+                      <Avatar owner={ownerForMe(me)} name={me.username} size={24} />
+                      <span className="hidden max-w-24 truncate text-muted-foreground sm:inline">{me.username}</span>
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-52">
+                    <ContextMenuItem onClick={() => setUserCardOpen(true)}>
+                      <Icon name="user-round" /> 账户面板
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => copyLink(me.username || "", "已复制用户名")}>
+                      <Icon name="clipboard-copy" /> 复制用户名
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => { void refresh(); toast.success("已刷新账户信息") }}>
+                      <Icon name="refresh-cw" /> 刷新账户信息
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem variant="destructive" onClick={async () => { await logout(); navigate("/") }}>
+                      <Icon name="log-out" /> 退出登录
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )}
             </div>
           </header>
@@ -327,7 +474,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"><Icon name="hard-drive" className="size-3.5" /></span>
               <span className="font-heading text-sm font-semibold">Wangyq ZeroShadow</span>
             </div>
-            <div className="flex flex-col gap-1 p-3">{sidebarNav}</div>
+            <div className="flex flex-col gap-1 p-3">{sidebarNav(false)}</div>
           </div>
 
           {/* 主内容 */}

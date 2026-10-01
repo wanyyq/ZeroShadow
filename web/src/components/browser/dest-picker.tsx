@@ -8,8 +8,8 @@ import type { Entry } from "@/lib/types"
 import { joinPath, parentOf } from "@/lib/format"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import { detectConflicts } from "@/lib/conflict"
-import type { ConflictItem } from "@/lib/conflict"
+import { CONFLICT_CANCELLED, detectConflicts } from "@/lib/conflict"
+import type { ConflictResolution } from "@/lib/conflict"
 import { ConflictDialog } from "@/components/browser/conflict-dialog"
 
 export function DestPickerDialog({
@@ -35,7 +35,7 @@ export function DestPickerDialog({
   const [conflictNames, setConflictNames] = React.useState<string[]>([])
   const [conflictExisting, setConflictExisting] = React.useState<Set<string>>(new Set())
   const [conflictDirs, setConflictDirs] = React.useState<Set<string>>(new Set())
-  const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
+  const conflictResolveRef = React.useRef<((items: ConflictResolution) => void) | null>(null)
 
   const load = React.useCallback((path: string) => {
     setLoading(true)
@@ -50,7 +50,12 @@ export function DestPickerDialog({
   }, [])
 
   React.useEffect(() => {
-    if (open) load("")
+    if (!open) return
+    // 每次打开都复位 busy：这个组件是常驻挂载的（open 变 false 并不会卸载），
+    // 而旧实现的成功路径忘了 setBusy(false)，于是「复制到…/移动到…」用过一次
+    // 之后确认按钮就永久置灰，必须刷新整页才能恢复。
+    setBusy(false)
+    load("")
   }, [open, load])
 
   const disabled = sourcePaths.some(
@@ -76,34 +81,42 @@ export function DestPickerDialog({
         setConflictExisting(existingNames)
         setConflictDirs(new Set(conflicts.filter((n) => existingDirs.has(n))))
         conflictResolveRef.current = async (items) => {
+          // 取消：直接中止，不要继续执行
+          if (items === CONFLICT_CANCELLED) { setBusy(false); return }
           const skipSet = new Set(items.filter((r) => r.action === "skip").map((r) => r.name))
           const overwrite = items.some((r) => r.action === "overwrite")
           const renameMap = new Map(items.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
           const mergeSet = new Set(items.filter((r) => r.action === "merge").map((r) => r.name))
           const sources: string[] = []
           const mergeSources: string[] = []
+          const targetNames: Record<string, string> = {}
           for (const s of sourcePaths) {
             const name = s.split("/").pop() || ""
             if (skipSet.has(name)) continue
             if (mergeSet.has(name)) { mergeSources.push(s); continue }
-            if (renameMap.has(name)) {
-              const parent = s.includes("/") ? s.slice(0, s.lastIndexOf("/")) : ""
-              sources.push(parent ? `${parent}/${renameMap.get(name)}` : renameMap.get(name)!)
-            } else {
-              sources.push(s)
-            }
+            sources.push(s)
+            // 「重命名」交给服务端：传「原始来源 + 期望的目标名」。
+            // 旧实现把来源路径改成新名字再发出去，源文件并不存在 → 必然 404。
+            const renamed = renameMap.get(name)
+            if (renamed) targetNames[s] = renamed
           }
           try {
             const promises: Promise<unknown>[] = []
             if (sources.length) {
-              promises.push(api.post(`/fs/${mode}`, { sources, dest: current, ...(overwrite ? { overwrite: true } : {}) }))
+              promises.push(api.post(`/fs/${mode}`, {
+                sources,
+                dest: current,
+                ...(overwrite ? { overwrite: true } : {}),
+                ...(Object.keys(targetNames).length ? { targetNames } : {}),
+              }))
             }
             if (mergeSources.length) {
               promises.push(api.post(`/fs/${mode}`, { sources: mergeSources, dest: current, merge: true }))
             }
-            if (promises.length === 0) { onOpenChange(false); return }
+            if (promises.length === 0) { setBusy(false); onOpenChange(false); return }
             await Promise.all(promises)
             toast.success(mode === "copy" ? "复制完成" : "移动完成")
+            setBusy(false)
             onOpenChange(false)
             onDone()
           } catch (err) { toast.error((err as Error).message); setBusy(false) }
@@ -193,7 +206,7 @@ export function DestPickerDialog({
     </Dialog>
     <ConflictDialog
       open={conflictOpen}
-      onOpenChange={(o) => { setConflictOpen(o); if (!o) conflictResolveRef.current?.([]) }}
+      onOpenChange={(o) => { setConflictOpen(o); if (!o && conflictResolveRef.current) { conflictResolveRef.current(CONFLICT_CANCELLED); conflictResolveRef.current = null } }}
       conflicts={conflictNames}
       existingNames={conflictExisting}
       directoryNames={conflictDirs}

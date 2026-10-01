@@ -138,6 +138,40 @@
   --noise-opacity: 0.025;
 }
 
+/* ============================================================================
+   外观偏好
+   由 state/client-settings.tsx 写到 <html> 的 data-* 属性上，这里统一生效。
+   选择器一律带 html[data-...] 前缀，确保优先级高于 :root / .dark 的同名变量。
+   ============================================================================ */
+
+/* 字号：Tailwind 的尺寸都是 rem，缩放根字号即可整体缩放 */
+html[data-font-scale="sm"] { font-size: 15px; }
+html[data-font-scale="base"] { font-size: 16px; }
+html[data-font-scale="lg"] { font-size: 17.5px; }
+
+/* 背景噪点：直接关掉 body::before 的透明度变量 */
+html[data-noise="off"] { --noise-opacity: 0; }
+
+/* 界面密度：列表行与卡片的内边距通过 --row-py 收放，
+   使用方只需挂 .dense-row（文件列表、待办列表等）。
+   舒适档刻意等于原来的 py-1.5，保证默认视觉不变。 */
+:root { --row-py: 0.375rem; }
+html[data-density="compact"] { --row-py: 0.125rem; }
+.dense-row {
+  padding-top: var(--row-py);
+  padding-bottom: var(--row-py);
+}
+
+/* 减少动画：同时压掉 CSS 过渡与动画；GSAP 入场由 lib/lucide.ts 自行跳过 */
+html[data-reduce-motion="1"] *,
+html[data-reduce-motion="1"] *::before,
+html[data-reduce-motion="1"] *::after {
+  transition-duration: 1ms !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

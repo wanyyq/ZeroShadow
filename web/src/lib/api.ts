@@ -5,6 +5,7 @@ import type {
   TodosResponse,
   MetricsResponse,
   BackupsResponse,
+  UploadResult,
 } from "@/lib/types"
 
 export class ApiError extends Error {
@@ -206,9 +207,17 @@ export function uploadFiles(
       if (e.lengthComputable) onProgress(e.loaded, e.total)
     }
     xhr.onload = () => {
-      const data = xhr.response as { error?: string } | null
-      if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response)
-      else reject(new ApiError(xhr.status, data?.error || `上传失败 (${xhr.status})`))
+      const data = xhr.response as
+        | { error?: string; results?: UploadResult["results"]; limitMB?: number }
+        | null
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response)
+        return
+      }
+      // 413 的响应体是 { results, limitMB }，没有 error 字段。原样只报「上传失败 (413)」
+      // 会把「超出大小限制 (512MB)」这个真正有用的原因丢掉。
+      const detail = data?.results?.find((r) => !r.ok && r.error)?.error
+      reject(new ApiError(xhr.status, data?.error || detail || `上传失败 (${xhr.status})`))
     }
     xhr.onerror = () => reject(new ApiError(0, "网络错误，上传中断"))
     xhr.onabort = () => reject(new ApiError(0, "已取消上传"))

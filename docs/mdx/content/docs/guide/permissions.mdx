@@ -157,6 +157,53 @@ fileWrite = 关
 - 作业进度是否仅创建者可见（`jobStatusOwnerOnly`）
 - 链接下载是否允许访问内网（`downloadUrlAllowPrivate`）
 - 写操作是否校验来源（`csrfOriginCheck`）
+- 默认上下文（不属于任何小组或选择「默认」）的可见范围（`defaultVisibility`）
+
+## 小组上下文（权限收窄）
+
+小组**不改变角色**，而是给成员加一层"上下文"：一名成员可以同时属于多个小组，在顶栏切换小组之后，
+**文件可见范围、有效权限与团队待办都会跟着收窄**。这一节讲的是它与上表权限矩阵的叠加规则。
+
+服务端在**每个请求**上重新解析当前小组、并算出本轮的有效权限
+（`server/src/config.js` 的 `effectivePerms(role, group)`），所以切换小组立即生效、不需要重新登录。
+
+```text
+最终权限(某个权限点) = 全局 memberPerms(该权限点) AND 小组 perms(该权限点)
+```
+
+<Callout type="info" title="小组只能收窄，不能放宽">
+服务端算有效权限时用的是 `effectivePerms(role, group)`：把全局 `memberPerms` 与所选小组的 `perms`
+**逐项取与**。所以小组里打开的项目，只有在全局也开着时才会生效；全局已关的项目，小组里怎么勾都无效。
+</Callout>
+
+| 维度 | 规则 |
+|:--|:--|
+| 谁有小组上下文 | 仅 `member`；超管可切换任意小组（不受小组权限约束，权限表固定全开）；访客没有小组上下文，只受 `guestHiddenPaths`（「对访客隐藏」）约束 |
+| 能切换到哪些小组 | 成员只能切到**自己所属**的小组（`/api/auth/groups` 返回的就是这份名单） |
+| 怎么切换 | 顶栏的小组选择器；选「默认」表示不使用小组上下文 |
+| 请求怎么带 | 普通请求带 `X-ZS-Group: <小组 id>`；`<img>` / `<video>` 这类无法自定义头的请求用 `?group=<小组 id>` 兜底 |
+| 上下文无效时 | 小组不存在、或调用者不属于该小组时**静默回退到默认上下文**（不报错，避免泄露小组结构） |
+| 可见范围 | 白名单 `whitelist` 为空 = 不限制；填了则**只能**看到白名单内的目录及其子目录；黑名单 `blacklist` **优先于白名单**，命中即不可见 |
+| 不可见的表现 | 一律按"不存在"处理：列目录里没有、直接访问返回 **404「文件或目录不存在」**、搜索 / 打包 / 压缩都会跳过 |
+| 默认上下文 | 不属于任何小组、或选择「默认」时，套用「设置 → 数据与保留 → 默认上下文可见范围」（`defaultVisibility`）里的白 / 黑名单 |
+| 上限与存放 | 小组最多 **200** 个；每个小组最多 **500** 名成员、**100** 名组长；成员被删除时会自动从所有小组移除。小组数据存在 `data/groups.json` |
+
+小组成员关系、可见范围与权限都在「设置 → 小组」里维护（见 [管理员指南](/docs/zeroshadow/admin/admin-guide) 的「小组」一节）。
+组长也可以在「团队」页自助调整本组的可见范围与成员——前提是超管把对应能力下放给了这个小组。
+
+### 组长能力 `leaderCaps`
+
+超管在「设置 → 小组 → 编辑小组 → 基本 → 组长权限」里逐项决定组长能做什么。
+未勾选的能力，组长在该小组内**完全不可用**（接口返回 403）。
+
+| 能力字段 | 后台名称 | 默认 | 作用 |
+|:--|:--|:--|:--|
+| `viewMembers` | 查看本组成员名单 | **开** | 在「团队」页看到本组成员；关掉后连成员名单都返回空数组 |
+| `manageTodo` | 创建 / 编辑本组待办 | **开** | 向本组下发待办，并管理本组与本组成员的待办 |
+| `editMemberAvatar` | 修改本组成员头像 | **关** | 修改本组成员的头像（超管始终可以改任意头像） |
+| `manageMembers` | 管理本组成员与可见范围 | **关** | 增删本组成员、调整本组可见范围；**不能**改名称 / 颜色 / 权限（这三项仍归超管） |
+
+组长的权限边界只到「自己是组长、且该小组开启了对应能力」为止，超出范围一律 403。
 
 ## 访客隐藏文件夹
 
@@ -256,7 +303,7 @@ fileWrite = 关
 ## 相关页面
 
 <Cards>
-  <Card title="管理员指南" href="/docs/zeroshadow/admin/admin-guide" description="「设置」页七个标签页的逐项说明" />
+  <Card title="管理员指南" href="/docs/zeroshadow/admin/admin-guide" description="「设置」页九个标签页的逐项说明" />
   <Card title="使用手册" href="/docs/zeroshadow/guide/manual" description="各角色在界面上的实际操作" />
   <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description="路径/端口/TRUST_PROXY 等 .env 项逐条对照" />
   <Card title="安全设计" href="/docs/zeroshadow/security/design" description="限流、SSRF、CSRF 等防护的取舍" />

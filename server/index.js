@@ -17,7 +17,7 @@ import { initAvatars } from "./src/avatars.js"
 import { runDailySnapshot } from "./src/backup.js"
 import { metricsMiddleware, startMetrics, stopMetrics } from "./src/metrics.js"
 import authRoutes from "./src/routes/auth.js"
-import fsRoutes from "./src/routes/fs.js"
+import fsRoutes, { SAVE_FILE_MAX_BYTES } from "./src/routes/fs.js"
 import adminRoutes from "./src/routes/admin.js"
 import avatarRoutes from "./src/routes/avatars.js"
 import todoRoutes from "./src/routes/todos.js"
@@ -66,6 +66,10 @@ app.use((_req, res, next) => {
 })
 
 app.use(cookieParser())
+// 在线编辑（/api/fs/save-file）提交的是整个文件正文，1MB 显然不够：该端点单独放宽。
+// body-parser 解析成功后会标记 req._body，后面的全局解析器不会再重复解析，
+// 其余接口仍然保持 1MB 上限。
+app.use("/api/fs/save-file", express.json({ limit: SAVE_FILE_MAX_BYTES }))
 app.use(express.json({ limit: "1mb" }))
 
 // 全局限流：防止隧道代理场景下的 TCP 缓冲问题
@@ -206,6 +210,22 @@ const server = app.listen(env.port, env.host, () => {
   }
   const tunnel = getConfig().tunnel
   if (tunnel.enabled) applyTunnelConfig(tunnel)
+})
+
+// 进程级兜底：未处理的 Promise 拒绝在 Node 15+ 默认是致命错误 —— 一次失败的上传
+// 清理（例如磁盘写满后 rm 也失败）就足以让局域网里所有人的网盘同时断线。
+// 这里只记录、不退出，优先保证服务可用性。
+process.on("unhandledRejection", (reason) => {
+  try {
+    logError("unhandled_rejection", { msg: reason instanceof Error ? reason.message : String(reason) })
+  } catch { /* 日志失败也不能再抛 */ }
+})
+process.on("uncaughtException", (err) => {
+  // 刻意不退出：本项目没有进程管理器（无 Docker / 无 pm2），退出即全员断线。
+  // 详情写进日志，便于通过后台「日志与指标」排查。
+  try {
+    logError("uncaught_exception", { msg: err?.message || String(err), stack: err?.stack })
+  } catch { /* 同上 */ }
 })
 
 function shutdown() {

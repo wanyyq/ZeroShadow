@@ -3,22 +3,11 @@ import { useSearchParams, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/icon"
-import { downloadUrl } from "@/lib/api"
+import { downloadUrl, triggerDownload } from "@/lib/api"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { previewType } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/state/auth"
-
-const EXT_KIND: Record<string, "image" | "video" | "audio" | "pdf" | "text" | "html"> = {
-  jpg: "image", jpeg: "image", png: "image", gif: "image", webp: "image", bmp: "image", avif: "image", svg: "image", tiff: "image", tif: "image", heic: "image", ico: "image",
-  mp4: "video", webm: "video", mov: "video", mkv: "video", wmv: "video", flv: "video", "3gp": "video", m4v: "video",
-  mp3: "audio", wav: "audio", flac: "audio", m4a: "audio", ogg: "audio", aac: "audio",
-  pdf: "pdf",
-  html: "html", htm: "html",
-}
-
-function escapeHtml(str: string): string {
-  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" }
-  return str.replace(/[&<>"']/g, (m) => map[m])
-}
 
 export default function PreviewPage() {
   const [params] = useSearchParams()
@@ -26,12 +15,14 @@ export default function PreviewPage() {
   const { me } = useAuth()
   const entryPath = params.get("path") || ""
   const name = entryPath.split("/").pop() || ""
-  const ext = (name.split(".").pop() || "").toLowerCase()
-  // HTML 正常走 /html-preview 专用路由；若因权限被路由到这里，按文本预览，
-  // 否则没有任何分支匹配会得到空白页
-  const mappedKind = EXT_KIND[ext] || "text"
-  const kind: string = mappedKind === "html" ? "text" : mappedKind
-  const url = entryPath ? downloadUrl(entryPath, true) : ""
+  // 只认 format.ts 的 previewType：未知扩展名（docx / zip / exe …）返回 null，
+  // 绝不能当文本抓取 —— 二进制会被渲染成一大片乱码，还没有任何兜底提示。
+  const previewKind = previewType(name)
+  const supported = !!entryPath && previewKind !== null
+  // html/htm 在 previewType 里就是 "text"：正常走 /html-preview 专用路由；
+  // 若因权限被路由到这里，按文本预览（否则没有分支匹配会得到空白页）
+  const kind: string = previewKind ?? "text"
+  const url = supported ? downloadUrl(entryPath, true) : ""
   const [text, setText] = React.useState<string | null>(null)
   const [scale, setScale] = React.useState(0)
   const [pos, setPos] = React.useState({ x: 0, y: 0 })
@@ -51,15 +42,17 @@ export default function PreviewPage() {
   }, [me.perms.preview, navigate])
 
   React.useEffect(() => {
-    if (kind === "text" && url) {
+    if (supported && kind === "text" && url) {
+      // 不要在这里做 HTML 转义：内容是交给 JSX 文本节点渲染的，React 本身就会转义，
+      // 手动再转一次会让引号、尖括号在屏幕上显示成 &quot; / &lt; 字面量。
       fetch(url, { credentials: "same-origin" })
-        .then(async (r) => { if (r.ok) setText(escapeHtml(await r.text())); else setText("加载失败") })
+        .then(async (r) => { if (r.ok) setText(await r.text()); else setText("加载失败") })
         .catch(() => setText("加载失败"))
     }
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") navigate(-1) }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [url, kind, navigate])
+  }, [url, kind, supported, navigate])
 
   React.useEffect(() => { setScale(0); setPos({ x: 0, y: 0 }); setFitScale(1) }, [url])
 
@@ -143,7 +136,9 @@ export default function PreviewPage() {
   const resetZoom = () => { setScale(0); setPos({ x: 0, y: 0 }) }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <ContextMenu>
+      <ContextMenuTrigger render={<div className="fixed inset-0 z-50" />}>
+        <div className="flex h-full flex-col bg-background">
       <div className="relative z-10 flex shrink-0 items-center justify-between border-b border-border bg-background px-4 py-2">
         <span className="truncate text-sm font-medium">{name}</span>
         <div className="flex items-center gap-1">
@@ -204,7 +199,14 @@ export default function PreviewPage() {
         {kind === "pdf" && (
           <iframe src={url} title={name} className="h-full w-full" />
         )}
-        {kind === "text" && (
+        {!supported && (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+            <Icon name="circle-slash" className="size-10 text-muted-foreground" />
+            <p className="text-sm font-medium">暂不支持预览此格式</p>
+            <p className="max-w-md truncate text-xs text-muted-foreground">{name}</p>
+          </div>
+        )}
+        {supported && kind === "text" && (
           <div className="h-full overflow-auto bg-muted/30">
             <pre className={cn("p-6 font-mono text-sm whitespace-pre-wrap", text ? "" : "opacity-50")}>
               {text ?? "加载中…"}
@@ -212,6 +214,27 @@ export default function PreviewPage() {
           </div>
         )}
       </div>
-    </div>
+        </div>
+      </ContextMenuTrigger>
+      {/* 查看页的右键菜单：下载、新标签打开、复制链接、返回 */}
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem disabled={!me.perms.downloadFile} onClick={() => { if (!me.perms.downloadFile) return toast.warning("此功能您没权限"); triggerDownload(url).catch(() => toast.error("下载失败")) }}>
+          <Icon name="download" /> 下载原文件
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => window.open(url, "_blank", "noopener")}>
+          <Icon name="external-link" /> 在新标签页打开
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => { void navigator.clipboard?.writeText(new URL(url, window.location.origin).href).then(() => toast.success("已复制链接"), () => toast.error("复制失败")) }}>
+          <Icon name="clipboard-copy" /> 复制链接
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => { void navigator.clipboard?.writeText(entryPath).then(() => toast.success("已复制相对路径"), () => toast.error("复制失败")) }}>
+          <Icon name="clipboard-list" /> 复制相对路径
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => navigate(-1)}>
+          <Icon name="arrow-left" /> 返回
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

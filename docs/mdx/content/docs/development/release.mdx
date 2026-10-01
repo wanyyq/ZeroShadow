@@ -30,6 +30,13 @@ package-release.ps1        单个平台的收尾：暂存文档 → 清理凭据
 产物落在仓库根，命名为 `ZeroShadow-<版本>-<平台>.zip`，版本取自根 `package.json`。
 逐平台的暂存目录是 `build/<平台>/`（已 gitignore）。
 
+<Callout type="warn" title="windows-arm64 目前是实验性目标">
+`windows-arm64` 会在 **pkg 内部失败**（不是配置问题）：它的基础运行时能正常下载、
+SHA256 也与 `pkg-fetch` 的 `EXPECTED_HASHES` 完全一致，之后 pkg 5.8.1 仍然报错。
+所以 CI 把它标成 `experimental`（`continue-on-error`，允许这一格红着），
+发布门禁也只要求另外 **4** 个平台。等工具链修好（例如换 `@yao-pkg/pkg`）再摘掉这个标记。
+</Callout>
+
 <Callout type="error" title="windows-x32（32 位 Windows）做不出来，这是工具链限制">
 `pkg` 依赖的 `pkg-fetch` **从未**发布过 win-x86 的基础运行时——不是 node18 没有，
 而是**任何 Node 版本都没有**。已从三个独立来源核对：
@@ -39,7 +46,8 @@ package-release.ps1        单个平台的收尾：暂存文档 → 清理凭据
 2. `pkg-fetch` v3.4 的 GitHub release 共 **178** 个 asset，没有 win-x86；
 3. 社区维护分支 `@yao-pkg/pkg-fetch` 的 v3.5 release 共 **997** 个 asset，同样没有 win-x86。
 
-向 `pkg` 请求该目标会直接返回：
+向 `pkg` 请求该目标会直接返回 `Error! 404: Not Found / Not found in remote cache: {"tag":"v3.4","name":"node-v18.5.0-win-x86"}`，
+原始的多行输出是：
 
 ```text
 Error! 404: Not Found
@@ -108,6 +116,12 @@ pwsh -NoProfile -File build-release.ps1 -NoZip
 | `0` | 全部请求的平台都成功 |
 | `1` | 致命错误（工具链缺失、前端构建失败、请求了不支持的目标……） |
 | `2` | 至少一个平台失败（其它平台的结果仍保留，矩阵的 `fail-fast` 是关的） |
+
+<Callout type="info" title="平台数量：可用的是五个，不是六个">
+传 `windows-x32` 会**按设计直接退出 1**（打印原因，不会去下载运行时）——它永远构建不出来，原因见上。
+`Auto-building.bat` 的用法文本里还留着一句历史遗留的 `all six platforms`，
+但它下方列出的可用平台只有五个（`Platforms: windows-x64 windows-arm64 linux-x64 linux-arm64 linux-armv7`）。
+</Callout>
 
 <Callout type="info" title="Linux / macOS 上构建">
 ```bash
@@ -244,31 +258,72 @@ ZeroShadow-1.1.0-windows-x64.zip
 
 ## GitHub Actions 自动编译
 
-`.github/workflows/build-release.yml` 在 `windows-latest` 与 `ubuntu-latest` 上并行构建上表
-五个平台，每个平台产出一个 `ZeroShadow-<版本>-<平台>.zip`。
+`.github/workflows/build-release.yml` 的矩阵在 `windows-latest` 与 `ubuntu-latest` 上并行构建上表
+五个平台目标，每个平台产出一个 `ZeroShadow-<版本>-<平台>.zip`。其中 `windows-arm64` 是实验性目标
+（允许失败，发布也不要求），所以**发布门禁实际要求 4 个平台**。
 
 ### 触发条件
 
 | 事件 | 行为 |
 |:--|:--|
-| 推 `v*` 标签 | 构建，并把归档**附加到对应的 GitHub Release** |
-| 推到 `main`（限相关路径改动） | 构建，归档上传为 Actions 产物 |
-| Pull Request（限相关路径改动） | 构建校验，不上传 |
-| 手动 `workflow_dispatch` | 同上 |
+| 推 `v*` 标签 | 构建全部平台；随后由**独立的 `release` job**把归档附加到对应的 GitHub Release |
+| 推到 `main` | 构建全部平台，归档上传为 Actions 产物（不发布 Release）；纯文档改动会被 `paths-ignore` 跳过 |
+| Pull Request | 只在相关路径改动时构建校验；**同样上传 Actions 产物**，但不发布 Release |
+| 手动 `workflow_dispatch` | 与 `push` 相同：构建 + 上传产物；只有 ref 是 `v*` 标签时才会发布 Release |
 
-路径过滤覆盖 `server/**`、`web/**`、`docs/**`、`package.json`、两个构建脚本、
-`.env.example`、`LICENSE`、`README.md` 与工作流自身。
+<Callout type="warn" title="push 用的是 paths-ignore，不是 paths（踩过的坑）">
+GitHub 会把 `paths` 过滤**同样应用到标签推送**。而 `git tag v1.0.0 && git push --tags` 常常是
+"标签指向刚推过的那个提交"，此时标签推送的变更集为空 → 不匹配任何 `paths` → **工作流根本不触发**
+→ 一个 Release 都不会产生。发版恰恰最依赖标签触发，所以这条路必须无条件跑。
 
-### 每个平台的任务步骤
+因此 `push` 上写的是 **`paths-ignore`**（`**.md`、`docs/**`、`.gitignore`、`.gitattributes`），
+只排除纯文档改动；代价是推 `main` 也会构建 5 个平台。
+`pull_request` 上用的才是路径白名单：`server/**`、`web/**`、`build-release.ps1`、
+`package-release.ps1`、`.github/workflows/build-release.yml`。
+</Callout>
+
+工作流声明了 `permissions: contents: write`（标签构建需要写 Release）。
+
+### 每个平台的任务步骤（`build` job）
 
 1. `actions/checkout`
-2. `pnpm/action-setup`（pnpm 10）
-3. `actions/setup-node`（**Node 22**，带 pnpm 缓存，缓存键是两个锁文件）
-4. 打印工具链版本
+2. `pnpm/action-setup`（指定 pnpm 10，**必须在 setup-node 之前**，缓存集成才生效）
+3. `actions/setup-node`（**Node 22**，带 pnpm 缓存，缓存键是 `server/pnpm-lock.yaml` 与 `web/pnpm-lock.yaml`）
+4. 打印工具链版本（host node / pnpm / pwsh）
 5. `build-release.ps1 -Targets <平台> -FrozenLockfile`
-6. **校验归档内容**（见下）
-7. `actions/upload-artifact`（`if-no-files-found: error`）
-8. 标签构建时用 `gh release upload` 附加到 Release
+6. **校验归档内容**（见下，任何一项不符就 `throw`，该平台任务失败）
+7. `actions/upload-artifact`：产物名 `<平台>-archive`，`if-no-files-found: error`，`retention-days: 30`
+
+<Callout type="info" title="upload-artifact 没有事件条件">
+第 7 步**所有事件都会执行**：标签推送、`main` 推送、PR、手动触发都会留下 Actions 产物。
+"PR 不上传"是旧文档的错误说法。
+</Callout>
+
+矩阵里 `windows-arm64` 带 `experimental: true`，job 上是
+`continue-on-error: ${{ matrix.experimental == true }}`，所以这一格失败不会影响另外 4 个归档。
+
+### 发布 job（`release`）
+
+发布**不是** build job 里的一步，而是一个独立的 job：
+
+- `needs: build`，条件 `if: always() && startsWith(github.ref, 'refs/tags/v')`。
+  必须带 `always()`：默认行为是"`needs` 的 job 失败或被跳过 → 本 job 也跳过"，
+  那样只要有一个平台失败，Release 就会**静默不发布**；
+- 跑在 `ubuntu-latest`，`permissions: contents: write`，**不 checkout**（不需要源码）；
+- `env.GH_REPO: ${{ github.repository }}` 是**必需**的一行：`gh` 解析目标仓库的顺序是
+  `--repo` 参数 > `GH_REPO` 环境变量 > 当前目录的 git remote；这个 job 没有 checkout，
+  目录里没有 `.git` 也就没有 remote，不给 `GH_REPO` 时 `gh` 会以 "not a git repository" 在几秒内失败；
+- 凭据是 `secrets.RELEASE_TOKEN || github.token`。如果仓库的
+  Settings → Actions → General → Workflow permissions 是只读，`GITHUB_TOKEN` 会被降级
+  （workflow 里写 `contents: write` 也提不了权），此时要么改仓库设置，要么配一个带 repo 权限的 PAT 存成
+  `RELEASE_TOKEN`；
+- 步骤：`actions/download-artifact`（`pattern: "*-archive"` + `merge-multiple: true`）
+  → **必需平台门禁** → `gh release create`（已存在则改为覆盖上传）/ `gh release upload --clobber`
+  → 把结果写进 Job Summary。上传步骤刻意不用 `set -e`，而是手动接住 `gh` 的原始报错并写进
+  Annotations 与 Summary，否则失败原因只存在于需要鉴权的日志端点里，外部读不到。
+
+**必需平台门禁**：要求产物里存在 `windows-x64`、`linux-x64`、`linux-arm64`、`linux-armv7` 四个平台，
+缺任何一个就 `exit 1`，**拒绝发布不完整的 Release**；`windows-arm64` 缺失时只打印一行 warn，不拦发布。
 
 <Callout type="info" title="为什么 CI 用 Node 22 而产物是 node18">
 见上文「"node18" 指的是什么」。宿主 Node 只负责构建，pkg 目标决定产物内嵌的运行时。

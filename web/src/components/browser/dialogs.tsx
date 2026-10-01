@@ -22,7 +22,8 @@ import { fileKind, formatBytes, formatDate, joinPath, previewType } from "@/lib/
 import type { Entry, EntryStat } from "@/lib/types"
 import { toast } from "sonner"
 import { detectConflicts } from "@/lib/conflict"
-import type { ConflictItem } from "@/lib/conflict"
+import { CONFLICT_CANCELLED } from "@/lib/conflict"
+import type { ConflictResolution } from "@/lib/conflict"
 import { ConflictDialog } from "@/components/browser/conflict-dialog"
 
 export function NewFolderDialog({
@@ -104,7 +105,7 @@ export function RenameDialog({
   const [conflictNames, setConflictNames] = React.useState<string[]>([])
   const [conflictExisting, setConflictExisting] = React.useState<Set<string>>(new Set())
   const [conflictDirs, setConflictDirs] = React.useState<Set<string>>(new Set())
-  const conflictResolveRef = React.useRef<((items: ConflictItem[]) => void) | null>(null)
+  const conflictResolveRef = React.useRef<((items: ConflictResolution) => void) | null>(null)
 
   React.useEffect(() => {
     if (open && entry) setName(entry.shortcut?.displayName || entry.name)
@@ -135,7 +136,12 @@ export function RenameDialog({
         setConflictExisting(new Set(existingNames))
         setConflictDirs(isDirConflict ? new Set([newName]) : new Set())
         conflictResolveRef.current = async (items) => {
+          // 取消：直接结束，不要再往下走
+          if (items === CONFLICT_CANCELLED) { setBusy(false); return }
           const item = items[0]
+          // 旧实现把「取消」当成空数组传进来，item 为 undefined，
+          // 读 item.action 抛出的 TypeError 被 catch 成一条英文报错 toast
+          if (!item) { setBusy(false); return }
           setBusy(true)
           try {
             if (item.action === "skip") {
@@ -202,7 +208,7 @@ export function RenameDialog({
     </Dialog>
     <ConflictDialog
       open={conflictOpen}
-      onOpenChange={(o) => { setConflictOpen(o); if (!o) conflictResolveRef.current?.([]) }}
+      onOpenChange={(o) => { setConflictOpen(o); if (!o && conflictResolveRef.current) { conflictResolveRef.current(CONFLICT_CANCELLED); conflictResolveRef.current = null } }}
       conflicts={conflictNames}
       existingNames={conflictExisting}
       directoryNames={conflictDirs}

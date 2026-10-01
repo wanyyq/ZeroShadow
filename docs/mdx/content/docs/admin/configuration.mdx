@@ -9,7 +9,7 @@ ZeroShadow 只有两个配置文件：
 | 文件 | 位置 | 内容 | 改完要做什么 |
 |:--|:--|:--|:--|
 | **`.env`** | 运行根目录（源码运行 = 项目根目录；exe 运行 = `ZeroShadow.exe` 同目录） | 端口、监听地址、超管账号密码、会话时长、存储目录、安全开关 | **重启服务** |
-| **`data/config.json`** | 运行根目录下的 `data/` | 后台所有设置：体积上限、权限开关、隐藏列表、隧道配置 | 在**网页后台**改即可即时生效；手工编辑需**重启服务** |
+| **`data/config.json`** | 运行根目录下的 `data/` | 后台所有设置：体积与保留上限、权限开关、头像 / 待办开关、默认可见范围、访客隐藏列表、隧道配置 | 在**网页后台**改即可即时生效；手工编辑需**重启服务** |
 
 另外有两个由程序自动生成、**不要手工编辑**的文件：
 
@@ -146,7 +146,7 @@ FILES_SOFT_DIR={"软件文件夹":"D:/MyFiles","工作目录":"D:\\Program\\xxx"
 | 启动参数 `-nolog` | 同上，例如 `node server/index.js -nolog` |
 
 静默模式下会一并关闭：启动横幅、每个请求的 `[REQ]` 行、以及所有 `info` / `warn` / `error` 的控制台输出。
-**日志文件始终照常写入**，可以在「设置 → 日志」里查看。
+**日志文件始终照常写入**，可以在「设置 → 日志与指标」里查看。
 
 <Callout type="info" title="用 pnpm 传参要注意写法">
 
@@ -201,24 +201,36 @@ SESSION_HOURS=72
 （`Auto-building.bat` 在打包前就会删掉它，所以发布包里本来就没有这个文件。）
 </Callout>
 
-`config.json` 一共 45 个字段：9 个数值上限、5 个布尔开关、19 个成员权限、8 个访客权限、1 个访客隐藏列表、3 个隧道字段。
+`config.json` 一共 **56** 个字段：**15** 个数值、**9** 个布尔开关、**19** 个成员权限、
+**8** 个访客权限、**1** 个访客隐藏列表、**3** 个隧道字段，外加 **1** 组默认可见范围
+（`defaultVisibility`，内含 `whitelist` / `blacklist` 两个列表）。
 
-### 3.1 数值上限
+### 3.1 数值类字段
 
 | 字段 | 默认值 | 取值 | 说明 |
 |:--|:--|:--|:--|
 | `superUploadLimitMB` | `2048` | 1–1048576 | 超管单文件上传上限（MB） |
 | `memberUploadLimitMB` | `512` | 1–1048576 | 成员单文件上传上限（MB） |
-| `zipMaxFiles` | `100` | 1–1048576 | 打包最大条目数；解压时压缩包内条目数上限 |
+| `zipMaxFiles` | `100` | 1–100000 | 打包最大条目数；解压时压缩包内条目数上限 |
 | `zipMaxSingleMB` | `50` | 1–1048576 | 打包时被选中文件的单文件上限；解压时单个条目的上限（超出的条目会被跳过）（MB） |
 | `zipMaxTotalMB` | `128` | 1–1048576 | 打包总量上限（MB） |
 | `extractMaxZipMB` | `128` | 1–1048576 | 被解压 `.zip` 文件本身的上限（MB） |
 | `extractMaxTotalMB` | `512` | 1–1048576 | 解压后总量上限（MB） |
 | `downloadUrlMaxMB` | `4096` | 1–1048576 | 链接下载单个文件上限（MB） |
-| `rateLimitPerMin` | `120` | 1–1048576 | 单 IP 每分钟重型操作次数 |
+| `rateLimitPerMin` | `120` | 1–100000 | 单 IP 每分钟重型操作次数 |
+| `avatarMaxKB` | `200` | 1–10240 | 单张头像的体积上限（KB）；服务端另行要求尺寸为 128×128 |
+| `backupKeep` | `20` | 1–500 | 每个受管数据文件保留多少份自动快照 |
+| `logRetentionDays` | `30` | 1–3650 | 日志文件保留天数，超期由定时清理删除 |
+| `metricsRetentionDays` | `7` | 1–365 | `data/metrics/*.jsonl` 指标样本保留天数 |
+| `metricsMemMinutes` | `15` | 1–1440 | 内存里保留多少分钟的指标采样（同时是 QPS 的统计窗口） |
+| `slowRequestMs` | `1000` | 1–600000 | 慢请求判定阈值（毫秒） |
 
-<Callout type="info" title="数值的取值范围是 1–1048576">
-数值只能通过 `PATCH /api/admin/config` 修改，取值范围限制在 1–1048576；提交 `0` 或负数会被直接拒绝（返回 400「数值需为 1-1048576 之间的整数」），要停掉限流请直接关掉 `rateLimitEnabled`。
+<Callout type="info" title="数值的取值范围按字段不同">
+数值只能通过 `PATCH /api/admin/config` 修改，每个字段都有自己的上下限（见上表，**并不统一**）。
+提交非整数、`0`、负数或超出该字段上限的值会被拒绝，返回 400，错误信息里带字段名与范围，
+统一格式是 `400 <字段名> 需为 <最小值>-<最大值> 之间的整数`，
+例如 `avatarMaxKB 需为 1-10240 之间的整数`、`slowRequestMs 需为 1-600000 之间的整数`。
+要停掉限流请直接关掉 `rateLimitEnabled`，而不是把 `rateLimitPerMin` 设成 0。
 </Callout>
 
 ### 3.2 布尔开关
@@ -230,8 +242,29 @@ SESSION_HOURS=72
 | `jobStatusOwnerOnly` | `true` | 作业进度是否仅创建者与超管可见 |
 | `downloadUrlAllowPrivate` | `false` | 链接下载是否允许访问内网地址 |
 | `csrfOriginCheck` | `true` | 写操作是否校验 `Origin` / `Sec-Fetch-Site` |
+| `avatarEnabled` | `true` | 是否允许上传 / 修改头像；关闭后成员与超管都改不了 |
+| `todoEnabled` | `true` | 是否启用团队待办；关闭后成员看不到待办功能 |
+| `backupEnabled` | `true` | 是否启用数据快照；关闭后连写入前的自动快照也不再产生 |
+| `requestMetricsEnabled` | `true` | 是否采集请求指标（QPS、状态码分布、慢请求） |
 
-### 3.3 成员权限 `memberPerms`
+### 3.3 默认可见范围 `defaultVisibility`
+
+不属于任何小组、或顶栏选择「默认」时生效的可见范围：
+
+```json
+"defaultVisibility": { "whitelist": [], "blacklist": [] }
+```
+
+| 字段 | 默认值 | 说明 |
+|:--|:--|:--|
+| `whitelist` | `[]` | 可见白名单。**空数组表示不限制**；非空时只有列表内及其子目录可见 |
+| `blacklist` | `[]` | 可见黑名单，**优先级高于白名单**，命中即不可见 |
+
+写入时的清洗规则：去掉首尾 `/`、把 `\` 统一成 `/`、去掉首尾空格、丢弃空项与 `.` / `..`、
+去掉含 `..` 段的路径、按顺序去重，每份列表最多 **200** 条。
+判定使用"等于该路径或位于其路径之内"，在 Windows / macOS 上不区分大小写。
+
+### 3.4 成员权限 `memberPerms`
 
 `memberPerms` 有 19 个字段，**全部默认 `true`**：
 
@@ -245,10 +278,11 @@ SESSION_HOURS=72
 说明：
 
 - 除 `fileWrite` 之外的写类开关（`upload` / `uploadFolders` / `mkdir` / `copy` / `move` / `rename` / `delete`）都必须同时满足 `fileWrite = true` 才真正生效；
+- 小组（`data/groups.json` 里每个小组的 `perms`）用的是**同一组键**，并且只能在这套全局值的基础上**继续关闭**（两者取"与"），详见 [权限与角色](/docs/zeroshadow/guide/permissions) 的「小组上下文」一节；
 - `downloadFile` / `downloadFolder` / `preview` 三个开关兼容旧配置里的 `download` 键（若存在会被当作三者的默认值）；
 - 成员没有 `details` 字段，**查看详细信息是固定开放的**。
 
-### 3.4 访客权限 `guestPerms`
+### 3.5 访客权限 `guestPerms`
 
 `guestPerms` 有 8 个字段：
 
@@ -265,7 +299,7 @@ SESSION_HOURS=72
 
 访客**没有**、也无法获得：上传、上传文件夹、新建文件夹、复制、移动、重命名、删除、查看详细信息、链接下载器、管理访客可见性、修改密码。
 
-### 3.5 访客隐藏列表 `guestHiddenPaths`
+### 3.6 访客隐藏列表 `guestHiddenPaths`
 
 字符串数组，元素是**相对网盘根目录的路径**（不带开头的 `/`），例如：
 
@@ -276,7 +310,7 @@ SESSION_HOURS=72
 判定规则是"等于该路径或位于其路径之内"，在 Windows / macOS 上不区分大小写。
 被隐藏的项在访客侧会**完全消失**，直接访问返回 404。
 
-### 3.6 隧道配置 `tunnel`
+### 3.7 隧道配置 `tunnel`
 
 | 字段 | 默认值 | 取值 |
 |:--|:--|:--|
@@ -286,25 +320,58 @@ SESSION_HOURS=72
 
 服务启动时若 `enabled` 为 `true`，会自动建立隧道。四种模式的实际命令与取舍见 [公网访问与隧道](/docs/zeroshadow/admin/tunnel)。
 
-## 四、其他运行时文件
+## 四、浏览器本地存储（`localStorage`）
+
+这几项**只存在访问者自己的浏览器里**，不写服务器、不随账号漫游；换浏览器或清除站点数据后会恢复默认。
+`data/config.json` 里没有它们。
+
+| 键名 | 内容 | 谁写入 |
+|:--|:--|:--|
+| `zs-theme` | 主题（浅色 / 深色 / 跟随系统） | 顶栏主题按钮、「设置 → 外观」 |
+| `zs-client-settings` | 文件浏览偏好：视图模式、排序字段、排序方向、文件夹置顶 | 「设置 → 外观 → 浏览偏好」、文件浏览器工具栏 / 空白处右键 |
+| `zs-group-context` | 当前选择的**小组上下文** id（`default` 表示默认上下文） | 顶栏的小组切换器 |
+| `zs-sidebar-collapsed` | 桌面侧边栏是否折叠（`"1"` 折叠、`"0"` / 不存在则展开） | 侧边栏底部的「折叠 / 展开」按钮 |
+
+<Callout type="info" title="小组上下文还会发给服务端">
+`zs-group-context` 除了存在浏览器里，还会以 `X-ZS-Group` 请求头的形式带给服务端；
+服务端会重新校验成员归属，存的值无效（小组不存在、或你不是该小组成员）时**回退到「默认」上下文**。
+</Callout>
+
+## 五、其他运行时文件
 
 | 路径 | 说明 |
 |:--|:--|
 | `data/files/` | 网盘文件根目录（可用 `FILES_DIR` 改到别处） |
-| `data/logs/zs-YYYY-MM-DD.log` | 按天切分的 JSONL 日志；界面只读最近 5 个文件 |
+| `data/logs/zs-YYYY-MM-DD.log` | 按天切分的 JSONL 日志；界面默认读最近 5 天，可用 `days` 查询参数放大（最多 90 天），超过 `logRetentionDays` 的文件会被清理 |
+| `data/metrics/zs-YYYY-MM-DD.jsonl` | 每分钟一条的系统指标样本（CPU / 内存 / 磁盘 / 文件数）；保留 `metricsRetentionDays` 天 |
 | `data/tmp/` | 上传与下载的中转目录；**每次启动会被清空** |
+| `data/groups.json` | 小组定义（成员、组长、权限收窄、可见范围、组长能力） |
+| `data/todos.json` | 团队待办 |
+| `data/avatars/<owner>.webp` | 用户头像，统一 128×128 WebP；成员是 `u-<用户id>`，超管是 `_superadmin` |
+| `data/backups/<文件名>/<时间戳>.json` | 数据快照（`config.json` / `users.json` / `groups.json` / `todos.json`），每个文件保留 `backupKeep` 份 |
 | `data/.ssh-known-hosts-tunnel` | 隧道专用 `known_hosts` 文件（使用 `StrictHostKeyChecking=accept-new`，不会污染你的 `~/.ssh/known_hosts`） |
 
-## 五、备份与迁移
+<Callout type="info" title="启动时会做一次自检">
+每次启动都会先做完整性检查：把损坏的 JSON 数据文件隔离出去，清掉 `data/tmp/` 的残留，
+再重新读入配置 / 成员 / 小组 / 待办，并扫描头像目录（尺寸或格式不合规的头像会被删除）。
+</Callout>
 
-需要备份的只有三样东西：
+## 六、备份与迁移
+
+需要备份的有这几样东西：
 
 1. **网盘文件**：`data/files/`（或 `FILES_DIR` 指向的目录）；
 2. **配置**：`.env` 与 `data/config.json`；
-3. **账号**：`data/users.json`。
+3. **账号**：`data/users.json`；
+4. **组织数据**：`data/groups.json`（小组）与 `data/todos.json`（团队待办）；
+5. **头像**（可选）：`data/avatars/`，丢了会回到用户名首字的默认头像。
 
 `data/.jwt-secret` 一起备份的话，迁移后所有人的登录状态都能保持连续；
 不备份也没关系，重新生成后大家重新登录一次即可。
+
+如果只是想在**同一台机器上防手滑**，服务端已经自带快照：覆盖写入前自动快照、每天一次全量快照，
+存放在 `data/backups/`，可以在「设置 → 数据与保留」里点「立即备份」或回滚（细节见
+[管理员指南](/docs/zeroshadow/admin/admin-guide)）。
 
 迁移步骤：停服务 → 拷贝上述内容到新机器 → 确保 `.env` 里的 `FILES_DIR` 指向正确路径 → 启动。
 

@@ -12,6 +12,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -85,75 +87,180 @@ export function SettingsPage() {
 }
 
 /* ==================== 外观 ==================== */
+
+/** 设置行：左侧文字 + 右侧控件，说明另起一行 —— 比把控件挤进 label 里更好读 */
+function SettingRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <Field>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <FieldLabel className="flex-auto">{label}</FieldLabel>
+        {children}
+      </div>
+      {hint && <FieldDescription>{hint}</FieldDescription>}
+    </Field>
+  )
+}
+
 function AppearanceSection() {
   const { theme, setTheme } = useTheme()
   const settings = useClientSettings()
 
-  const themes = [
+  const themeOptions = [
     ["light", "sun", "浅色"],
     ["dark", "moon", "深色"],
     ["system", "monitor", "跟随系统"],
   ] as const
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      {/* 主题：不用卡，用按钮组 */}
-      <div>
-        <h3 className="mb-3 text-sm font-medium">主题</h3>
-        <div className="edge-highlight flex gap-2 rounded-xl border border-border bg-card p-1">
-          {themes.map(([value, icon, label]) => (
-            <button
-              key={value}
-              onClick={() => setTheme(value)}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm transition-all duration-200",
-                theme === value ? "bg-accent font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon name={icon} className="size-4" /> {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 浏览偏好：行内布局 */}
-      <div>
-        <h3 className="mb-3 text-sm font-medium">浏览偏好</h3>
-        <div className="edge-highlight rounded-xl border border-border bg-card p-3">
-          <div className="grid gap-3">
-            <Row label="默认视图">
-              <Select value={settings.view} onValueChange={(v) => settings.update({ view: v as "list" | "grid" })}>
-                <SelectTrigger className="w-28"><SelectValue>{(v) => (v === "grid" ? "网格" : "列表")}</SelectValue></SelectTrigger>
-                <SelectContent><SelectItem value="list">列表</SelectItem><SelectItem value="grid">网格</SelectItem></SelectContent>
-              </Select>
-            </Row>
-            <Row label="排序字段">
-              <Select value={settings.sortBy} onValueChange={(v) => settings.update({ sortBy: v as "name" | "size" | "mtime" })}>
-                <SelectTrigger className="w-28"><SelectValue>{(v) => (v === "size" ? "大小" : v === "mtime" ? "修改时间" : "名称")}</SelectValue></SelectTrigger>
-                <SelectContent><SelectItem value="name">名称</SelectItem><SelectItem value="size">大小</SelectItem><SelectItem value="mtime">修改时间</SelectItem></SelectContent>
-              </Select>
-            </Row>
-            <Row label="排序方向">
-              <Select value={settings.sortDir} onValueChange={(v) => settings.update({ sortDir: v as "asc" | "desc" })}>
-                <SelectTrigger className="w-28"><SelectValue>{(v) => (v === "desc" ? "降序" : "升序")}</SelectValue></SelectTrigger>
-                <SelectContent><SelectItem value="asc">升序</SelectItem><SelectItem value="desc">降序</SelectItem></SelectContent>
-              </Select>
-            </Row>
-            <Row label="文件夹置顶">
-              <Switch checked={settings.foldersFirst} onCheckedChange={(v) => settings.update({ foldersFirst: !!v })} />
-            </Row>
+    <div className="flex flex-col gap-4">
+      <Card className="edge-highlight">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <CardTitle>外观</CardTitle>
+              <CardDescription>只作用于这台设备的浏览器（保存在 localStorage）</CardDescription>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => { settings.reset(); toast.success("已恢复默认外观") }}>
+              <Icon name="rotate-ccw" data-icon="inline-start" /> 恢复默认
+            </Button>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+        </CardHeader>
+        <CardContent>
+          <FieldGroup className="gap-6">
+            <FieldSet>
+              <FieldLegend variant="label">主题</FieldLegend>
+              <ToggleGroup
+                value={[theme]}
+                onValueChange={(v) => {
+                  const next = v[v.length - 1] as "light" | "dark" | "system" | undefined
+                  if (next) setTheme(next)
+                }}
+              >
+                {themeOptions.map(([value, icon, label]) => (
+                  <ToggleGroupItem key={value} value={value}>
+                    <Icon name={icon} data-icon="inline-start" /> {label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              <FieldDescription className="mt-2">任意页面按 `D` 键也能循环切换主题。</FieldDescription>
+            </FieldSet>
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      {children}
+            <FieldSet>
+              <FieldLegend variant="label">界面</FieldLegend>
+              <div className="flex flex-col gap-5">
+                <SettingRow label="界面密度" hint="紧凑会收紧列表行高与卡片内边距，一屏能放下更多条目。">
+                  <ToggleGroup
+                    value={[settings.density]}
+                    onValueChange={(v) => {
+                      const next = v[v.length - 1] as "comfortable" | "compact" | undefined
+                      if (next) settings.update({ density: next })
+                    }}
+                  >
+                    <ToggleGroupItem value="comfortable">舒适</ToggleGroupItem>
+                    <ToggleGroupItem value="compact">紧凑</ToggleGroupItem>
+                  </ToggleGroup>
+                </SettingRow>
+
+                <SettingRow label="字号" hint="整体缩放界面文字（Tailwind 的尺寸都是 rem，改根字号即可）。">
+                  <ToggleGroup
+                    value={[settings.fontScale]}
+                    onValueChange={(v) => {
+                      const next = v[v.length - 1] as "sm" | "base" | "lg" | undefined
+                      if (next) settings.update({ fontScale: next })
+                    }}
+                  >
+                    <ToggleGroupItem value="sm">小</ToggleGroupItem>
+                    <ToggleGroupItem value="base">标准</ToggleGroupItem>
+                    <ToggleGroupItem value="lg">大</ToggleGroupItem>
+                  </ToggleGroup>
+                </SettingRow>
+
+                <SettingRow label="默认折叠侧边栏" hint="仅影响桌面端；窄屏抽屉不受影响。">
+                  <Switch
+                    checked={settings.sidebarCollapsed}
+                    onCheckedChange={(v) => settings.update({ sidebarCollapsed: !!v })}
+                  />
+                </SettingRow>
+
+                <SettingRow label="背景噪点" hint="页面底层的细微噪点纹理，关掉后背景更纯净。">
+                  <Switch checked={settings.noise} onCheckedChange={(v) => settings.update({ noise: !!v })} />
+                </SettingRow>
+
+                <SettingRow label="减少动画" hint="关闭页面与列表的入场动画、以及界面过渡效果。">
+                  <Switch
+                    checked={settings.reduceMotion}
+                    onCheckedChange={(v) => settings.update({ reduceMotion: !!v })}
+                  />
+                </SettingRow>
+              </div>
+            </FieldSet>
+          </FieldGroup>
+        </CardContent>
+      </Card>
+
+      <Card className="edge-highlight">
+        <CardHeader>
+          <CardTitle>文件浏览默认值</CardTitle>
+          <CardDescription>打开文件页时使用的初始视图与排序（页面上随时可改，改完同样会记在这里）</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup className="gap-6">
+            <FieldSet>
+              <FieldLegend variant="label">视图</FieldLegend>
+              <ToggleGroup
+                value={[settings.view]}
+                onValueChange={(v) => {
+                  const next = v[v.length - 1] as "list" | "grid" | undefined
+                  if (next) settings.update({ view: next })
+                }}
+              >
+                <ToggleGroupItem value="list">
+                  <Icon name="list" data-icon="inline-start" /> 列表
+                </ToggleGroupItem>
+                <ToggleGroupItem value="grid">
+                  <Icon name="layout-grid" data-icon="inline-start" /> 网格
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </FieldSet>
+
+            <FieldSet>
+              <FieldLegend variant="label">排序</FieldLegend>
+              <div className="flex flex-col gap-5">
+                <SettingRow label="排序字段">
+                  <ToggleGroup
+                    value={[settings.sortBy]}
+                    onValueChange={(v) => {
+                      const next = v[v.length - 1] as "name" | "size" | "mtime" | undefined
+                      if (next) settings.update({ sortBy: next })
+                    }}
+                  >
+                    <ToggleGroupItem value="name">名称</ToggleGroupItem>
+                    <ToggleGroupItem value="size">大小</ToggleGroupItem>
+                    <ToggleGroupItem value="mtime">修改时间</ToggleGroupItem>
+                  </ToggleGroup>
+                </SettingRow>
+
+                <SettingRow label="排序方向">
+                  <ToggleGroup
+                    value={[settings.sortDir]}
+                    onValueChange={(v) => {
+                      const next = v[v.length - 1] as "asc" | "desc" | undefined
+                      if (next) settings.update({ sortDir: next })
+                    }}
+                  >
+                    <ToggleGroupItem value="asc">升序</ToggleGroupItem>
+                    <ToggleGroupItem value="desc">降序</ToggleGroupItem>
+                  </ToggleGroup>
+                </SettingRow>
+
+                <SettingRow label="文件夹置顶" hint="排序时始终把文件夹排在文件前面。">
+                  <Switch checked={settings.foldersFirst} onCheckedChange={(v) => settings.update({ foldersFirst: !!v })} />
+                </SettingRow>
+              </div>
+            </FieldSet>
+          </FieldGroup>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -3,9 +3,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Icon } from "@/components/icon"
-import { cn } from "@/lib/utils"
-import type { ConflictAction, ConflictItem } from "@/lib/conflict"
+import type { ConflictAction, ConflictItem, ConflictResolution } from "@/lib/conflict"
 import { resolveDuplicateName } from "@/lib/conflict"
 
 interface ConflictDialogProps {
@@ -14,7 +14,7 @@ interface ConflictDialogProps {
   conflicts: string[]
   existingNames: Set<string>
   directoryNames?: Set<string>
-  onResolved: (items: ConflictItem[]) => void
+  onResolved: (items: ConflictResolution) => void
 }
 
 export function ConflictDialog({
@@ -106,54 +106,35 @@ export function ConflictDialog({
                     <Icon name={isDir ? "folder" : "file"} className="mr-1.5 inline size-3.5 text-muted-foreground" />
                     {name}
                   </p>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <label className={cn("flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 transition-colors", actions[i] === "rename" ? "border-ring bg-accent" : "border-border hover:bg-muted")}>
-                      <input
-                        type="radio"
-                        name={`conflict-${i}`}
-                        className="sr-only"
-                        checked={actions[i] === "rename"}
-                        onChange={() => setAction(i, "rename")}
-                      />
-                      <Icon name="pencil-line" className="size-3" />
+                  {/* 2–4 个互斥选项：用 ToggleGroup 而不是手写 radio + active 样式 */}
+                  <ToggleGroup
+                    size="sm"
+                    className="flex-wrap"
+                    value={[actions[i]]}
+                    onValueChange={(next) => {
+                      const picked = next[next.length - 1] as ConflictAction | undefined
+                      if (picked && picked !== actions[i]) setAction(i, picked)
+                    }}
+                  >
+                    <ToggleGroupItem value="rename">
+                      <Icon name="pencil-line" data-icon="inline-start" />
                       重命名为 {resolvedNames[i]}
-                    </label>
-                    <label className={cn("flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 transition-colors", actions[i] === "skip" ? "border-ring bg-accent" : "border-border hover:bg-muted")}>
-                      <input
-                        type="radio"
-                        name={`conflict-${i}`}
-                        className="sr-only"
-                        checked={actions[i] === "skip"}
-                        onChange={() => setAction(i, "skip")}
-                      />
-                      <Icon name="circle-slash" className="size-3" />
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="skip">
+                      <Icon name="circle-slash" data-icon="inline-start" />
                       跳过
-                    </label>
-                    <label className={cn("flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 transition-colors", actions[i] === "overwrite" ? "border-ring bg-accent" : "border-border hover:bg-muted")}>
-                      <input
-                        type="radio"
-                        name={`conflict-${i}`}
-                        className="sr-only"
-                        checked={actions[i] === "overwrite"}
-                        onChange={() => setAction(i, "overwrite")}
-                      />
-                      <Icon name="replace" className="size-3" />
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="overwrite">
+                      <Icon name="replace" data-icon="inline-start" />
                       覆盖
-                    </label>
+                    </ToggleGroupItem>
                     {isDir && (
-                      <label className={cn("flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 transition-colors", actions[i] === "merge" ? "border-ring bg-accent" : "border-border hover:bg-muted")}>
-                        <input
-                          type="radio"
-                          name={`conflict-${i}`}
-                          className="sr-only"
-                          checked={actions[i] === "merge"}
-                          onChange={() => setAction(i, "merge")}
-                        />
-                        <Icon name="folder-sync" className="size-3" />
+                      <ToggleGroupItem value="merge">
+                        <Icon name="folder-sync" data-icon="inline-start" />
                         合并
-                      </label>
+                      </ToggleGroupItem>
                     )}
-                  </div>
+                  </ToggleGroup>
                 </div>
               )
             })}

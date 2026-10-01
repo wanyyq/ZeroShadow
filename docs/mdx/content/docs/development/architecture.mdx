@@ -34,22 +34,32 @@ icon: Boxes
     <File name="package.json" />
     <Folder name="src" defaultOpen>
       <File name="auth.js" />
+      <File name="avatars.js" />
+      <File name="backup.js" />
       <File name="config.js" />
+      <File name="context.js" />
       <File name="env.js" />
       <File name="files.js" />
+      <File name="groups.js" />
+      <File name="integrity.js" />
       <File name="jobs.js" />
       <File name="logger.js" />
+      <File name="metrics.js" />
       <File name="netguard.js" />
       <File name="ratelimit.js" />
       <File name="safety.js" />
       <File name="status.js" />
       <File name="store.js" />
+      <File name="todos.js" />
       <File name="tunnel.js" />
       <File name="users.js" />
       <Folder name="routes">
         <File name="auth.js" />
         <File name="fs.js" />
         <File name="admin.js" />
+        <File name="avatars.js" />
+        <File name="groups.js" />
+        <File name="todos.js" />
       </Folder>
     </Folder>
   </Folder>
@@ -62,7 +72,11 @@ icon: Boxes
       <File name="App.tsx" />
       <File name="index.css" />
       <Folder name="pages" />
-      <Folder name="components" />
+      <Folder name="components">
+        <Folder name="ui">
+          <File name="toggle-group.tsx" />
+        </Folder>
+      </Folder>
       <Folder name="state" />
       <Folder name="lib" />
     </Folder>
@@ -101,30 +115,43 @@ icon: Boxes
 | 文件 | 职责 |
 |:--|:--|
 | `auth.js` | JWT 签发与校验、CSRF、登录暴破防护 |
-| `config.js` | 运行时配置 + 权限矩阵 + 各类上限计算（**权限的唯一真相来源**） |
+| `avatars.js` | 头像读写：WebP 尺寸 / 体积校验（手写头解析，不引原生库）、md5 索引、删除 |
+| `backup.js` | 四个受管数据文件的快照与回滚（`data/backups/<文件名>/`） |
+| `config.js` | 运行时配置 + 权限矩阵 + 各类上限计算（**权限的唯一真相来源**），并负责小组权限收窄 |
+| `context.js` | 请求上下文：解析小组（`X-ZS-Group` 头 / `?group=` 兜底）并算出 `req.perms` |
 | `env.js` | `.env` 加载、密钥生成、目录准备、只读映射目录解析 |
 | `files.js` | 目录列举、条目信息、递归统计、搜索、复制 / 移动 |
+| `groups.js` | 小组读写、可见范围判定、组长能力校验 |
+| `integrity.js` | 启动自检：损坏的 JSON 移入 `data/backups/corrupt/` 隔离、清理 tmp 残留 |
 | `jobs.js` | 长任务（压缩 / 解压 / 链接下载）的进度与清理 |
-| `logger.js` | JSONL 日志、查询、清空 |
+| `logger.js` | JSONL 日志、查询与聚合统计、按 `logRetentionDays` 清理 |
+| `metrics.js` | 每分钟系统指标采样 + 请求指标（QPS / 状态码 / 慢请求）与落盘轮转 |
 | `netguard.js` | 出站目标校验（SSRF 防护） |
 | `ratelimit.js` | 重型接口按 IP 限流中间件 |
 | `safety.js` | 路径校验、名称清洗、访客可见性 |
 | `status.js` | 服务器状态采集（含局域网地址） |
-| `store.js` | 原子写入 + 串行锁 |
+| `store.js` | 原子写入 + 串行锁（覆盖写前触发 `backup.js` 快照） |
+| `todos.js` | 团队待办的读写、清洗与可见性辅助 |
 | `tunnel.js` | SSH 反向隧道生命周期 |
 | `users.js` | 成员增删改查、bcrypt 校验 |
 | `routes/auth.js` | `/api/auth/*` |
 | `routes/fs.js` | `/api/fs/*`（最大的一块） |
 | `routes/admin.js` | `/api/admin/*`（整个 router 都套了 `requireRole("superadmin")`） |
+| `routes/avatars.js` | `/api/avatars/*`（头像读写） |
+| `routes/groups.js` | `/api/groups/*`（组长自助，受超管勾选的 `leaderCaps` 约束） |
+| `routes/todos.js` | `/api/todos/*`（团队待办） |
 
 **前端 `web/src/`**
 
 | 目录 | 内容 |
 |:--|:--|
-| `pages/` | 页面：浏览 / 登录 / 设置 / 预览 / 编辑 / HTML / 工具 / 关于 |
+| `pages/` | 页面：浏览 / 登录 / 设置 / 团队 / 预览 / 编辑 / HTML / 工具 / 关于；设置页的「日志与指标」「小组」「数据与保留」拆在 `pages/settings/` 下 |
 | `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件） |
-| `state/` | 五个 Provider：auth / client-settings / clipboard / uploads / operations |
-| `lib/` | api / types / format / conflict / lucide / utils |
+| `state/` | 六个 Provider：auth / groups / client-settings / clipboard / uploads / operations |
+| `lib/` | api / types / format / conflict / lucide / utils / avatar-cache / avatar-image |
+
+`components/ui/toggle-group.tsx` 是基于 `@base-ui/react` 的**分段控件**（2–4 个互斥选项），
+团队待办的筛选与编辑器、同名处理对话框都改用了它。
 
 **静态资源**：`public/resources/` 放字体、`lucide.min.js`、`gsap.min.js`、`tailwindcss.min.js`。
 
@@ -141,23 +168,38 @@ icon: Boxes
   → 请求日志中间件                打印 [REQ] 方法 路径 host ip ua（静默模式下跳过）
   → 安全响应头中间件              nosniff / SAMEORIGIN / no-referrer / Permissions-Policy
   → cookieParser
-  → express.json({ limit: "1mb" })
+  → /api/fs/save-file 专用 json    limit = SAVE_FILE_MAX_BYTES（16MB）
+  → express.json({ limit: "1mb" }) 其余接口仍是 1MB
   → socket.setNoDelay(true)       缓解隧道代理场景的缓冲问题
+  → metricsMiddleware             请求指标采集（异常一律吞掉，不阻塞请求）
   → attachAuth                    解析 Cookie 得到 req.auth = { role, username, userId }
+  → attachContext                 解析小组上下文，算出 req.group / req.groupId / req.perms
   → /api 上的 csrfGuard           非 GET/HEAD/OPTIONS 校验自定义头与来源
   → GET /api/meta
-  → /api/auth  /api/fs  /api/admin
+  → /api/auth  /api/fs  /api/admin  /api/avatars  /api/todos  /api/groups
   → /api 兜底 404 JSON
   → express.static(WEB_DIST) + 非 /api 的 SPA fallback（带应用外壳 CSP）
   → 统一错误处理（5xx 记日志，只回"服务器内部错误"）
 ```
 
-启动时会：清空 `data/tmp/` → 建目录 → 读配置 → 若隧道已启用则拉起隧道；
-退出信号（`SIGINT` / `SIGTERM`）会先停隧道再关服务，兜底 3 秒强制退出。
+启动时会：做完整性自检（隔离损坏的 JSON）→ 重载配置 / 成员 / 小组 / 待办 → 扫描并清理不合规头像
+→ 执行每日快照 → 清空 `data/tmp/` → 建目录 → 启动指标采集与日志清理定时器
+→ 若隧道已启用则拉起隧道；
+退出信号（`SIGINT` / `SIGTERM`）会先停隧道与指标采集再关服务，兜底 3 秒强制退出。
 
-<Callout type="info" title="请求体上限 1MB">
-`express.json({ limit: "1mb" })` 意味着 `/api/fs/save-file`（在线编辑）能写回的文本
-**最大约 1MB**。要编辑更大的文件必须改这个上限，并同步考虑内存占用。
+<Callout type="info" title="请求体上限：save-file 单独放宽到 16MB">
+`/api/fs/save-file`（在线编辑保存）挂了一个单独的 `express.json({ limit: SAVE_FILE_MAX_BYTES })`，
+`SAVE_FILE_MAX_BYTES = 16 * 1024 * 1024`；body-parser 解析成功后会标记 `req._body`，
+后面的全局 `express.json({ limit: "1mb" })` 不会重复解析，**其余接口仍然是 1MB**。
+超限时该接口自己先判字节数并返回 413（文案带实际大小与 16MB 上限）。
+</Callout>
+
+<Callout type="info" title="进程级兜底：记录但不退出">
+`server/index.js` 末尾注册了 `unhandledRejection` 与 `uncaughtException`：
+两者都只把原因（异常还带 `stack`）写进日志，**刻意不退出进程**——
+本项目没有进程管理器（无 Docker / 无 pm2），退出即局域网内所有人同时断线。
+理由很具体：一次失败的上传清理（例如磁盘写满后连 `rm` 也失败）不该升级成全局断线。
+日志事件名是 `unhandled_rejection` 与 `uncaught_exception`，可在「设置 → 日志与指标」里查。
 </Callout>
 
 ## 权限是怎么判的
@@ -166,12 +208,25 @@ icon: Boxes
 
 ```js
 requireRole("superadmin")   // 按角色
-requirePerm("compressZip")  // 按 effectivePerms(role) 里的权限点
+requirePerm("compressZip")  // 按当前请求的 req.perms 里的权限点
 ```
 
-`effectivePerms(role)`（`server/src/config.js`）是**唯一的权限真相来源**：
+`effectivePerms(role, group)`（`server/src/config.js`）是**唯一的权限真相来源**：
 把 `config.json` 里的 `memberPerms` / `guestPerms` 与角色叠加，算出最终布尔表
 （例如成员的写类权限都要 `fileWrite` 为真）。前端拿到的 `perms` 就是它的输出。
+
+登录之后每个请求还会经过 `attachContext`（`server/src/context.js`）：
+
+```text
+X-ZS-Group: <小组 id>  或  ?group=<小组 id>
+  → resolveGroupContext(req)   校验小组存在、且调用者属于该小组；无效则回退"默认"
+  → req.perms = effectivePerms(req.auth.role, req.group)
+```
+
+**小组权限只能收窄**：`effectivePerms` 会把 `memberPerms` 与小组 `perms` 逐项取与（`base[key] && !!groupPerms[key]`）。
+超管直接返回固定全开的权限表，不参与小组收窄；访客没有小组上下文，只受 `guestHiddenPaths` 影响。
+`requirePerm` 读的是 `req.perms`，所以小组切换对所有接口**立即生效**，不需要重新登录。
+可见范围则由 `isVisibleForContext` 统一判定（黑名单优先、白名单为空即不限制）。
 
 失败时的状态码语义（前端据此区分"要登录"与"没权限"）：
 
@@ -213,6 +268,14 @@ requirePerm("compressZip")  // 按 effectivePerms(role) 里的权限点
 
 `web/src/pages/settings/index.tsx`：用 `permItem(...)` 在「权限」页加一个开关。
 </Step>
+<Step>
+### 允许小组收窄（可选）
+
+`web/src/pages/settings/groups-section.tsx`：把新键加进对应分组的 `PERM_GROUPS` 条目
+（它能选中哪些键由 `MEMBER_PERM_KEYS` 决定，但分组与中文名要手工补上），
+小组编辑器里才会出现这个开关；属于写操作的还要加进 `WRITE_PERM_KEYS`，
+这样「文件操作总开关」关闭时它会跟着置灰。
+</Step>
 </Steps>
 
 ## 数据存放
@@ -221,11 +284,17 @@ requirePerm("compressZip")  // 按 effectivePerms(role) 里的权限点
 |:--|:--|:--|
 | 服务配置 | `data/config.json` | 启动时读入内存，后台修改后原子写回 |
 | 成员账号 | `data/users.json` | 同上；密码为 bcrypt 哈希 |
+| 小组 | `data/groups.json` | 同上；后台「小组」页写回，成员被删除时自动移除 |
+| 团队待办 | `data/todos.json` | 同上；删除小组时该组待办转为全体可见 |
+| 头像 | `data/avatars/<owner>.webp` | 上传即原子替换；启动时扫描，尺寸 / 格式不合规的文件会被删除 |
+| 数据快照 | `data/backups/<文件名>/<时间戳>-<随机>.json` | 覆盖写前 + 每天一次；每个文件保留 `backupKeep` 份 |
+| 系统指标 | `data/metrics/zs-*.jsonl`（即 `data/metrics/zs-YYYY-MM-DD.jsonl`） | 每分钟一条；保留 `metricsRetentionDays` 天 |
+| 请求指标 | **内存** 环形桶 + 最近 50 条慢请求 | 窗口由 `metricsMemMinutes` 决定（默认 15 分钟），重启清零 |
 | 会话密钥 | `data/.jwt-secret` | 首次生成后复用；删除即让全部会话失效 |
 | 长任务进度 | **内存** `Map` | 10 分钟 TTL，每分钟扫描清理 |
 | 登录失败计数 | **内存** `Map` | 重启清零 |
 | 限流计数 | **内存** `Map` | 重启清零 |
-| 日志 | `data/logs/zs-*.log` | 按天一个 JSONL 文件 |
+| 日志 | `data/logs/zs-*.log` | 按天一个 JSONL 文件；超过 `logRetentionDays` 自动清理 |
 
 写入用 `store.js` 的 `withLock` + `writeJsonAtomic`（写临时文件再重命名），
 避免并发覆盖和半个文件。
@@ -268,6 +337,9 @@ router.post("/my-op", requirePerm("editFiles"), rateLimit, async (req, res, next
 
 要点：**路径一律用 `resolveSafe` / `resolveAny` 解析**（自带穿越防护），
 写操作要先 `blockSoft`，需要限流就挂 `rateLimit`，错误统一交给 `next(err)`（`httpError(status, msg)` 造错误）。
+涉及路径的端点还应当调用 `assertContextVisible(req, rel)`，让小组 / 默认可见范围对读写都生效
+（`attachContext` 已经全局挂好，`req.perms` / `req.group` 随取随用）。
+新路由文件要在 `server/index.js` 里 `app.use("/api/xxx", xxxRoutes)` 挂上。
 前端在 `web/src/lib/api.ts` 里加一个薄封装即可。
 
 ## 前端
@@ -276,13 +348,25 @@ router.post("/my-op", requirePerm("editFiles"), rateLimit, async (req, res, next
 
 ```text
 ThemeProvider(zs-theme)
-└── AuthProvider            身份 + perms，30 秒轮询 /api/auth/me
-    └── ClientSettingsProvider   视图/排序偏好（localStorage: zs-client-settings）
-        └── ClipboardProvider    复制/剪切的内存剪贴板
-            └── UploadsProvider  上传任务队列与进度
-                └── OperationsProvider  压缩/解压/链接下载的轮询与进度
-                    └── TooltipProvider → BrowserRouter → Routes → Toaster
+└── ErrorBoundary
+    └── AuthProvider            身份 + perms，30 秒轮询 /api/auth/me
+        └── GroupsProvider      我可切换的小组 + 当前小组上下文（localStorage: zs-group-context）
+            ├── AvatarSync            登录后按 md5 增量同步头像（配 IndexedDB 缓存）
+            └── ClientSettingsProvider   视图/排序偏好（localStorage: zs-client-settings）
+                └── ClipboardProvider    复制/剪切的内存剪贴板
+                    └── UploadsProvider  上传任务队列与进度
+                        └── OperationsProvider  压缩/解压/链接下载的轮询与进度
+                            └── TooltipProvider → BrowserRouter → Routes → Toaster
 ```
+
+一共六个状态 Provider（`AuthProvider` / `GroupsProvider` / `ClientSettingsProvider` /
+`ClipboardProvider` / `UploadsProvider` / `OperationsProvider`）都在 `web/src/state/` 下；
+`ThemeProvider` 单独放在 `components/theme-provider.tsx`。切换小组时 `GroupsProvider` 会同时
+更新模块级的 `X-ZS-Group` 请求头（`lib/api.ts` 的 `setGroupContext`）并刷新身份，
+所以后续所有请求都会带上新的上下文。
+
+桌面侧边栏的折叠状态不进 Provider：它由 `components/layout/app-shell.tsx`
+直接读写 `localStorage: zs-sidebar-collapsed`。
 
 <Callout type="info" title="主题切换是自己实现的">
 项目**没有**用 `next-themes`（虽然它在 `package.json` 里，但全代码库零引用）。
@@ -297,15 +381,17 @@ ThemeProvider(zs-theme)
 |:--|:--|:--|
 | `/` | `pages/browser-page.tsx` | 文件浏览器，最大的一块 |
 | `/login` | `pages/login-page.tsx` | 登录 |
-| `/settings` | `pages/settings/index.tsx` | 设置，七个标签页全在这一个文件里 |
+| `/settings` | `pages/settings/index.tsx` | 设置，九个标签页；「日志与指标」「小组」「数据与保留」已拆成同目录下的独立文件 |
+| `/team` | `pages/team-page.tsx` | 团队待办（访客看到"登录后可查看"的空状态） |
 | `/preview` | `pages/preview-page.tsx` | 预览（全屏，不自带外壳） |
 | `/editor` | `pages/editor-page.tsx` | 在线编辑（全屏） |
 | `/html-preview` | `pages/html-page.tsx` | HTML 沙箱预览（全屏） |
 | `/tools` | `pages/tools-page.tsx` | 单位换算 + 链接下载器 |
-| `/about` | `pages/about-page.tsx` | 关于 |
+| `/about` | `pages/about-page.tsx` | 软件开源信息 |
 | `*` | 重定向到 `/` | |
 
-页面外边套的是 `components/layout/app-shell.tsx`：桌面固定侧边栏 + 顶栏 + 窄屏抽屉。
+页面外边套的是 `components/layout/app-shell.tsx`：桌面固定侧边栏（**可折叠成图标条**，状态存
+`zs-sidebar-collapsed`）+ 顶栏（搜索、小组切换器、主题、账户卡片）+ 窄屏抽屉。
 preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 
 ### 交互组件
@@ -313,13 +399,26 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 | 组件 | 作用 |
 |:--|:--|
 | `browser/dialogs.tsx` | 新建文件夹、重命名、删除确认、详细信息 |
-| `browser/conflict-dialog.tsx` | 同名处理（重命名 / 跳过 / 覆盖 / 合并 + 套用全部） |
-| `browser/dest-picker.tsx` | 「复制到…」「移动到…」的目录选择器 |
+| `browser/conflict-dialog.tsx` | 同名处理（重命名 / 跳过 / 覆盖 / 合并 + 套用全部），选项用分段按钮；「取消」会真正中止操作 |
+| `browser/dest-picker.tsx` | 「复制到…」「移动到…」的目录选择器（冲突选「重命名」时通过 `targetNames` 把新名字交给服务端） |
 | `browser/path-picker.tsx` | 单纯的目录选择器（工具页用它选保存位置） |
 | `browser/upload-panel.tsx` / `ops-panel.tsx` | 右下角的两个进度浮层 |
 | `browser/shortcut-editor.tsx` | `.zeropath` 快捷方式编辑 |
+| `ui/toggle-group.tsx` | 分段控件（2–4 个互斥选项），团队待办筛选、待办编辑器、同名处理对话框都用它 |
+| `settings/groups-section.tsx` | 小组列表与四标签页编辑器（基本 / 成员 / 可见范围 / 权限） |
+| `settings/data-section.tsx` | 头像、团队待办、默认可见范围、日志与指标保留、备份与回滚 |
+| `settings/logs-metrics-section.tsx` | 系统指标曲线、请求指标与慢请求、操作日志 |
 | `components/icon.tsx` | 渲染 `<i data-lucide>` 占位 |
+| `components/avatar.tsx` | 头像（配合 `lib/avatar-cache.ts` 的 IndexedDB 缓存与 `lib/avatar-image.ts` 的 128×128 WebP 转换） |
 | `lib/conflict.ts` | 冲突检测与 `名字 (1)` 生成 |
+| `lib/avatar-cache.ts` / `lib/avatar-image.ts` | 头像的 IndexedDB 缓存与浏览器端裁切（128×128 WebP） |
+
+<Callout type="warn" title="上传分批常量必须两边一致">
+`web/src/state/uploads.tsx` 里的 `MAX_FILES_PER_REQUEST = 100` **必须与**
+`server/src/routes/fs.js` 的 `MAX_FILES_PER_REQUEST` 保持一致：服务端用 busboy 的
+`files` 限制，超出部分会被**直接丢弃**且只触发一次 `filesLimit` 事件，
+前端靠分批上传才不会静默丢文件。
+</Callout>
 
 ### 图标与动画
 
@@ -330,7 +429,7 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 
 <Callout type="warn" title="存在两套图标体系">
 应用代码走 `Icon` 组件 + 全局 `lucide.min.js` + `createIcons()` 扫描 DOM；
-但 `components/ui/*` 里有 8 个文件直接从 `lucide-react` 导入图标
+但 `components/ui/*` 里有 7 个文件直接从 `lucide-react` 导入图标
 （`breadcrumb`、`checkbox`、`dialog`、`context-menu`、`dropdown-menu`、`select`、`spinner`）。
 结果是打包体积里存在两份 lucide、两套渲染时机。不致命，但属于该收敛的技术债。
 </Callout>
@@ -358,14 +457,19 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
   目前没有页面在用（文件浏览器的搜索框在自己的工具栏里）；
 - `components/browser/dialogs.tsx` 里的 `PreviewDialog` 与 `EditorDialog` 已被独立的
   `/preview`、`/editor` 页面取代，但两套实现仍然并存；
-- `components/ui/` 下的 `breadcrumb`、`input-group`、`field` 没有引用（面包屑在
-  `browser-page.tsx` 与 `dest-picker.tsx` 各手写了一遍）；
+- `components/ui/` 下的 `breadcrumb` 完全没有引用（面包屑在 `browser-page.tsx` 与
+  `dest-picker.tsx` 各手写了一遍）；`input-group` 与 `field` 现在是团队页 /
+  小组编辑器在用的，不再属于死代码；
 - 依赖里装了但全代码库零引用：`next-themes`、`@fontsource-variable/inter`；
   静态资源里 `web/public/resources/tailwindcss.min.js` 也没有引用。
 
 <Callout type="warn" title="typecheck 抓不到死代码">
 `tsconfig` 开了 `noUnusedLocals`，但它**不报未使用的 export**。
 所以上面这些死代码 `pnpm typecheck` 全绿也发现不了，只能靠人工或额外工具。
+
+（另外注意：`pnpm typecheck` 以前其实**什么都没检查**——根 `tsconfig.json` 是 solution 式配置、
+`files` 为空数组，`tsc` 不会顺着 `references` 去查任何文件。现在它直接跑
+`tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit`，是真检查了。）
 </Callout>
 
 ## 常见改动指引
@@ -373,8 +477,14 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 | 想做的事 | 改哪里 |
 |:--|:--|
 | 加一个权限开关 | 见本文「新增一个权限点的完整步骤」 |
-| 加一个接口 | `server/src/routes/*.js` + `web/src/lib/api.ts` |
-| 加一个设置项 | `server/src/config.js` 的 `DEFAULTS` → `routes/admin.js` 的 `PATCH /config` 白名单 → `web/src/lib/types.ts` → `settings/index.tsx` |
+| 加一个接口 | `server/src/routes/*.js` + `web/src/lib/api.ts`；新路由文件要在 `server/index.js` 里 `app.use("/api/xxx", xxxRoutes)` 挂上 |
+| 改团队待办字段 | `server/src/todos.js` 的 `sanitizeTodo` 与 `allowed` 白名单 + `routes/todos.js` + `pages/team-page.tsx`（类型在 `lib/types.ts`） |
+| 加一个设置项 | `server/src/config.js` 的 `DEFAULTS` → `routes/admin.js` 的 `PATCH /config` 白名单（数值要进 `NUMERIC_KEYS` 并给上下限）→ `web/src/lib/types.ts` → `settings/index.tsx`（或拆出去的 `settings/groups-section.tsx` / `data-section.tsx` / `logs-metrics-section.tsx`） |
+| 加一项组长能力 | `server/src/groups.js` 的 `LEADER_CAPS` / `DEFAULT_LEADER_CAPS` → 对应路由用 `leaderHasCap()` 校验 → `web/src/lib/types.ts` → `settings/groups-section.tsx` 的 `CAP_ITEMS` |
+| 改在线编辑的大小上限 | `server/src/routes/fs.js` 的 `SAVE_FILE_MAX_BYTES`（`index.js` 用它给该端点单独放宽 `express.json`） |
+| 改小组可见性规则 | `server/src/groups.js` 的 `isVisibleInVisibility()` / `visibilityFor()`；文件路由统一走 `assertContextVisible()`，打包 / 压缩另有 `zipVisibility()` 做递归过滤 |
+| 改头像尺寸 | `server/src/avatars.js` 的 `AVATAR_SIZE` 与 `web/src/lib/avatar-image.ts` 的 `TARGET` **必须一起改** |
+| 改日志 / 指标 / 备份的保留策略 | `logger.js` 的 `sweepLogs`、`metrics.js` 的 `cleanupOldMetrics`、`backup.js` 的 `rotate` + `settings/data-section.tsx` |
 | 改默认体积上限 | `server/src/config.js` 的 `DEFAULTS`（注意已存在的 `data/config.json` 会覆盖默认值） |
 | 加一种可预览格式 | `web/src/lib/format.ts` 的 `EXT_KIND` / `PREVIEWABLE` + `server/src/routes/fs.js` 的 `INLINE_TYPES` |
 | 加一种可编辑格式 | `web/src/pages/browser-page.tsx` 里的 `EDITABLE` 数组 |

@@ -117,6 +117,10 @@ pnpm start
 | `data/.jwt-secret` | 会话签名密钥，自动生成 96 个十六进制字符（`crypto.randomBytes(48)`） |
 | `data/config.json` | 后台设置（首次保存设置时才写入） |
 | `data/users.json` | 团队成员账号（密码为 bcrypt 哈希） |
+| `data/metrics/` | 按天写入的指标采样 `zs-YYYY-MM-DD.jsonl`（每分钟一条） |
+| `data/groups.json` / `data/todos.json` | 小组 / 团队待办（首次创建时才写入） |
+| `data/avatars/` | 头像（128×128 WebP），设置过头像才有文件 |
+| `data/backups/` | 数据快照：覆盖写前自动备份 + 每日一次，可在「设置 → 数据与保留」里回滚 |
 
 ## 工作目录很重要
 
@@ -162,8 +166,9 @@ pnpm dev:web      # 终端 2：前端 Vite 开发服务器，端口 5173
 ```
 
 **开发时请访问 http://localhost:5173**，不要访问 12345：Vite 会把浏览器发来的 `/api` 请求
-转发到 `http://localhost:12345`（见 `web/vite.config.ts` 的 `server.proxy`）。
-如果改了后端端口，记得同步改 `vite.config.ts` 里的代理目标。
+转发到后端（见 `web/vite.config.ts` 的 `server.proxy`）。
+**代理目标端口是自动读根目录 `.env` 的 `PORT` 得到的**（`backendPort()`），所以不需要手工同步；
+改了 `.env` 的 `PORT` 后重新启动 `pnpm dev:web` 即可。
 
 <Callout type="info">
 `pnpm dev:server` 同样要在仓库根执行（原因见 [工作目录很重要](#工作目录很重要)）。

@@ -38,7 +38,7 @@ docs/mdx/
 
 ### 1. 复制内容
 
-> ⚠️ **本套内容的站内链接是写死 `/docs/zeroshadow/...` 的**（84 处，已经改好）。
+> ⚠️ **本套内容的站内链接是写死 `/docs/zeroshadow/...` 的**（全部已改好，不要改回相对路径）。
 > 所以它**必须挂在 `<站点>/content/docs/zeroshadow/` 这一层**，不能放在 `content/docs/` 顶层。
 > 要挂到别的名字下，看 [integration/README.md](integration/README.md) 的说明。
 
@@ -107,9 +107,9 @@ cp docs/mdx/public/img/* <你的站点>/public/img/
 | 介绍 | `/docs` | 产品定位、功能特性、权限概览、技术栈、阅读指引 |
 | 快速开始 | `/docs/getting-started/quickstart` | 环境要求、三步启动、开发模式、工作目录规则、从发布包运行 |
 | 常见问题 | `/docs/getting-started/faq` | 按现象分类的排查清单 |
-| 使用手册 | `/docs/guide/manual` | 界面、上传下载、预览、在线编辑、搜索、压缩解压、快捷方式、链接下载器、冲突处理、快捷键 |
-| 权限与角色 | `/docs/guide/permissions` | 三角色完整权限矩阵、权限依赖、访客隐藏规则 |
-| 管理员指南 | `/docs/admin/admin-guide` | 设置页七个标签页逐项说明 |
+| 使用手册 | `/docs/guide/manual` | 界面、小组切换、上传下载、预览、在线编辑、搜索、压缩解压、快捷方式、链接下载器、团队待办、头像、冲突处理、快捷键 |
+| 权限与角色 | `/docs/guide/permissions` | 三角色完整权限矩阵、权限依赖、小组收窄与组长能力、访客隐藏规则 |
+| 管理员指南 | `/docs/admin/admin-guide` | 设置页九个标签页逐项说明（含小组、数据与保留、日志与指标） |
 | 配置参考 | `/docs/admin/configuration` | `.env` 全部变量 + `config.json` 全部字段与默认值 |
 | 公网访问与隧道 | `/docs/admin/tunnel` | 四种隧道模式、真实 ssh 命令、`TRUST_PROXY` 用法与排查 |
 | 安全设计 | `/docs/security/design` | 认证、CSRF、路径安全、SSRF 防护、沙箱、限流、密钥卫生 |
@@ -168,9 +168,12 @@ node docs/mdx/.authoring/check-coverage.mjs docs/mdx # 退出码 = 疑似丢失�
   这个脚本反过来做——把源文档里的配置键、环境变量、接口路径、数值等特征 token 抽出来，
   逐个确认在目标 MDX 里存在，**少一个就报出来**。
 
-当前状态：`validate-mdx.mjs` 退出码 0；`check-coverage.mjs` 剩 4 个 token 命中不到，
-已人工确认全部是**有意的重排**（数值单位间的空格、把 `{ ... }` 展开成更明确的写法、
-把一行报错拆成多行代码块），内容本身没有丢失。
+判断口径：
+
+- `validate-mdx.mjs` 必须退出码 0（它挡住的是**构建直接失败**的问题）；
+- `check-coverage.mjs` 若还有命中，逐条对照源文档确认是否属于"有意的重排"
+  （数值单位间的空格、把 `{ ... }` 展开成更明确的写法、把一行报错拆成多行代码块、
+  目标页面确实不适用该条），确认无实质遗漏再提交——不要为了凑 0 而往文档里塞没有意义的内容。
 
 ## 与仓库内旧文档的关系
 

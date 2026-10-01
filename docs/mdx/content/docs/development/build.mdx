@@ -150,7 +150,7 @@ pnpm start -- -nolog
 tail -f data/logs/zs-$(date +%F).log
 ```
 
-后台「设置 → 日志」里也能按级别与关键字查询，或一键清空。
+后台「设置 → 日志与指标」里也能按级别、天数与关键字查询，或一键清空，并附带 CPU / 内存曲线与请求指标。
 
 ### 前端类型检查只查类型、不产出
 
@@ -159,3 +159,10 @@ pnpm typecheck
 ```
 
 注意它**不报未使用的 export**，所以死代码不会因此暴露。
+
+<Callout type="warn" title="这个脚本以前什么都没检查">
+旧脚本跑的是 `tsc --noEmit -p tsconfig.json`，而 `web/tsconfig.json` 是 solution 式配置
+（`"files": []` + 两个 `references`）——`tsc` 不会顺着 `references` 检查文件，于是永远直接通过。
+现在改成分别检查 `tsconfig.app.json`（`src`）与 `tsconfig.node.json`（`vite.config.ts` 等），
+真的会报类型错误了，细节见 [测试脚本](/docs/zeroshadow/development/testing)。
+</Callout>

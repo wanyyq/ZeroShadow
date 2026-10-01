@@ -289,6 +289,12 @@ router.get("/logs", async (req, res, next) => {
       days: req.query.days,
       auditOnly: req.query.audit === "1" || req.query.audit === "true",
     })
+    // stats=0 时省掉聚合统计。除了省算力，也让只关心日志行的调用方拿到更小的响应：
+    // stats.users 以用户名为键，而用户名可能仅大小写不同（如 Wangyq 与 wangyq），
+    // Windows PowerShell 的 ConvertFrom-Json 会把它们判成重复键并直接抛错。
+    if (req.query.stats === "0" || req.query.stats === "false") {
+      return res.json({ logs: rows })
+    }
     res.json({ logs: rows, stats: aggregateLogs(rows) })
   } catch (err) {
     next(err)

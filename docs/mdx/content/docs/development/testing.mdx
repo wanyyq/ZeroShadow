@@ -10,7 +10,7 @@ icon: FlaskConical
 | 脚本 | 定位 | 断言数 | 退出码 |
 |:--|:--|:--|:--|
 | `smoke-test.ps1` | 端到端功能冒烟 | 38 项 | 失败项数量 |
-| `security-test.ps1` | 安全回归 | 16 组 | 失败项数量 |
+| `security-test.ps1` | 安全回归 | 17 组 | 失败项数量 |
 
 两个脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过。
 
@@ -37,7 +37,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
 | `-Password` | `.env` 的 `SUPER_ADMIN_PASSWORD` | 超管密码 |
 | `-KeepScratch` | 关 | 保留测试用的临时文件 |
 
-### 覆盖范围（9 组共 38 项）
+### 覆盖范围（10 组共 38 项）
+
+对应脚本里的 `Section "0. 连通性"` … `Section "9. SPA 与静态资源"`，共 **10 个 Section**：
 
 1. **连通性**：`/ping`、`/api/meta`
 2. **CSRF 与认证**：无自定义头被拦（403）、错误凭据 401、超管登录成功
@@ -52,15 +54,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
    服务器状态、隧道状态结构
 10. **SPA 与静态资源**：首页 HTML、`/resources/lucide.min.js`（前端未构建时跳过）
 
-运行时逐项打印结果，形如 `PASS csrf-blocked` / `FAIL xxx`，最后给一行汇总：
+<Callout type="info" title="以脚本里的 Section 为准">
+`smoke-test.ps1` 头部的注释里写的组数是旧的（写着 15 组），**实际执行的是 `Section "0."` ～ `Section "9."`
+共 10 个 Section**、38 项断言；脚本会逐项打印 `PASS` / `FAIL` / `SKIP`，最后给一行汇总，
+汇总里的数字来自实跑统计，不是写死的。
+</Callout>
 
-```text
-PASS ping
-PASS meta
-PASS csrf-blocked
-...
-===== 通过 38 / 失败 0 / 跳过 0 =====
-```
+运行时逐项打印结果，形如 `PASS csrf-blocked` / `FAIL xxx`；
+两个脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过。
 
 ### 行为约定
 
@@ -146,7 +147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 | `2` | 超管登录失败 |
 | 其它 | 失败项数量 |
 
-### 16 组断言
+### 17 组断言
 
 | 组 | 主题 |
 |:--|:--|
@@ -166,11 +167,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 | 14 | 作业状态归属 |
 | 15 | 访客可见性随重命名同步 |
 | 16 | 路径解析加固 |
+| 17 | 上传与归档回归（文件夹上传保留目录结构、`maxFilesPerRequest`、相对路径覆盖且不留副本、`targetNames` 重命名、`stats=0`、在线编辑 2 MB 上限与原子写） |
 
 ### 它会临时改动什么
 
-- 第 4 组会改访客权限开关，第 11 组会改解压总量上限，第 12 组会改限流阈值——
-  都在各自段落结束时**还原成你原来的值**；
+- 第 4 组会改访客权限开关、第 11 组会改解压总量上限——都在各自段落结束时**还原成你原来的值**；
 - `-TestJobOwnership` 会临时创建一个成员账号并在结束时删除；
 - 除此之外不动用户与发布包。
 
@@ -184,6 +185,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 这两项失败说明工作区需要清理，而不是代码有缺陷。
 </Callout>
 
+## 类型检查 `pnpm typecheck`
+
+```bash
+pnpm typecheck     # 根 package.json 转发给 pnpm -C web typecheck
+```
+
+它实际执行的是两套配置：
+
+```bash
+tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit
+```
+
+<Callout type="warn" title="这个命令以前是个空操作">
+`web/tsconfig.json` 是一个 solution-style 的配置（只有 `references`、`files: []`）：
+**`tsc` 不会顺着 `references` 去检查任何文件**，所以旧的 `tsc --noEmit` 等于什么都没检查——
+代码里有类型错误也照样全绿。
+
+现在脚本显式指定两份配置：`tsconfig.app.json` 查 `src`（`strict` + `noUnusedLocals` +
+`noUnusedParameters`），`tsconfig.node.json` 查 `vite.config.ts` 这类 Node 侧文件。任一处报错即非零退出。
+</Callout>
+
+`web/tsconfig.json` 里那份 `"files": []`（JSON 写法）是**有意保留**的：`pnpm build`（`tsc -b`）与编辑器的
+项目引用解析都依赖 solution 式配置，所以修的是 npm script，**不是**配置本身。
+
+改完前端后请以 `pnpm typecheck` 的输出为准：它现在能抓到以前漏掉的类型错误，
+但**依然抓不到未使用的 export**（`noUnusedLocals` 只管局部变量）。
+
 ## 提交前自查
 
 <Steps>
@@ -194,6 +222,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 pnpm typecheck
 pnpm lint
 ```
+
+`pnpm typecheck` 现在是真检查（见上一节）；如果它突然报出一批老错误，
+说明改动确实碰到了类型问题，而不是脚本变严了。
 </Step>
 <Step>
 ### 前端能构建
