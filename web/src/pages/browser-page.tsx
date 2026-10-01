@@ -21,6 +21,7 @@ import { fileKind, formatBytes, formatDate, joinPath, previewType } from "@/lib/
 import { animateListIn } from "@/lib/lucide"
 import type { Entry, SearchResult } from "@/lib/types"
 import { useAuth } from "@/state/auth"
+import { useGroups } from "@/state/groups"
 import { useClientSettings } from "@/state/client-settings"
 import { useClipboard } from "@/state/clipboard"
 import { useUploads } from "@/state/uploads"
@@ -36,6 +37,12 @@ type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 function noPermToast() { toast.warning("此功能您没权限") }
 function noPermSoftToast() { toast.warning("外部映射目录仅支持只读操作") }
 
+// 文件夹上传时，把 webkitRelativePath 写回 File.name，便于服务端还原目录结构
+function withRelativePath(f: File): File {
+  const wp = f.webkitRelativePath
+  return wp ? new File([f], wp, { type: f.type, lastModified: f.lastModified }) : f
+}
+
 function anySoftReadOnly(entries: Entry[]) {
   return entries.some((e) => e.softReadOnly)
 }
@@ -49,6 +56,7 @@ export function BrowserPage() {
   const path = params.get("path") || ""
   const query = params.get("q") || ""
   const { me } = useAuth()
+  const { currentId: groupContextId } = useGroups()
   const settings = useClientSettings()
   const clipboard = useClipboard()
   const uploads = useUploads()
@@ -92,9 +100,21 @@ export function BrowserPage() {
     }
     setSelected(new Set())
     lastIndexRef.current = -1
-  }, [path, query])
+    // groupContextId 变化时需要重新拉取（小组上下文收窄可见范围），虽未在函数体内直接引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, query, groupContextId])
 
   React.useEffect(refresh, [refresh])
+
+  // 切换小组上下文后回到根目录（当前位置可能不在新上下文的可见范围内）。
+  // 注意：setParams 的标识会随导航变化，因此必须用 ref 记录上一次的小组 id，
+  // 只在小组真正变化时才重置，否则每次进入文件夹都会被弹回根目录。
+  const prevGroupRef = React.useRef(groupContextId)
+  React.useEffect(() => {
+    if (prevGroupRef.current === groupContextId) return
+    prevGroupRef.current = groupContextId
+    setParams({})
+  }, [groupContextId, setParams])
   React.useEffect(() => uploads.onCompleted((dest) => dest === path && refresh()), [uploads, path, refresh])
   React.useEffect(() => operations.onCompleted((job) => job.type === "extract" && job.status === "done" && refresh()), [operations, refresh])
 
@@ -109,6 +129,8 @@ export function BrowserPage() {
     })
     return list
   }, [entries, settings.sortBy, settings.sortDir, settings.foldersFirst])
+
+  const isCurrentSoft = sorted.length > 0 && sorted.every((e) => e.softReadOnly)
 
   const goto = (p: string) => setParams(p ? { path: p } : {})
   const displayName = (entry: Entry) => entry.shortcut?.displayName || entry.name
@@ -159,6 +181,19 @@ export function BrowserPage() {
     if (entry.type === "dir") return goto(joinPath(path, entry.name))
     handleOpenFile(entry)
   }
+
+  // 双击打开文件夹 / 预览文件。Base UI 的 render 合并会丢失 render 元素上的
+  // onDoubleClick，因此通过 ref 绑定原生监听，保证交互稳定。
+  const openEntryRef = React.useRef(openEntry)
+  React.useEffect(() => {
+    openEntryRef.current = openEntry
+  })
+  const dblClickRef = React.useCallback(
+    (entry: Entry) => (node: HTMLDivElement | null) => {
+      if (node) node.ondblclick = () => openEntryRef.current(entry)
+    },
+    []
+  )
 
   const select = (entry: Entry, index: number, e: React.MouseEvent) => {
     setSelected((prev) => {
@@ -519,41 +554,41 @@ export function BrowserPage() {
         </ContextMenuItem>
       )
     }}
-    {single && entry.type === "file" && (entry.name.toLowerCase().endsWith(".zip")) && (
+    if (single && entry.type === "file" && entry.name.toLowerCase().endsWith(".zip")) {
       items.push(
         <ContextMenuItem key="extract" disabled={!me.perms.extractZip || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
           <Icon name="folder-open" /> 解压到当前目录
         </ContextMenuItem>
       )
-    )}
-    {single && entry.type === "dir" && (
+    }
+    if (single && entry.type === "dir") {
       items.push(
         <ContextMenuItem key="compressDir" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress([entry]) }}>
           <Icon name="folder-archive" /> 压缩为 Zip
         </ContextMenuItem>
       )
-    )}
-    {!single && (
+    }
+    if (!single) {
       items.push(
         <ContextMenuItem key="compress" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress(targets) }}>
           <Icon name="folder-archive" /> 压缩所选为 Zip
         </ContextMenuItem>
       )
-    )}
-    {single && entry.type === "shortcut" && (
+    }
+    if (single && entry.type === "shortcut") {
       items.push(
         <ContextMenuItem key="editShortcut" disabled={entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else { setShortcutEntry(entry); setShortcutOpen(true) } }}>
           <Icon name="pencil-line" /> 编辑快捷方式
         </ContextMenuItem>
       )
-    )}
-    {single && entry.type !== "shortcut" && (
+    }
+    if (single && entry.type !== "shortcut") {
       items.push(
         <ContextMenuItem key="createShortcut" onClick={() => { setShortcutEntry(entry); setShortcutOpen(true) }}>
           <Icon name="link" /> 创建快捷方式
         </ContextMenuItem>
       )
-    )}
+    }
     items.push(<ContextMenuSeparator key="s1" />)
     items.push(
       <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
@@ -654,13 +689,13 @@ export function BrowserPage() {
             <TooltipTrigger
               render={
                 <div
+                  ref={dblClickRef(entry)}
                   data-animate-item
                   className={cn(
                     "group flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 transition-colors select-none",
                     isSelected ? "bg-accent" : "hover:bg-muted/70"
                   )}
                   onClick={(e) => select(entry, index, e)}
-                  onDoubleClick={() => openEntry(entry)}
                 />
               }
             >
@@ -693,13 +728,13 @@ export function BrowserPage() {
             <TooltipTrigger
               render={
                 <div
+                  ref={dblClickRef(entry)}
                   data-animate-item
                   className={cn(
                     "edge-highlight flex cursor-default flex-col items-center gap-2 rounded-lg border border-border bg-card p-4 transition-all select-none",
                     isSelected ? "border-ring bg-accent" : "hover:bg-muted/60"
                   )}
                   onClick={(e) => select(entry, index, e)}
-                  onDoubleClick={() => openEntry(entry)}
                 />
               }
             >
@@ -717,7 +752,6 @@ export function BrowserPage() {
     )
   }
 
-  const isCurrentSoft = sorted.length > 0 && sorted.every((e) => e.softReadOnly)
   const canUpload = me.perms.upload && !isCurrentSoft
   const canMkdir = me.perms.mkdir && !isCurrentSoft
 
@@ -868,10 +902,10 @@ export function BrowserPage() {
       </div>
 
       <input ref={fileInputRef} type="file" multiple className="hidden"
-        onChange={(e) => { const rawFiles = Array.from(e.target.files || []); const files = rawFiles.map((f) => { const wp = (f as any).webkitRelativePath as string | undefined; return wp ? new File([f], wp, { type: f.type, lastModified: f.lastModified }) : f }); if (files.length) handleUpload(files); e.target.value = "" }}
+        onChange={(e) => { const files = Array.from(e.target.files || []).map(withRelativePath); if (files.length) handleUpload(files); e.target.value = "" }}
       />
       <input ref={folderInputRef} type="file" {...{ webkitdirectory: "" } as Record<string, string>} multiple className="hidden"
-        onChange={(e) => { const rawFiles = Array.from(e.target.files || []); const files = rawFiles.map((f) => { const wp = (f as any).webkitRelativePath as string | undefined; return wp ? new File([f], wp, { type: f.type, lastModified: f.lastModified }) : f }); if (files.length) handleUpload(files); e.target.value = "" }}
+        onChange={(e) => { const files = Array.from(e.target.files || []).map(withRelativePath); if (files.length) handleUpload(files); e.target.value = "" }}
       />
       <UploadPanel />
       <OpsPanel />

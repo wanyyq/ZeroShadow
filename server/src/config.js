@@ -14,18 +14,30 @@ const DEFAULTS = {
   extractMaxTotalMB: 512,
   downloadUrlMaxMB: 4096,
   // ===== 安全开关（后台可调，默认均为较安全的取值）=====
-  // 单 IP 每分钟可执行的"重型操作"次数（打包/解压/搜索/详情/链接下载）
   rateLimitEnabled: true,
   rateLimitPerMin: 120,
-  // 只读外部映射目录的内容是否允许复制/压缩进网盘主目录
   softDirAllowCopyOut: false,
-  // 作业进度是否只有创建者（与超管）可查询
   jobStatusOwnerOnly: true,
-  // 链接下载是否允许访问内网地址（等效于环境变量 DOWNLOAD_URL_ALLOW_PRIVATE）
   downloadUrlAllowPrivate: false,
-  // 写操作是否校验来源（Origin / Sec-Fetch-Site）；若反向代理会改写 Host 头
-  // 导致误拦，可在后台关闭（仍保留自定义请求头校验）
   csrfOriginCheck: true,
+  // ===== 头像 =====
+  avatarEnabled: true,
+  avatarMaxKB: 200,
+  // ===== 团队 Todo =====
+  todoEnabled: true,
+  // ===== 备份与数据保留 =====
+  backupEnabled: true,
+  backupKeep: 20,
+  logRetentionDays: 30,
+  metricsRetentionDays: 7,
+  metricsMemMinutes: 15,
+  requestMetricsEnabled: true,
+  slowRequestMs: 1000,
+  // ===== 未分组/默认上下文的可见范围 =====
+  defaultVisibility: {
+    whitelist: [],
+    blacklist: [],
+  },
   memberPerms: {
     fileWrite: true,
     browse: true,
@@ -65,6 +77,9 @@ const DEFAULTS = {
   },
 };
 
+// 成员权限键（顺序即后台展示顺序）；也是小组权限收窄的依据
+export const MEMBER_PERM_KEYS = Object.keys(DEFAULTS.memberPerms)
+
 function deepMerge(base, extra) {
   if (Array.isArray(base)) return Array.isArray(extra) ? extra : base
   if (base && typeof base === "object") {
@@ -79,9 +94,19 @@ function deepMerge(base, extra) {
   return extra === undefined ? base : extra
 }
 
-let config = deepMerge(structuredClone(DEFAULTS), readJsonSync(CONFIG_FILE, {}))
+function normalizeConfig(raw) {
+  return deepMerge(structuredClone(DEFAULTS), raw)
+}
+
+let config = normalizeConfig(readJsonSync(CONFIG_FILE, {}))
 
 export function getConfig() {
+  return config
+}
+
+/** 从磁盘重读配置（用于备份回滚后同步内存态） */
+export function reloadConfig() {
+  config = normalizeConfig(readJsonSync(CONFIG_FILE, {}))
   return config
 }
 
@@ -89,7 +114,7 @@ export async function saveConfig(mutator) {
   return withLock("config", async () => {
     const draft = structuredClone(config)
     mutator(draft)
-    config = deepMerge(structuredClone(DEFAULTS), draft)
+    config = normalizeConfig(draft)
     await writeJsonAtomic(CONFIG_FILE, config)
     return config
   })
@@ -110,7 +135,14 @@ function legacyPreview(p) {
   return !!(p.download ?? true)
 }
 
-export function effectivePerms(role) {
+/**
+ * 计算某角色的有效权限。
+ * @param {string} role superadmin | member | guest
+ * @param {{perms?: object}|null} group 当前小组上下文（仅对 member 生效）
+ *
+ * 小组权限只能"收窄"全局 memberPerms：两者取与。
+ */
+export function effectivePerms(role, group = null) {
   if (role === "superadmin") {
     return {
       fileWrite: true,
@@ -138,7 +170,7 @@ export function effectivePerms(role) {
   if (role === "member") {
     const p = config.memberPerms
     const fw = !!p.fileWrite
-    return {
+    const base = {
       fileWrite: fw,
       browse: !!p.browse,
       upload: fw && !!p.upload,
@@ -160,6 +192,13 @@ export function effectivePerms(role) {
       downloadUrl: !!p.downloadUrl,
       changePassword: !!p.changePassword,
     }
+    const gp = group && group.perms
+    if (gp && typeof gp === "object") {
+      for (const key of Object.keys(base)) {
+        if (key in gp) base[key] = base[key] && !!gp[key]
+      }
+    }
+    return base
   }
   const g = config.guestPerms
   return {
@@ -211,4 +250,9 @@ export function zipLimits() {
 export function downloadUrlLimitBytes() {
   const mb = config.downloadUrlMaxMB ?? 4096
   return mb > 0 ? mb * 1024 * 1024 : 0
+}
+
+export function avatarMaxBytes() {
+  const kb = config.avatarMaxKB ?? 200
+  return Math.max(1, Number(kb) || 200) * 1024
 }

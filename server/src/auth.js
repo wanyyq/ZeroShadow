@@ -98,7 +98,7 @@ export function requireRole(...roles) {
 
 export function requirePerm(perm) {
   return (req, res, next) => {
-    const perms = effectivePerms(req.auth.role)
+    const perms = req.perms || effectivePerms(req.auth.role, req.group)
     if (!perms[perm]) {
       if (req.auth.role === "guest") return res.status(401).json({ error: "请先登录" })
       return res.status(403).json({ error: "没有权限执行此操作" })

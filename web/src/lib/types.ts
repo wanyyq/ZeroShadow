@@ -22,11 +22,97 @@ export interface Perms {
   changePassword: boolean
 }
 
+export interface PublicGroup {
+  id: string
+  name: string
+  color: string
+  leaders: string[]
+}
+
 export interface Me {
   role: Role
   username: string | null
+  userId: string | null
   perms: Perms
   uploadLimitMB: number
+  groupId: string
+  group: PublicGroup | null
+}
+
+export interface Group {
+  id: string
+  name: string
+  color: string
+  members: string[]
+  leaders: string[]
+  perms: Record<string, boolean>
+  whitelist: string[]
+  blacklist: string[]
+  leaderCaps: {
+    viewMembers: boolean
+    manageTodo: boolean
+    editMemberAvatar: boolean
+    manageMembers: boolean
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export type LeaderCapKey = "viewMembers" | "manageTodo" | "editMemberAvatar" | "manageMembers"
+
+export interface Todo {
+  id: string
+  title: string
+  note: string
+  priority: "low" | "normal" | "high"
+  dueAt: string | null
+  scope: "all" | "group" | "member"
+  groupId: string
+  memberId: string
+  done: boolean
+  doneAt: string | null
+  doneBy: string | null
+  allowAssigneeEdit: boolean
+  createdBy: string
+  createdById: string | null
+  createdByRole: string
+  createdAt: string
+  updatedAt: string
+  groupName: string
+  memberName: string
+  canEdit: boolean
+  canComplete: boolean
+  canManage: boolean
+}
+
+export interface TodosResponse {
+  todos: Todo[]
+  enabled: boolean
+  canCreateAll: boolean
+  leaderGroups: { id: string; name: string }[]
+  members: { id: string; username: string }[]
+}
+
+export interface LeaderGroup {
+  id: string
+  name: string
+  color: string
+  leaderCaps: Group["leaderCaps"]
+  isLeader: boolean
+  canViewMembers: boolean
+  canManageMembers: boolean
+  canManageTodo: boolean
+  whitelist: string[]
+  blacklist: string[]
+  memberCount: number
+  members: Member[]
+}
+
+export interface AvatarMeta {
+  owner: string
+  md5: string
+  size: number
+  updatedAt: number
 }
 
 export interface ShortcutInfo {
@@ -91,6 +177,17 @@ export interface AdminConfig {
   jobStatusOwnerOnly: boolean
   downloadUrlAllowPrivate: boolean
   csrfOriginCheck: boolean
+  avatarEnabled: boolean
+  avatarMaxKB: number
+  todoEnabled: boolean
+  backupEnabled: boolean
+  backupKeep: number
+  logRetentionDays: number
+  metricsRetentionDays: number
+  metricsMemMinutes: number
+  requestMetricsEnabled: boolean
+  slowRequestMs: number
+  defaultVisibility: { whitelist: string[]; blacklist: string[] }
   memberPerms: {
     fileWrite: boolean
     browse: boolean
@@ -165,7 +262,52 @@ export interface LogRow {
   user: string | null
   role: string | null
   ip: string | null
+  audit?: boolean
 }
+
+export interface LogStats {
+  total: number
+  byLevel: Record<string, number>
+  topEvents: { event: string; count: number }[]
+  byDay: Record<string, number>
+  users: Record<string, number>
+}
+
+export interface MetricsSample {
+  t: number
+  cpu: number
+  memUsedPct: number
+  rssMB: number
+  heapUsedMB: number
+  freeMB: number
+  totalMB: number
+  diskFreeMB: number | null
+  diskTotalMB: number | null
+  files: number
+  dirs: number
+  bytes: number
+}
+
+export interface MetricsResponse {
+  mem: MetricsSample[]
+  latest: MetricsSample | null
+  requests: {
+    qps: number
+    lastMinute: { total: number; s2: number; s3: number; s4: number; s5: number; slow: number }
+    series: { t: number; total: number; s4: number; s5: number; slow: number }[]
+    slow: { method: string; path: string; status: number; ms: number; at: string }[]
+    totals: { requests: number; errors: number }
+  }
+  config: { memMinutes: number; sampleMs: number }
+}
+
+export interface BackupEntry {
+  id: string
+  size: number
+  mtime: number
+}
+
+export type BackupsResponse = Record<string, BackupEntry[]>
 
 export interface UploadResult {
   results: { name: string; ok: boolean; savedAs?: string; error?: string }[]

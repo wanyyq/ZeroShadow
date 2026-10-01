@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
@@ -5,21 +6,30 @@ import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Icon } from "@/components/icon"
+import { Avatar } from "@/components/avatar"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
+import { useGroups } from "@/state/groups"
 import { cn } from "@/lib/utils"
-import { api } from "@/lib/api"
+import { api, uploadAvatar } from "@/lib/api"
+import { ownerForMe, primeAvatar } from "@/lib/avatar-cache"
+import { fileToAvatarWebp } from "@/lib/avatar-image"
 import { toast } from "sonner"
 import type { Me } from "@/lib/types"
 
 const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", member: "团队成员", guest: "访客" }
 
-const NAV = [
-  { path: "/", icon: "files", label: "文件" },
-  { path: "/tools", icon: "wrench", label: "工具" },
-  { path: "/settings", icon: "settings", label: "设置" },
-  { path: "/about", icon: "info", label: "关于" },
-]
+function navItems(loggedIn: boolean) {
+  const items = [{ path: "/", icon: "files", label: "文件" }]
+  if (loggedIn) items.push({ path: "/team", icon: "clipboard-list", label: "团队" })
+  items.push(
+    { path: "/tools", icon: "wrench", label: "工具" },
+    { path: "/settings", icon: "settings", label: "设置" },
+    { path: "/about", icon: "info", label: "关于" }
+  )
+  return items
+}
 
 interface ShellContextValue {
   searchText: string
@@ -37,6 +47,25 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
   const [oldPwd, setOldPwd] = React.useState("")
   const [newPwd, setNewPwd] = React.useState("")
   const [busy, setBusy] = React.useState(false)
+  const [uploading, setUploading] = React.useState(false)
+  const fileRef = React.useRef<HTMLInputElement>(null)
+  const owner = ownerForMe(me)
+
+  const onPickAvatar = async (file: File | undefined) => {
+    if (!file || !owner) return
+    setUploading(true)
+    try {
+      const blob = await fileToAvatarWebp(file)
+      const meta = await uploadAvatar("me", blob)
+      await primeAvatar(meta.owner, meta.md5, blob)
+      toast.success("头像已更新")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ""
+    }
+  }
 
   const changePwd = async () => {
     if (!oldPwd || newPwd.length < 6) return
@@ -80,12 +109,32 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
           <>
             <DialogHeader><DialogTitle>账户</DialogTitle></DialogHeader>
             <div className="flex items-center gap-4">
-              <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-accent text-2xl font-medium">
-                {me.username?.charAt(0).toUpperCase()}
-              </span>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="group relative shrink-0 rounded-full outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
+                title="点击更换头像"
+              >
+                <Avatar owner={owner} name={me.username} size={56} />
+                <span className={cn(
+                  "absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100",
+                  uploading && "opacity-100"
+                )}>
+                  <Icon name={uploading ? "loader-2" : "camera"} className={cn("size-4", uploading && "animate-spin")} />
+                </span>
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => onPickAvatar(e.target.files?.[0])}
+              />
               <div className="min-w-0">
                 <p className="text-base font-semibold">{me.username}</p>
                 <p className="text-sm text-muted-foreground">{ROLE_LABEL[me.role]}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">头像自动裁剪为 128×128</p>
               </div>
             </div>
             <div className="mt-4 grid gap-1">
@@ -125,6 +174,36 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+function GroupSwitcher() {
+  const { groups, currentId, setCurrent } = useGroups()
+  const { me, refresh } = useAuth()
+  const navigate = useNavigate()
+  if (me.role === "guest") return null
+  const onChange = (v: string | null) => {
+    setCurrent(v || "default")
+    void refresh()
+    navigate("/")
+  }
+  const label = currentId === "default" ? "默认" : groups.find((g) => g.id === currentId)?.name || "默认"
+  return (
+    <Select value={currentId} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-28 text-xs sm:w-32" size="sm" title="切换小组上下文">
+        <Icon name="layers" className="size-3.5 shrink-0" />
+        <SelectValue render={(_p, s) => <>{s.value === "default" ? "默认" : groups.find((g) => g.id === s.value)?.name || "默认"}</>}>{label}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="default">默认</SelectItem>
+        {groups.map((g) => (
+          <SelectItem key={g.id} value={g.id}>
+            <span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: g.color }} />
+            {g.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -168,7 +247,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const sidebarNav = (
     <div className="flex flex-col gap-1">
-      {NAV.map((item) => (
+      {navItems(me.role !== "guest").map((item) => (
         <button key={item.path} onClick={() => { navigate(item.path); setMobileOpen(false) }}
           className={cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150",
@@ -219,6 +298,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <div className="hidden flex-1 sm:block" />
             <div className="ml-auto flex items-center gap-1">
+              <GroupSwitcher />
               <button onClick={cycleTheme} title={theme === "light" ? "浅色" : theme === "dark" ? "深色" : "跟随系统"}
                 className="hidden rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex">
                 <Icon name={themeIcon} className="size-[18px]" />
@@ -232,9 +312,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onClick={() => setUserCardOpen(true)}
                   className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-muted"
                 >
-                  <span className="flex size-6 items-center justify-center rounded-full bg-accent text-xs font-medium">
-                    {me.username?.charAt(0).toUpperCase()}
-                  </span>
+                  <Avatar owner={ownerForMe(me)} name={me.username} size={24} />
                   <span className="hidden sm:inline text-muted-foreground">{me.username}</span>
                 </button>
               )}

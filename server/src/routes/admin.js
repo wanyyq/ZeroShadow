@@ -1,12 +1,26 @@
 import { Router } from "express"
 import { env } from "../env.js"
 import { requireRole } from "../auth.js"
-import { getConfig, saveConfig } from "../config.js"
-import { batchMembers, createMembers, findById, findByUsername, listMembers, persist, resetPassword } from "../users.js"
+import { reloadConfig, getConfig, saveConfig } from "../config.js"
+import { batchMembers, createMembers, findById, findByUsername, listMembers, persist, reloadUsers, resetPassword } from "../users.js"
 import { getStatus } from "../status.js"
 import { applyTunnelConfig, tunnelStatus, validateCustomHost } from "../tunnel.js"
-import { clearLogs, info, queryLogs } from "../logger.js"
+import { aggregateLogs, clearLogs, info, queryLogs } from "../logger.js"
 import { samePath } from "../safety.js"
+import {
+  LEADER_CAPS,
+  addMembers,
+  createGroup,
+  deleteGroup,
+  listGroups,
+  reloadGroups,
+  removeUserFromAllGroups,
+  updateGroup,
+} from "../groups.js"
+import { reloadTodos, removeGroupFromTodos, removeUserFromTodos } from "../todos.js"
+import { deleteAvatar, ownerForUser } from "../avatars.js"
+import { listBackups, restoreBackup, snapshotAll } from "../backup.js"
+import { getMetrics, readMetricsHistory } from "../metrics.js"
 
 const router = Router()
 
@@ -22,6 +36,50 @@ function actor(req) {
   return { user: req.auth.username, role: req.auth.role, ip: req.ip }
 }
 
+// 数值型配置：键 -> [min, max]
+const NUMERIC_KEYS = {
+  superUploadLimitMB: [1, 1048576],
+  memberUploadLimitMB: [1, 1048576],
+  zipMaxFiles: [1, 100000],
+  zipMaxSingleMB: [1, 1048576],
+  zipMaxTotalMB: [1, 1048576],
+  extractMaxZipMB: [1, 1048576],
+  extractMaxTotalMB: [1, 1048576],
+  downloadUrlMaxMB: [1, 1048576],
+  rateLimitPerMin: [1, 100000],
+  avatarMaxKB: [1, 10240],
+  backupKeep: [1, 500],
+  logRetentionDays: [1, 3650],
+  metricsRetentionDays: [1, 365],
+  metricsMemMinutes: [1, 1440],
+  slowRequestMs: [1, 600000],
+}
+
+const BOOLEAN_KEYS = [
+  "rateLimitEnabled",
+  "softDirAllowCopyOut",
+  "jobStatusOwnerOnly",
+  "downloadUrlAllowPrivate",
+  "csrfOriginCheck",
+  "avatarEnabled",
+  "todoEnabled",
+  "backupEnabled",
+  "requestMetricsEnabled",
+]
+
+function cleanVisibilityPathList(value) {
+  if (!Array.isArray(value)) return []
+  const out = []
+  for (const item of value) {
+    const rel = String(item || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim()
+    if (!rel || rel === "." || rel === "..") continue
+    if (rel.split("/").some((p) => p === "..")) continue
+    if (!out.includes(rel)) out.push(rel)
+    if (out.length >= 200) break
+  }
+  return out
+}
+
 router.get("/config", (_req, res) => {
   res.json(getConfig())
 })
@@ -30,17 +88,26 @@ router.patch("/config", async (req, res, next) => {
   try {
     const body = req.body || {}
     const updates = {}
-    for (const key of ["superUploadLimitMB", "memberUploadLimitMB", "zipMaxFiles", "zipMaxSingleMB", "zipMaxTotalMB", "extractMaxZipMB", "extractMaxTotalMB", "downloadUrlMaxMB", "rateLimitPerMin"]) {
+    for (const [key, [min, max]] of Object.entries(NUMERIC_KEYS)) {
       if (body[key] !== undefined) {
         const n = Number(body[key])
-        if (!Number.isInteger(n) || n < 1 || n > 1048576) {
-          throw httpError(400, "数值需为 1-1048576 之间的整数")
+        if (!Number.isInteger(n) || n < min || n > max) {
+          throw httpError(400, `${key} 需为 ${min}-${max} 之间的整数`)
         }
         updates[key] = n
       }
     }
-    for (const key of ["rateLimitEnabled", "softDirAllowCopyOut", "jobStatusOwnerOnly", "downloadUrlAllowPrivate", "csrfOriginCheck"]) {
+    for (const key of BOOLEAN_KEYS) {
       if (body[key] !== undefined) updates[key] = !!body[key]
+    }
+    if (body.defaultVisibility !== undefined) {
+      if (typeof body.defaultVisibility !== "object" || body.defaultVisibility === null) {
+        throw httpError(400, "defaultVisibility 参数格式错误")
+      }
+      updates.defaultVisibility = {
+        whitelist: cleanVisibilityPathList(body.defaultVisibility.whitelist),
+        blacklist: cleanVisibilityPathList(body.defaultVisibility.blacklist),
+      }
     }
     for (const group of ["memberPerms", "guestPerms"]) {
       if (body[group] !== undefined) {
@@ -54,18 +121,13 @@ router.patch("/config", async (req, res, next) => {
       }
     }
     const config = await saveConfig((draft) => {
-      if (updates.superUploadLimitMB) draft.superUploadLimitMB = updates.superUploadLimitMB
-      if (updates.memberUploadLimitMB) draft.memberUploadLimitMB = updates.memberUploadLimitMB
-      if (updates.zipMaxFiles) draft.zipMaxFiles = updates.zipMaxFiles
-      if (updates.zipMaxSingleMB) draft.zipMaxSingleMB = updates.zipMaxSingleMB
-      if (updates.zipMaxTotalMB) draft.zipMaxTotalMB = updates.zipMaxTotalMB
-      if (updates.extractMaxZipMB) draft.extractMaxZipMB = updates.extractMaxZipMB
-      if (updates.extractMaxTotalMB) draft.extractMaxTotalMB = updates.extractMaxTotalMB
-      if (updates.downloadUrlMaxMB) draft.downloadUrlMaxMB = updates.downloadUrlMaxMB
-      if (updates.rateLimitPerMin) draft.rateLimitPerMin = updates.rateLimitPerMin
-      for (const key of ["rateLimitEnabled", "softDirAllowCopyOut", "jobStatusOwnerOnly", "downloadUrlAllowPrivate", "csrfOriginCheck"]) {
+      for (const key of Object.keys(NUMERIC_KEYS)) {
         if (updates[key] !== undefined) draft[key] = updates[key]
       }
+      for (const key of BOOLEAN_KEYS) {
+        if (updates[key] !== undefined) draft[key] = updates[key]
+      }
+      if (updates.defaultVisibility) draft.defaultVisibility = updates.defaultVisibility
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms)
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms)
     })
@@ -89,6 +151,7 @@ router.delete("/hidden-paths", async (req, res, next) => {
   }
 })
 
+// ================================================================ 成员 =====
 router.get("/members", (_req, res) => {
   res.json({ members: listMembers() })
 })
@@ -116,7 +179,15 @@ router.post("/members/batch", async (req, res, next) => {
     if (!["enable", "disable", "delete"].includes(action) || !Array.isArray(ids) || !ids.length) {
       throw httpError(400, "参数格式错误")
     }
-    const count = await batchMembers(action, ids.map(String))
+    const idList = ids.map(String)
+    const count = await batchMembers(action, idList)
+    if (action === "delete") {
+      for (const id of idList) {
+        await removeUserFromAllGroups(id)
+        await removeUserFromTodos(id)
+        deleteAvatar(ownerForUser(id))
+      }
+    }
     info("members_batch", { msg: `${action} × ${count}`, ...actor(req) })
     res.json({ count })
   } catch (err) {
@@ -141,7 +212,6 @@ router.patch("/members/:id", async (req, res, next) => {
     if (!user) throw httpError(404, "用户不存在")
     if (req.body?.username) {
       const newName = String(req.body.username).trim()
-      // 仅校验用户名格式（密码已存在，无需重复校验）
       const USERNAME_RE = /^[A-Za-z0-9_.-]{2,32}$/
       if (!USERNAME_RE.test(newName)) throw httpError(400, "用户名需为 2-32 位字母、数字、_ . -")
       if (newName.toLowerCase() === env.superUser.toLowerCase()) throw httpError(400, "该用户名已被超级管理员占用")
@@ -157,14 +227,69 @@ router.patch("/members/:id", async (req, res, next) => {
   }
 })
 
+// ================================================================ 小组 =====
+router.get("/groups", (_req, res) => {
+  res.json({
+    groups: listGroups(),
+    leaderCaps: LEADER_CAPS,
+    members: listMembers(),
+  })
+})
+
+router.post("/groups", async (req, res, next) => {
+  try {
+    const group = await createGroup(req.body || {})
+    info("group_create", { msg: group.name, ...actor(req) })
+    res.json({ group })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.patch("/groups/:id", async (req, res, next) => {
+  try {
+    const group = await updateGroup(String(req.params.id), req.body || {})
+    info("group_update", { msg: group.name, ...actor(req) })
+    res.json({ group })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.post("/groups/:id/members", async (req, res, next) => {
+  try {
+    const ids = req.body?.ids
+    if (!Array.isArray(ids)) throw httpError(400, "参数格式错误")
+    const group = await addMembers(String(req.params.id), ids, req.body?.action === "remove" ? "remove" : "add")
+    info("group_update", { msg: `${group.name} 成员调整`, ...actor(req) })
+    res.json({ group })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.delete("/groups/:id", async (req, res, next) => {
+  try {
+    await deleteGroup(String(req.params.id))
+    await removeGroupFromTodos(String(req.params.id))
+    info("group_delete", { msg: String(req.params.id), ...actor(req) })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ================================================================ 日志 =====
 router.get("/logs", async (req, res, next) => {
   try {
     const rows = await queryLogs({
       limit: req.query.limit,
       level: String(req.query.level || ""),
       q: String(req.query.q || ""),
+      days: req.query.days,
+      auditOnly: req.query.audit === "1" || req.query.audit === "true",
     })
-    res.json({ logs: rows })
+    res.json({ logs: rows, stats: aggregateLogs(rows) })
   } catch (err) {
     next(err)
   }
@@ -180,6 +305,57 @@ router.delete("/logs", async (req, res, next) => {
   }
 })
 
+// ================================================================ 指标 =====
+router.get("/metrics", (_req, res) => {
+  res.json(getMetrics())
+})
+
+router.get("/metrics/history", async (req, res, next) => {
+  try {
+    const rows = await readMetricsHistory(String(req.query.date || ""))
+    res.json({ date: String(req.query.date || ""), samples: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ================================================================ 备份 =====
+router.get("/backups", (_req, res) => {
+  res.json({ backups: listBackups() })
+})
+
+router.post("/backups", async (req, res, next) => {
+  try {
+    const count = snapshotAll()
+    info("backup_create", { msg: `手动快照 ${count} 个文件`, ...actor(req) })
+    res.json({ ok: true, count, backups: listBackups() })
+  } catch (err) {
+    next(err)
+  }
+})
+
+const RESTORE_RELOAD = {
+  "config.json": reloadConfig,
+  "users.json": reloadUsers,
+  "groups.json": reloadGroups,
+  "todos.json": reloadTodos,
+}
+
+router.post("/backups/restore", async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "")
+    const id = String(req.body?.id || "")
+    restoreBackup(name, id)
+    const reload = RESTORE_RELOAD[name]
+    if (reload) reload()
+    info("backup_restore", { msg: `${name} ← ${id}`, ...actor(req) })
+    res.json({ ok: true, name, id })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ================================================================ 状态/隧道 =
 router.get("/status", async (_req, res, next) => {
   try {
     res.json(await getStatus())

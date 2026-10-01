@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Icon } from "@/components/icon"
 
-const VERSION = "1.0.0"
+const VERSION = "1.1.0"
 
 export function AboutPage() {
   return (

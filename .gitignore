@@ -29,6 +29,7 @@ build/
 data/
 .env
 .env.local
+SKILL/
 .env.*.local
 !.env.example
 
@@ -61,3 +62,4 @@ desktop.ini
 # ---- 个人设计/需求工作稿（不随仓库发布）----
 AIGC.md
 main.md
+AI-input/

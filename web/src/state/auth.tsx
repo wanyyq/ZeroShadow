@@ -7,6 +7,9 @@ import type { Me } from "@/lib/types"
 const GUEST: Me = {
   role: "guest",
   username: null,
+  userId: null,
+  groupId: "default",
+  group: null,
   perms: {
     fileWrite: false,
     upload: false,

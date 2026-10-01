@@ -10,6 +10,14 @@ const MAX_MEMBERS = 500
 
 let users = readJsonSync(USERS_FILE, [])
 if (!Array.isArray(users)) users = []
+users = users.filter((u) => u && typeof u === "object" && u.id && u.username)
+
+export function reloadUsers() {
+  users = readJsonSync(USERS_FILE, [])
+  if (!Array.isArray(users)) users = []
+  users = users.filter((u) => u && typeof u === "object" && u.id && u.username)
+  return users
+}
 
 export function persist() {
   return writeJsonAtomic(USERS_FILE, users)

@@ -36,6 +36,7 @@ import {
   uniqueName,
 } from "../files.js"
 import { info } from "../logger.js"
+import { isVisibleForContext } from "../groups.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
 import { rateLimit } from "../ratelimit.js"
 import { createJob, failJob, finishJob, jobCreatedBy, jobStatus, patchJob } from "../jobs.js"
@@ -67,6 +68,23 @@ function blockSoftCopyOut(rel) {
   if (isSoftPath(rel) && !getConfig().softDirAllowCopyOut) {
     const err = new Error("只读映射目录的内容不允许复制到网盘目录（可在后台设置中放开）")
     err.status = 403
+    throw err
+  }
+}
+
+// 小组上下文可见性：选中小组后，只有白名单内且不在黑名单的目录可见。
+// 对不可见路径一律按"不存在"处理，避免暴露路径结构。
+function contextVisible(req, rel) {
+  // 根目录始终允许列出（否则白名单模式下无法展示"可见的子目录"），
+  // 具体子项在列表里逐个过滤。
+  if (!rel) return true
+  return isVisibleForContext(rel, { role: req.auth.role, group: req.group, userId: req.auth.userId })
+}
+
+function assertContextVisible(req, rel) {
+  if (!contextVisible(req, rel)) {
+    const err = new Error("文件或目录不存在")
+    err.status = 404
     throw err
   }
 }
@@ -165,19 +183,24 @@ router.get("/list", requirePerm("browse"), async (req, res, next) => {
   try {
     const { abs, rel, isSoft } = resolveSafe(req.query.path)
     if (!isSoft && guestBlocked(req, rel)) throw httpError(404, "目录不存在")
+    assertContextVisible(req, rel)
     if (isSoft) {
       if (guestBlocked(req, rel)) throw httpError(404, "目录不存在")
       const resolved = resolveAny(rel)
       await assertDir(resolved.abs)
       const entries = await listDir(resolved.abs, rel, { forGuest: req.auth.role === "guest" })
-      const marked = entries.map((e) => ({ ...e, softReadOnly: true }))
+      const marked = entries
+        .filter((e) => contextVisible(req, joinRel(rel, e.name)))
+        .map((e) => ({ ...e, softReadOnly: true }))
       res.json({ path: rel, entries: marked })
     } else {
       await assertDir(abs)
-      const entries = await listDir(abs, rel, { forGuest: req.auth.role === "guest" })
+      const entries = (await listDir(abs, rel, { forGuest: req.auth.role === "guest" })).filter((e) =>
+        contextVisible(req, joinRel(rel, e.name))
+      )
       let all = entries
       if (!rel) {
-        let softs = getSoftDirEntries()
+        let softs = getSoftDirEntries().filter((s) => contextVisible(req, s.name))
         if (softs.length) {
           if (req.auth.role === "guest") {
             softs = softs.filter((s) => !isHiddenFromGuest(s.name))
@@ -197,6 +220,7 @@ router.get("/download", async (req, res, next) => {
     const resolved = resolveAny(normRel(req.query.path))
     if (!resolved.rel) throw httpError(400, "非法路径")
     if (!resolved.isSoft && guestBlocked(req, resolved.rel)) throw httpError(404, "文件不存在")
+    assertContextVisible(req, resolved.rel)
     const stat = await assertExists(resolved.abs)
     if (!stat.isFile()) throw httpError(400, "只能下载文件，文件夹请使用打包下载")
 
@@ -234,11 +258,12 @@ router.get("/download", async (req, res, next) => {
   }
 })
 
-async function collectZipItems(rels, forGuest) {
+async function collectZipItems(rels, forGuest, req) {
   const items = []
   for (const rel of rels) {
     if (!rel) continue
     if (!isSoftPath(rel) && forGuest && isHiddenFromGuest(rel)) continue
+    if (req && !contextVisible(req, rel)) continue
     const resolved = resolveAny(rel)
     const stat = await statSafe(resolved.abs)
     if (!stat || stat.isSymbolicLink()) continue
@@ -344,7 +369,7 @@ router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, ne
     }
 
     const forGuest = req.auth.role === "guest"
-    const items = await collectZipItems(rels, forGuest)
+    const items = await collectZipItems(rels, forGuest, req)
     if (!items.length) throw httpError(404, "没有可下载的内容")
     await validateZipLimits(items, forGuest)
 
@@ -396,6 +421,7 @@ router.post("/mkdir", requirePerm("mkdir"), async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
+    assertContextVisible(req, rel)
     await assertDir(abs)
     const name = String(req.body?.name || "").trim()
     const invalid = validateName(name)
@@ -418,6 +444,7 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
     destAbs = resolved.abs
     destRel = resolved.rel
     blockSoft(destRel)
+    assertContextVisible(req, destRel)
     await assertDir(destAbs)
     if (req.query.overwrite) {
       try {
@@ -538,6 +565,7 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
+    assertContextVisible(req, rel)
     if (!rel) throw httpError(400, "非法路径")
     await assertExists(abs)
     const newName = String(req.body?.newName || "").trim()
@@ -586,6 +614,7 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
     for (const p of paths) {
       const { abs, rel } = resolveSafe(p)
       blockSoft(rel)
+      assertContextVisible(req, rel)
       if (!rel) throw httpError(400, "不能删除根目录")
       await fs.promises.rm(abs, { recursive: true, force: true })
       deleted.push(rel)
@@ -638,12 +667,14 @@ async function transfer(req, res, next, mode) {
     const merge = !!req.body?.merge
     const dest = resolveSafe(req.body?.dest)
     blockSoft(dest.rel)
+    assertContextVisible(req, dest.rel)
     await assertDir(dest.abs)
     const done = []
     for (const p of sources) {
       const src = resolveSafe(p)
       if (mode === "move") blockSoft(src.rel)
       if (mode === "copy") blockSoftCopyOut(src.rel)
+      assertContextVisible(req, src.rel)
       if (!src.rel) throw httpError(400, "非法来源")
       const stat = await assertExists(src.abs)
       if (
@@ -693,6 +724,7 @@ router.post("/move", requirePerm("move"), (req, res, next) => transfer(req, res,
 router.get("/stat", requirePerm("details"), rateLimit, async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path))
+    assertContextVisible(req, resolved.rel)
     const stat = await assertExists(resolved.abs)
     const base = {
       name: resolved.rel ? path.basename(resolved.abs) : "根目录",
@@ -722,8 +754,10 @@ router.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) =
     if (!q || q.length > 100) throw httpError(400, "请输入搜索关键词")
     const resolved = resolveAny(normRel(req.query.path))
     if (!resolved.isSoft && guestBlocked(req, resolved.rel)) throw httpError(404, "目录不存在")
+    assertContextVisible(req, resolved.rel)
     await assertDir(resolved.abs)
-    const results = await searchFiles(resolved.abs, resolved.rel, q, { forGuest: req.auth.role === "guest" })
+    let results = await searchFiles(resolved.abs, resolved.rel, q, { forGuest: req.auth.role === "guest" })
+    results = results.filter((r) => contextVisible(req, r.path))
     if (resolved.isSoft) {
       results.forEach((r) => { r.softReadOnly = true })
     }
@@ -823,11 +857,12 @@ router.post("/compress", requirePerm("compressZip"), rateLimit, async (req, res,
     const destRel = req.body?.dest || path.dirname(paths[0] || "")
     const dest = resolveSafe(destRel)
     blockSoft(dest.rel)
+    assertContextVisible(req, dest.rel)
     await assertDir(dest.abs)
     const forGuest = req.auth.role === "guest"
     const sourceRels = paths.map((p) => normRel(p))
     for (const rel of sourceRels) blockSoftCopyOut(rel)
-    const items = await collectZipItems(sourceRels, forGuest)
+    const items = await collectZipItems(sourceRels, forGuest, req)
     if (!items.length) throw httpError(404, "没有可压缩的内容")
     await validateZipLimits(items, forGuest)
     const { fileCount, totalSize } = await countZipFilesAndSize(items, forGuest)
@@ -851,9 +886,12 @@ router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, n
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
+    assertContextVisible(req, rel)
     if (!rel) throw httpError(400, "非法路径")
-    const destAbs = req.body?.dest ? resolveSafe(req.body.dest).abs : path.dirname(abs)
+    const destResolved = req.body?.dest ? resolveSafe(req.body.dest) : null
+    const destAbs = destResolved ? destResolved.abs : path.dirname(abs)
     blockSoft(req.body?.dest || rel)
+    if (destResolved) assertContextVisible(req, destResolved.rel)
     await assertDir(destAbs)
     const stat = await assertExists(abs)
     if (!stat.isFile() || !rel.toLowerCase().endsWith(".zip")) {
@@ -954,6 +992,7 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
+    assertContextVisible(req, rel)
     if (!rel) throw httpError(400, "非法路径")
     const content = String(req.body?.content || "")
     await fs.promises.writeFile(abs, content, "utf8")
@@ -1110,6 +1149,7 @@ router.post("/download-url", requirePerm("downloadUrl"), rateLimit, async (req, 
 
     const destResolved = resolveSafe(String(req.body?.dest || ""))
     blockSoft(destResolved.rel)
+    assertContextVisible(req, destResolved.rel)
     await assertDir(destResolved.abs)
     const uniqueOut = await uniqueName(destResolved.abs, safeName)
     const outPath = path.join(destResolved.abs, uniqueOut)

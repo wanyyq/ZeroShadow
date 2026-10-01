@@ -14,6 +14,7 @@ import {
 import { effectivePerms, uploadLimitMB } from "../config.js"
 import bcrypt from "bcryptjs"
 import { verifyLogin, findById, resetPassword } from "../users.js"
+import { groupsForUser, listGroups } from "../groups.js"
 import { info, warn } from "../logger.js"
 
 const router = Router()
@@ -99,13 +100,31 @@ router.post("/logout", requireRole("superadmin", "member"), (req, res) => {
   res.json({ ok: true })
 })
 
+function publicGroup(g) {
+  return { id: g.id, name: g.name, color: g.color, leaders: g.leaders }
+}
+
+/** 当前用户可切换的小组上下文（超管可切换全部） */
+router.get("/groups", (req, res) => {
+  if (req.auth.role === "superadmin") {
+    res.json({ groups: listGroups().map(publicGroup) })
+  } else if (req.auth.role === "member") {
+    res.json({ groups: groupsForUser(req.auth.userId).map(publicGroup) })
+  } else {
+    res.json({ groups: [] })
+  }
+})
+
 router.get("/me", (req, res) => {
   const { role, username } = req.auth
   res.json({
     role,
     username,
-    perms: effectivePerms(role),
+    userId: req.auth.userId || null,
+    perms: req.perms || effectivePerms(role, req.group),
     uploadLimitMB: uploadLimitMB(role),
+    groupId: req.groupId || "default",
+    group: req.group ? publicGroup(req.group) : null,
   })
 })
 

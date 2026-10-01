@@ -19,13 +19,19 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Icon } from "@/components/icon"
+import { Avatar } from "@/components/avatar"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
 import { useClientSettings } from "@/state/client-settings"
-import { api } from "@/lib/api"
+import { api, uploadAvatar, deleteAvatar } from "@/lib/api"
+import { ownerForUser, primeAvatar, forgetAvatar } from "@/lib/avatar-cache"
+import { fileToAvatarWebp } from "@/lib/avatar-image"
 import { formatBytes, formatUptime } from "@/lib/format"
-import type { AdminConfig, LogRow, Member, ServerStatus, TunnelStatus } from "@/lib/types"
+import type { AdminConfig, Member, ServerStatus, TunnelStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { GroupsSection } from "@/pages/settings/groups-section"
+import { DataSection } from "@/pages/settings/data-section"
+import { LogsMetricsSection } from "@/pages/settings/logs-metrics-section"
 
 export function SettingsPage() {
   const { me, ready } = useAuth()
@@ -44,9 +50,11 @@ export function SettingsPage() {
                 {isSuper && (
                   <>
                     <TabsTrigger value="status"><Icon name="activity" /> 状态</TabsTrigger>
-                    <TabsTrigger value="logs"><Icon name="scroll-text" /> 日志</TabsTrigger>
+                    <TabsTrigger value="logs"><Icon name="scroll-text" /> 日志与指标</TabsTrigger>
                     <TabsTrigger value="members"><Icon name="users" /> 成员</TabsTrigger>
+                    <TabsTrigger value="groups"><Icon name="layers" /> 小组</TabsTrigger>
                     <TabsTrigger value="perms"><Icon name="shield-check" /> 权限</TabsTrigger>
+                    <TabsTrigger value="data"><Icon name="database" /> 数据与保留</TabsTrigger>
                     <TabsTrigger value="security"><Icon name="lock" /> 安全</TabsTrigger>
                     <TabsTrigger value="tunnel"><Icon name="globe" /> 公网</TabsTrigger>
                   </>
@@ -56,9 +64,11 @@ export function SettingsPage() {
               {isSuper && (
                 <>
                   <TabsContent value="status"><StatusSection /></TabsContent>
-                  <TabsContent value="logs"><LogsSection /></TabsContent>
+                  <TabsContent value="logs"><LogsMetricsSection /></TabsContent>
                   <TabsContent value="members"><MembersSection /></TabsContent>
+                  <TabsContent value="groups"><GroupsSection /></TabsContent>
                   <TabsContent value="perms"><PermsSection /></TabsContent>
+                  <TabsContent value="data"><DataSection /></TabsContent>
                   <TabsContent value="security"><SecuritySection /></TabsContent>
                   <TabsContent value="tunnel"><TunnelSection /></TabsContent>
                 </>
@@ -113,19 +123,19 @@ function AppearanceSection() {
           <div className="grid gap-3">
             <Row label="默认视图">
               <Select value={settings.view} onValueChange={(v) => settings.update({ view: v as "list" | "grid" })}>
-                <SelectTrigger className="w-28"><SelectValue render={(_p, s) => <>{s.value}</>}>列表</SelectValue></SelectTrigger>
+                <SelectTrigger className="w-28"><SelectValue>{(v) => (v === "grid" ? "网格" : "列表")}</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="list">列表</SelectItem><SelectItem value="grid">网格</SelectItem></SelectContent>
               </Select>
             </Row>
             <Row label="排序字段">
               <Select value={settings.sortBy} onValueChange={(v) => settings.update({ sortBy: v as "name" | "size" | "mtime" })}>
-                <SelectTrigger className="w-28"><SelectValue render={(_p, s) => <>{s.value}</>}>名称</SelectValue></SelectTrigger>
+                <SelectTrigger className="w-28"><SelectValue>{(v) => (v === "size" ? "大小" : v === "mtime" ? "修改时间" : "名称")}</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="name">名称</SelectItem><SelectItem value="size">大小</SelectItem><SelectItem value="mtime">修改时间</SelectItem></SelectContent>
               </Select>
             </Row>
             <Row label="排序方向">
               <Select value={settings.sortDir} onValueChange={(v) => settings.update({ sortDir: v as "asc" | "desc" })}>
-                <SelectTrigger className="w-28"><SelectValue render={(_p, s) => <>{s.value}</>}>升序</SelectValue></SelectTrigger>
+                <SelectTrigger className="w-28"><SelectValue>{(v) => (v === "desc" ? "降序" : "升序")}</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="asc">升序</SelectItem><SelectItem value="desc">降序</SelectItem></SelectContent>
               </Select>
             </Row>
@@ -199,79 +209,6 @@ function StatusSection() {
   )
 }
 
-/* ==================== 日志 ==================== */
-function LogsSection() {
-  const [logs, setLogs] = React.useState<LogRow[]>([])
-  const [level, setLevel] = React.useState("all")
-  const [q, setQ] = React.useState("")
-  const [confirmClear, setConfirmClear] = React.useState(false)
-
-  const load = React.useCallback(() => {
-    api.get<{ logs: LogRow[] }>("/admin/logs", { limit: 300, level: level === "all" ? "" : level, q })
-      .then((d) => setLogs(d.logs)).catch((e) => toast.error((e as Error).message))
-  }, [level, q])
-  React.useEffect(load, [load])
-
-  return (
-    <Card className="edge-highlight">
-      <CardHeader>
-        <CardTitle>操作日志</CardTitle>
-        <CardDescription>登录、文件操作与系统事件（最近 5 天）</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={level} onValueChange={(v) => setLevel(v || "all")}>
-            <SelectTrigger className="w-28" size="sm"><SelectValue render={(_p, s) => <>{s.value}</>}>全部</SelectValue></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部级别</SelectItem>
-              <SelectItem value="info">信息</SelectItem>
-              <SelectItem value="warn">警告</SelectItem>
-              <SelectItem value="error">错误</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input placeholder="搜索事件/用户/IP…" className="h-8 w-52 text-sm" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
-          <Button size="sm" variant="ghost" onClick={load}><Icon name="refresh-cw" /> 刷新</Button>
-          <Button size="sm" variant="destructive" onClick={() => setConfirmClear(true)}><Icon name="trash-2" /> 清空</Button>
-        </div>
-        <ScrollArea className="h-96 rounded-md border border-border">
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-40">时间</TableHead>
-                <TableHead className="w-28">事件</TableHead>
-                <TableHead className="w-24">用户</TableHead>
-                <TableHead className="w-32">IP</TableHead>
-                <TableHead>详情</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {logs.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">暂无日志</TableCell></TableRow>}
-              {logs.map((row, i) => (
-                <TableRow key={i}>
-                  <TableCell className="font-mono text-xs whitespace-nowrap">{row.t.replace("T", " ").slice(0, 19)}</TableCell>
-                  <TableCell className={cn("truncate text-xs font-medium", row.lvl === "error" ? "text-destructive" : row.lvl === "warn" ? "text-amber-600 dark:text-amber-400" : "")} title={row.ev}>{row.ev}</TableCell>
-                  <TableCell className="truncate text-xs" title={row.user || undefined}>{row.user || "-"}</TableCell>
-                  <TableCell className="truncate font-mono text-xs" title={row.ip || undefined}>{row.ip || "-"}</TableCell>
-                  <TableCell className="truncate text-xs" title={row.msg}>{row.msg || "-"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </CardContent>
-      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>清空全部日志？</AlertDialogTitle><AlertDialogDescription>该操作不可撤销。</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={async () => { try { await api.del("/admin/logs"); toast.success("日志已清空"); load(); setConfirmClear(false) } catch (e) { toast.error((e as Error).message) } }}>清空</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
-  )
-}
-
 /* ==================== 成员 ==================== */
 function MembersSection() {
   const [members, setMembers] = React.useState<Member[]>([])
@@ -286,11 +223,45 @@ function MembersSection() {
   const [resetBatch, setResetBatch] = React.useState(false)
   const [batchNewPassword, setBatchNewPassword] = React.useState("")
   const [confirmDelete, setConfirmDelete] = React.useState<{ singleId?: string } | null>(null)
+  const avatarFileRef = React.useRef<HTMLInputElement>(null)
+  const [avatarTarget, setAvatarTarget] = React.useState<Member | null>(null)
 
   const load = React.useCallback(() => {
     api.get<{ members: Member[] }>("/admin/members").then((d) => { setMembers(d.members); setSelected(new Set()) }).catch((e) => toast.error((e as Error).message))
   }, [])
   React.useEffect(load, [load])
+
+  const pickAvatar = (m: Member) => {
+    setAvatarTarget(m)
+    avatarFileRef.current?.click()
+  }
+
+  const onAvatarFile = async (file: File | undefined) => {
+    if (!file || !avatarTarget) return
+    const target = avatarTarget
+    try {
+      const blob = await fileToAvatarWebp(file)
+      const meta = await uploadAvatar(ownerForUser(target.id), blob)
+      await primeAvatar(meta.owner, meta.md5, blob)
+      toast.success(`已更新 ${target.username} 的头像`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setAvatarTarget(null)
+      if (avatarFileRef.current) avatarFileRef.current.value = ""
+    }
+  }
+
+  const removeAvatar = async (m: Member) => {
+    try {
+      await deleteAvatar(ownerForUser(m.id))
+      await forgetAvatar(ownerForUser(m.id))
+      toast.success("已恢复默认头像")
+      load()
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
 
   const genPassword = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6)
 
@@ -361,6 +332,7 @@ function MembersSection() {
                 <TableHead className="w-10">
                   <Checkbox checked={allChecked} onCheckedChange={() => setSelected(allChecked ? new Set() : new Set(members.map((m) => m.id)))} />
                 </TableHead>
+                <TableHead className="w-14">头像</TableHead>
                 <TableHead>用户名</TableHead>
                 <TableHead className="w-20">状态</TableHead>
                 <TableHead className="w-40">创建时间</TableHead>
@@ -368,13 +340,18 @@ function MembersSection() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {members.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">还没有成员，点击"添加成员"创建</TableCell></TableRow>}
+              {members.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">还没有成员，点击"添加成员"创建</TableCell></TableRow>}
               {members.map((m) => (
                 <ContextMenu key={m.id}>
                   <ContextMenuTrigger render={
                     <TableRow key={m.id}>
                       <TableCell>
                         <Checkbox checked={selected.has(m.id)} onCheckedChange={() => setSelected((prev) => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next })} />
+                      </TableCell>
+                      <TableCell>
+                        <button type="button" onClick={() => pickAvatar(m)} title="点击更换头像" className="rounded-full">
+                          <Avatar owner={ownerForUser(m.id)} name={m.username} size={28} />
+                        </button>
                       </TableCell>
                       <TableCell className="font-medium">{m.username}</TableCell>
                       <TableCell><Badge variant={m.disabled ? "secondary" : "default"}>{m.disabled ? "已禁用" : "正常"}</Badge></TableCell>
@@ -387,6 +364,8 @@ function MembersSection() {
                             : <DropdownMenuItem onClick={() => batch("disable", m.id)}><Icon name="circle-slash" /> 禁用</DropdownMenuItem>}
                             <DropdownMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}><Icon name="pencil-line" /> 更改用户名</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setResetTarget(m)}><Icon name="key" /> 重置密码</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => pickAvatar(m)}><Icon name="image-plus" /> 设置头像</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => removeAvatar(m)}><Icon name="user-round-x" /> 恢复默认头像</DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}><Icon name="trash-2" /> 删除</DropdownMenuItem>
                           </DropdownMenuContent>
@@ -409,6 +388,8 @@ function MembersSection() {
         </div>
       </CardContent>
 
+      <input ref={avatarFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onAvatarFile(e.target.files?.[0])} />
+
       {/* Dialogs */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
@@ -429,7 +410,7 @@ function MembersSection() {
             <Label htmlFor="reset-pwd">新密码</Label>
             <div className="flex gap-2">
               <Input id="reset-pwd" value={resetBatch ? batchNewPassword : resetPassword} onChange={(e) => resetBatch ? setBatchNewPassword(e.target.value) : setResetPassword(e.target.value)} placeholder="至少 6 位" />
-              <Button variant="outline" onClick={() => { const p = genPassword(); resetBatch ? setBatchNewPassword(p) : setResetPassword(p) }}>随机生成</Button>
+              <Button variant="outline" onClick={() => { const p = genPassword(); if (resetBatch) setBatchNewPassword(p); else setResetPassword(p) }}>随机生成</Button>
             </div>
           </div>
           <DialogFooter>
@@ -864,7 +845,7 @@ function TunnelSection() {
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm">隧道服务</span>
             <Select value={config.mode} onValueChange={handleModeChange}>
-              <SelectTrigger className="w-40"><SelectValue render={(_p, s) => <>{s.value}</>}>pinggy.io</SelectValue></SelectTrigger>
+              <SelectTrigger className="w-40"><SelectValue>{(v) => (v === "localhostrun" ? "localhost.run" : v === "serveo" ? "serveo.net" : v === "custom" ? "自定义 SSH" : "pinggy.io")}</SelectValue></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pinggy">pinggy.io（推荐）</SelectItem>
                 <SelectItem value="localhostrun">localhost.run</SelectItem>

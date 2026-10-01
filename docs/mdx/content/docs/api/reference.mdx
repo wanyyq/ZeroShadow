@@ -140,11 +140,13 @@ X-Requested-With: XMLHttpRequest
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.0.0" }
+{ "name": "ZeroShadow", "version": "1.1.0" }
 ```
 
-<Callout type="warn" title="version 字段是硬编码的">
-`version` 目前在 `server/index.js` 中硬编码，与 `package.json` 的 `1.1.0` 不一致。
+<Callout type="info" title="version 是写死的，改版本号要动三处">
+`version` 与根 `package.json` 一致，但它是**写死**在代码里的，并没有从 `package.json` 读取。
+发版时三处必须同步修改：根 `package.json`、`server/index.js` 里的 `/api/meta`、
+以及「关于」页的 `web/src/pages/about-page.tsx`（`VERSION` 常量）。
 </Callout>
 
 ---

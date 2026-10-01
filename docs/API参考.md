@@ -101,10 +101,12 @@ X-Requested-With: XMLHttpRequest
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.0.0" }
+{ "name": "ZeroShadow", "version": "1.1.0" }
 ```
 
-> `version` 目前是硬编码的（在 `server/index.js` 中），与 `package.json` 的 `1.1.0` 不一致。
+> `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：
+> 改版本号时必须同时改三处——根 `package.json`、`server/index.js` 里的 `/api/meta`、
+> 以及「关于」页的 `web/src/pages/about-page.tsx`（`VERSION` 常量）。
 
 ---
 
