@@ -13,7 +13,6 @@ import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
 import { useGroups } from "@/state/groups"
 import { useClientSettings } from "@/state/client-settings"
-import { animatePageIn, animateSidebarIn, animateThemeSwap } from "@/lib/lucide"
 import { VERSION } from "@/version"
 import { cn } from "@/lib/utils"
 import { api, uploadAvatar } from "@/lib/api"
@@ -311,27 +310,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [searchText, setSearchText] = React.useState("")
   const { sidebarCollapsed: collapsed, update: updateSettings } = useClientSettings()
 
-  // —— GSAP 动画挂载点（全部在 lib/lucide.ts 里判断「减少动画」，开了就自动跳过）——
-  const pageRef = React.useRef<HTMLDivElement>(null)
-  const sidebarNavRef = React.useRef<HTMLDivElement>(null)
-  const firstThemeRef = React.useRef(true)
-  // 换页面时重放一次入场动画
-  React.useEffect(() => {
-    animatePageIn(pageRef.current)
-  }, [location.pathname])
-  // 侧边栏首次出现时错落入场，只跑一次
-  React.useEffect(() => {
-    animateSidebarIn(sidebarNavRef.current)
-  }, [])
-  // 明暗切换时轻微淡入；首次挂载不播（否则会闪一下）
-  React.useEffect(() => {
-    if (firstThemeRef.current) {
-      firstThemeRef.current = false
-      return
-    }
-    animateThemeSwap(document.documentElement)
-  }, [theme])
-
   const toggleCollapsed = React.useCallback(() => {
     updateSettings({ sidebarCollapsed: !collapsed })
   }, [updateSettings, collapsed])
@@ -432,7 +410,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex flex-1 flex-col overflow-y-auto px-2 pt-3">
             <ContextMenu>
               {/* min-h-full 让触发区铺满可见高度，列表下方的空白处也能右键 */}
-              <ContextMenuTrigger render={<div ref={sidebarNavRef} className="flex min-h-full flex-col gap-0.5" />}>
+              <ContextMenuTrigger render={<div className="flex min-h-full flex-col gap-0.5" />}>
                 {/* 品牌：与导航行共用同一套栅格（32px 图标槽 + gap-2.5 + px-2），保证文字与图标都对齐 */}
                 <div
                   className={cn(
@@ -551,8 +529,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* 主内容 */}
-          {/* 页面容器：每次换路由做一次轻微的入场动画（见 lib/lucide.ts，尊重「减少动画」） */}
-          <div ref={pageRef} className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
+          {/* 页面容器刻意不做入场动画：整页级别的 transform/opacity 会让浏览器
+              每帧重新合成整屏，在低端机上直接掉帧。需要动效的地方都在小元素上做
+              （列表错落见 lib/lucide.ts 的 animateListIn）。 */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
         </div>
 
         <UserCard open={userCardOpen} onOpenChange={setUserCardOpen} me={me} logout={logout} navigate={navigate} themeIcon={themeIcon} cycleTheme={cycleTheme} />

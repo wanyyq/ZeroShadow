@@ -25,6 +25,8 @@ import { Avatar } from "@/components/avatar"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
 import { useClientSettings } from "@/state/client-settings"
+import { useConfirm } from "@/components/confirm-dialog"
+import { PathPicker } from "@/components/browser/path-picker"
 import { api, uploadAvatar, deleteAvatar } from "@/lib/api"
 import { ownerForUser, primeAvatar, forgetAvatar } from "@/lib/avatar-cache"
 import { fileToAvatarWebp } from "@/lib/avatar-image"
@@ -104,6 +106,7 @@ function SettingRow({ label, hint, children }: { label: string; hint?: string; c
 function AppearanceSection() {
   const { theme, setTheme } = useTheme()
   const settings = useClientSettings()
+  const confirm = useConfirm()
 
   const themeOptions = [
     ["light", "sun", "浅色"],
@@ -120,7 +123,15 @@ function AppearanceSection() {
               <CardTitle>外观</CardTitle>
               <CardDescription>只作用于这台设备的浏览器（保存在 localStorage）</CardDescription>
             </div>
-            <Button size="sm" variant="outline" onClick={() => { settings.reset(); toast.success("已恢复默认外观") }}>
+            <Button size="sm" variant="outline" onClick={async () => {
+              if (!(await confirm({
+                title: "恢复默认外观？",
+                description: "主题、界面密度、字号、侧边栏折叠、背景噪点、减少动画与文件浏览默认值都会回到出厂设置。",
+                confirmText: "恢复默认",
+              }))) return
+              settings.reset()
+              toast.success("已恢复默认外观")
+            }}>
               <Icon name="rotate-ccw" data-icon="inline-start" /> 恢复默认
             </Button>
           </div>
@@ -322,6 +333,7 @@ function StatusSection() {
 
 /* ==================== 成员 ==================== */
 function MembersSection() {
+  const confirm = useConfirm()
   const [members, setMembers] = React.useState<Member[]>([])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [showCreate, setShowCreate] = React.useState(false)
@@ -364,6 +376,11 @@ function MembersSection() {
   }
 
   const removeAvatar = async (m: Member) => {
+    if (!(await confirm({
+      title: `把「${m.username}」的头像恢复成默认？`,
+      description: "已上传的头像文件会被删除，无法恢复。",
+      confirmText: "恢复默认头像",
+    }))) return
     try {
       await deleteAvatar(ownerForUser(m.id))
       await forgetAvatar(ownerForUser(m.id))
@@ -554,6 +571,8 @@ function MembersSection() {
 
 /* ==================== 权限 ==================== */
 function PermsSection() {
+  // 显式遮蔽 window.confirm —— 确认一律走应用内的 ConfirmProvider
+  const confirm = useConfirm()
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [superLimit, setSuperLimit] = React.useState("")
   const [memberLimit, setMemberLimit] = React.useState("")
@@ -562,6 +581,7 @@ function PermsSection() {
   const [zipMaxTotal, setZipMaxTotal] = React.useState("")
   const [extractMax, setExtractMax] = React.useState("")
   const [downloadMax, setDownloadMax] = React.useState("")
+  const [pickHidden, setPickHidden] = React.useState(false)
 
   const load = React.useCallback(() => {
     api.get<AdminConfig>("/admin/config").then((c) => {
@@ -593,8 +613,24 @@ function PermsSection() {
   }
 
   const unhide = async (p: string) => {
+    if (!(await confirm({
+      title: `恢复访客对「${p}」的可见性？`,
+      description: "该目录会重新出现在访客的列表里。",
+      confirmText: "恢复可见",
+      destructive: false,
+    }))) return
     try { const next = await api.del<AdminConfig>("/admin/hidden-paths", { path: p }); setConfig(next); toast.success("已恢复访客可见") }
     catch (e) { toast.error((e as Error).message) }
+  }
+
+  // 用可视化目录选择器直接指定要隐藏的文件夹，不必先回到文件页右键
+  const hidePath = async (p: string) => {
+    if (!p) { toast.error("不能隐藏根目录"); return }
+    try {
+      await api.post("/fs/guest-visibility", { path: p, hidden: true })
+      toast.success(`已对访客隐藏 /${p}`)
+      load()
+    } catch (e) { toast.error((e as Error).message) }
   }
 
   if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
@@ -736,20 +772,30 @@ function PermsSection() {
       {/* 隐藏文件夹 */}
       <Separator className="mb-3" />
       <div>
-        <p className="mb-2 text-sm font-medium">对访客隐藏的文件夹</p>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium">对访客隐藏的文件夹</p>
+          <Button size="xs" variant="outline" onClick={() => setPickHidden(true)}>
+            <Icon name="folder-tree" data-icon="inline-start" /> 选择目录
+          </Button>
+        </div>
         {config.guestHiddenPaths.length === 0 ? (
-          <p className="text-xs text-muted-foreground">暂无。在文件列表中右键文件夹可设为隐藏</p>
+          <p className="text-xs text-muted-foreground">暂无。用上面的「选择目录」挑选，或在文件列表中右键文件夹设为隐藏</p>
         ) : (
           <div className="grid gap-1.5">
             {config.guestHiddenPaths.map((p) => (
-              <div key={p} className="flex items-center justify-between rounded-md border border-border px-3 py-1.5">
-                <span className="flex items-center gap-2 font-mono text-xs"><Icon name="eye-off" className="size-3.5 text-muted-foreground" /> /{p}</span>
-                <Button size="xs" variant="ghost" onClick={() => unhide(p)}>恢复可见</Button>
+              <div key={p} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-1.5">
+                <span className="flex min-w-0 items-center gap-2 font-mono text-xs">
+                  <Icon name="eye-off" className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">/{p}</span>
+                </span>
+                <Button size="xs" variant="ghost" className="shrink-0" onClick={() => unhide(p)}>恢复可见</Button>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <PathPicker open={pickHidden} onOpenChange={setPickHidden} onPick={hidePath} />
     </div>
   )
 }

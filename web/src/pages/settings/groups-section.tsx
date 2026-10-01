@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { PathPicker } from "@/components/browser/path-picker"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -279,6 +280,17 @@ function GroupEditor({ group, members, onClose, onSaved }: {
   )
   const [whitelist, setWhitelist] = React.useState((group?.whitelist || []).join("\n"))
   const [blacklist, setBlacklist] = React.useState((group?.blacklist || []).join("\n"))
+  // 「从目录选择」当前要往哪个列表里插
+  const [picking, setPicking] = React.useState<null | "white" | "black">(null)
+  const insertPicked = (picked: string) => {
+    const isWhite = picking === "white"
+    const current = isWhite ? whitelist : blacklist
+    const lines = current.split("\n").map((l) => l.trim()).filter(Boolean)
+    if (picked && !lines.includes(picked)) lines.push(picked)
+    if (isWhite) setWhitelist(lines.join("\n"))
+    else setBlacklist(lines.join("\n"))
+    setPicking(null)
+  }
   const [memberQuery, setMemberQuery] = React.useState("")
   const [nameError, setNameError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
@@ -480,12 +492,17 @@ function GroupEditor({ group, members, onClose, onSaved }: {
             <ScrollArea className="h-[46vh] pr-3">
               <FieldGroup className="gap-6 py-1">
                 <Field>
-                  <FieldLabel htmlFor="g-white">
-                    白名单
-                    {whiteCount > 0
-                      ? <Badge variant="secondary" className="px-1 text-[10px]">{whiteCount}</Badge>
-                      : <Badge variant="outline" className="px-1 text-[10px]">不限</Badge>}
-                  </FieldLabel>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <FieldLabel htmlFor="g-white" className="flex items-center gap-2">
+                      白名单
+                      {whiteCount > 0
+                        ? <Badge variant="secondary" className="px-1 text-[10px]">{whiteCount}</Badge>
+                        : <Badge variant="outline" className="px-1 text-[10px]">不限</Badge>}
+                    </FieldLabel>
+                    <Button size="xs" variant="outline" onClick={() => setPicking("white")}>
+                      <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                    </Button>
+                  </div>
                   <Textarea
                     id="g-white"
                     className="h-32 resize-none font-mono text-xs"
@@ -497,10 +514,15 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                 </Field>
 
                 <Field>
-                  <FieldLabel htmlFor="g-black">
-                    黑名单
-                    {blackCount > 0 && <Badge variant="secondary" className="px-1 text-[10px]">{blackCount}</Badge>}
-                  </FieldLabel>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <FieldLabel htmlFor="g-black" className="flex items-center gap-2">
+                      黑名单
+                      {blackCount > 0 && <Badge variant="secondary" className="px-1 text-[10px]">{blackCount}</Badge>}
+                    </FieldLabel>
+                    <Button size="xs" variant="outline" onClick={() => setPicking("black")}>
+                      <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                    </Button>
+                  </div>
                   <Textarea
                     id="g-black"
                     className="h-32 resize-none font-mono text-xs"
@@ -563,6 +585,8 @@ function GroupEditor({ group, members, onClose, onSaved }: {
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <PathPicker open={picking !== null} onOpenChange={(o) => { if (!o) setPicking(null) }} onPick={insertPicked} />
     </Dialog>
   )
 }

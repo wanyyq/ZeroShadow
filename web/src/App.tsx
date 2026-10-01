@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
+import { ConfirmProvider } from "@/components/confirm-dialog"
 import { AuthProvider, useAuth } from "@/state/auth"
 import { GroupsProvider } from "@/state/groups"
 import { ClientSettingsProvider } from "@/state/client-settings"
@@ -42,21 +43,23 @@ export default function App() {
                 <UploadsProvider>
                   <OperationsProvider>
                     <TooltipProvider delay={300}>
-                      <BrowserRouter>
-                        <Routes>
-                          <Route path="/" element={<BrowserPage />} />
-                          <Route path="/login" element={<LoginPage />} />
-                          <Route path="/settings" element={<SettingsPage />} />
-                          <Route path="/team" element={<TeamPage />} />
-                          <Route path="/preview" element={<PreviewPage />} />
-                          <Route path="/editor" element={<EditorPage />} />
-                          <Route path="/html-preview" element={<HtmlPage />} />
-                          <Route path="/tools" element={<ToolsPage />} />
-                          <Route path="/about" element={<AboutPage />} />
-                          <Route path="*" element={<Navigate to="/" replace />} />
-                        </Routes>
-                      </BrowserRouter>
-                      <Toaster position="bottom-center" />
+                      <ConfirmProvider>
+                        <BrowserRouter>
+                          <Routes>
+                            <Route path="/" element={<BrowserPage />} />
+                            <Route path="/login" element={<LoginPage />} />
+                            <Route path="/settings" element={<SettingsPage />} />
+                            <Route path="/team" element={<TeamPage />} />
+                            <Route path="/preview" element={<PreviewPage />} />
+                            <Route path="/editor" element={<EditorPage />} />
+                            <Route path="/html-preview" element={<HtmlPage />} />
+                            <Route path="/tools" element={<ToolsPage />} />
+                            <Route path="/about" element={<AboutPage />} />
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                          </Routes>
+                        </BrowserRouter>
+                        <Toaster position="bottom-center" />
+                      </ConfirmProvider>
                     </TooltipProvider>
                   </OperationsProvider>
                 </UploadsProvider>

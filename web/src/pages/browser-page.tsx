@@ -95,6 +95,9 @@ export function BrowserPage() {
   // 请求序号：快速连续切目录时，先发出的慢响应会覆盖后发出的结果，
   // 表现为「面包屑已经是 B，列表还是 A」并且 loading 提前结束。只认最新一次。
   const reqSeqRef = React.useRef(0)
+  // 上一次播放入场动画的「目录或搜索」标识，用来避免刷新同一目录时重复播放
+  const animatedKeyRef = React.useRef<string | null>(null)
+
   const refresh = React.useCallback(() => {
     const seq = ++reqSeqRef.current
     const stale = () => seq !== reqSeqRef.current
@@ -109,7 +112,13 @@ export function BrowserPage() {
         .then((d) => {
           if (stale()) return
           setEntries(d.entries)
-          requestAnimationFrame(() => animateListIn(listRef.current))
+          // 只在「换目录 / 换搜索」时做一次入场动画。上传、删除、重命名之后都会
+          // refresh，如果每次都重放，列表会不停闪烁，还白白创建一大批 tween。
+          const animKey = query ? `q:${query}` : `p:${path}`
+          if (animatedKeyRef.current !== animKey) {
+            animatedKeyRef.current = animKey
+            requestAnimationFrame(() => animateListIn(listRef.current))
+          }
         })
         .catch((err) => {
           if (stale()) return

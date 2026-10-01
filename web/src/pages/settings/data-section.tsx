@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Icon } from "@/components/icon"
+import { PathPicker } from "@/components/browser/path-picker"
 import { api, createBackup, fetchBackups, restoreBackup } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import type { AdminConfig, BackupsResponse } from "@/lib/types"
@@ -33,6 +34,18 @@ export function DataSection() {
   const [defBlack, setDefBlack] = React.useState("")
   const [backups, setBackups] = React.useState<BackupsResponse>({})
   const [restoreTarget, setRestoreTarget] = React.useState<{ name: string; id: string } | null>(null)
+  // 「从目录选择」当前要追加到哪个列表
+  const [picking, setPicking] = React.useState<null | "white" | "black">(null)
+
+  const insertPicked = (picked: string) => {
+    const isWhite = picking === "white"
+    const current = isWhite ? defWhite : defBlack
+    const lines = current.split("\n").map((l) => l.trim()).filter(Boolean)
+    if (picked && !lines.includes(picked)) lines.push(picked)
+    if (isWhite) setDefWhite(lines.join("\n"))
+    else setDefBlack(lines.join("\n"))
+    setPicking(null)
+  }
 
   const load = React.useCallback(() => {
     api.get<AdminConfig>("/admin/config").then((c) => {
@@ -146,17 +159,32 @@ export function DataSection() {
         <CardContent className="grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
-              <span className="text-xs text-muted-foreground">白名单（每行一个相对路径）</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">白名单（每行一个相对路径）</span>
+                <Button size="xs" variant="outline" onClick={() => setPicking("white")}>
+                  <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                </Button>
+              </div>
               <Textarea className="h-24 resize-none font-mono text-xs" value={defWhite} onChange={(e) => setDefWhite(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <span className="text-xs text-muted-foreground">黑名单（一律隐藏）</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">黑名单（一律隐藏）</span>
+                <Button size="xs" variant="outline" onClick={() => setPicking("black")}>
+                  <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                </Button>
+              </div>
               <Textarea className="h-24 resize-none font-mono text-xs" value={defBlack} onChange={(e) => setDefBlack(e.target.value)} />
             </div>
           </div>
-          <div><Button size="sm" onClick={saveDefaults}>保存</Button></div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={saveDefaults}>保存</Button>
+            <span className="text-xs text-muted-foreground">点「从目录选择」会追加一行，仍需点保存才会生效</span>
+          </div>
         </CardContent>
       </Card>
+
+      <PathPicker open={picking !== null} onOpenChange={(o) => { if (!o) setPicking(null) }} onPick={insertPicked} />
 
       {/* 日志与指标保留 */}
       <Card className="edge-highlight">
