@@ -101,8 +101,12 @@ function Invoke-Api {
   if ($ExtraHeaders) { foreach ($key in $ExtraHeaders.Keys) { $headers[$key] = $ExtraHeaders[$key] } }
   $params = @{ UseBasicParsing = $true; Method = $Method; Uri = ($BaseUrl + $Path); Headers = $headers }
   if ($null -ne $Body) {
-    $params.ContentType = "application/json"
-    $params.Body = ($Body | ConvertTo-Json -Depth 8 -Compress)
+    # Windows PowerShell 5.1 encodes a *string* body as ISO-8859-1, which turns any
+    # non-ASCII character into "?" - the editor encoding tests send Chinese and
+    # silently got "????" back. Send explicit UTF-8 bytes instead.
+    $json = ($Body | ConvertTo-Json -Depth 8 -Compress)
+    $params.ContentType = "application/json; charset=utf-8"
+    $params.Body = [System.Text.Encoding]::UTF8.GetBytes($json)
     if (-not $NoCsrf) { $headers["X-Requested-With"] = "XMLHttpRequest" }
   }
   if ($Session) { $params.WebSession = $Session }
@@ -112,14 +116,18 @@ function Invoke-Api {
     return @{ code = [int]$r.StatusCode; body = [string]$r.Content; headers = $r.Headers }
   } catch {
     $resp = $_.Exception.Response
-    if ($resp) {
-      $text = ""
+    # Windows PowerShell 5.1 leaves the response stream empty for error statuses;
+    # the body only shows up in ErrorDetails.Message. Read that first, then fall
+    # back to the stream (older behaviour) so assertions on error bodies work.
+    $text = ""
+    if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $text = [string]$_.ErrorDetails.Message }
+    if (-not $text -and $resp) {
       try {
         $stream = $resp.GetResponseStream()
         if ($stream) { $reader = New-Object System.IO.StreamReader($stream); $text = $reader.ReadToEnd() }
       } catch { }
-      return @{ code = [int]$resp.StatusCode; body = $text; headers = $resp.Headers }
     }
+    if ($resp) { return @{ code = [int]$resp.StatusCode; body = $text; headers = $resp.Headers } }
     return @{ code = -1; body = $_.Exception.Message; headers = $null }
   }
 }
@@ -745,6 +753,107 @@ Check "save-file accepts a 2 MB body (limit raised above the global 1 MB)" ($r.c
 $bigFile = Join-Path $filesDir ($scratchName + "\big.txt")
 $bigSize = if (Test-Path -LiteralPath $bigFile) { (Get-Item -LiteralPath $bigFile).Length } else { -1 }
 Check "save-file wrote the complete body (atomic replace)" ($bigSize -eq (2 * 1024 * 1024)) ("size " + $bigSize)
+
+Section "18. Online editor encodings (/api/fs/file + save-file)"
+# ---------------------------------------------------------------------------
+
+# This file must stay pure ASCII (see .gitattributes), so the Chinese test string
+# is built from code points: 0x4E2D 0x6587 0x6D4B 0x8BD5 = "zhong wen ce shi".
+$zh = ([string][char]0x4E2D) + ([string][char]0x6587) + ([string][char]0x6D4B) + ([string][char]0x8BD5)
+
+# 1) UTF-8 baseline: write, then read back through the editor endpoint.
+$null = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{ path = ($scratchName + "/enc-utf8.txt"); content = $zh }
+$r = Invoke-Api -Method GET -Path ("/api/fs/file?path=" + [uri]::EscapeDataString($scratchName + "/enc-utf8.txt")) -Session $session
+Check "editor reads a UTF-8 file" ($r.code -eq 200 -and $r.body -match '"encoding":"utf8"') ("got " + $r.code + " " + $r.body)
+Check "editor returns the decoded text" ($r.body -match ([regex]::Escape($zh))) ("body: " + $r.body)
+
+# 2) Write as GB18030 with CRLF, then verify the RAW BYTES on disk using .NET's
+#    GBK code page (936) - an independent check that does not trust our encoder.
+#    The body is two lines so the CRLF conversion is actually exercised.
+$gbkBody = $zh + "`n" + $zh
+$r = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{
+  path = ($scratchName + "/enc-gbk.txt"); content = $gbkBody; encoding = "gb18030"; eol = "crlf"
+}
+Check "save-file accepts an explicit gb18030 encoding" ($r.code -eq 200) ("got " + $r.code + " " + $r.body)
+$gbkFile = Join-Path $filesDir ($scratchName + "\enc-gbk.txt")
+$diskBytes = @()
+if (Test-Path -LiteralPath $gbkFile) { $diskBytes = [System.IO.File]::ReadAllBytes($gbkFile) }
+$expect = [System.Text.Encoding]::GetEncoding(936).GetBytes($zh + "`r`n" + $zh)
+$sameBytes = ($diskBytes.Length -eq $expect.Length)
+if ($sameBytes) {
+  for ($i = 0; $i -lt $expect.Length; $i++) {
+    if ($diskBytes[$i] -ne $expect[$i]) { $sameBytes = $false; break }
+  }
+}
+Check "gb18030 save writes real GBK bytes (checked against code page 936)" $sameBytes ("disk=" + ($diskBytes -join ",") + " expected=" + ($expect -join ","))
+$tailOk = ($diskBytes.Length -ge 2 -and $diskBytes -contains 13)
+Check "gb18030 save converted LF to CRLF" $tailOk ("disk=" + ($diskBytes -join ","))
+
+# 3) Read it back: the encoding and the original line-ending style must survive.
+$r = Invoke-Api -Method GET -Path ("/api/fs/file?path=" + [uri]::EscapeDataString($scratchName + "/enc-gbk.txt")) -Session $session
+Check "editor auto-detects gb18030 on read-back" ($r.code -eq 200 -and $r.body -match '"encoding":"gb18030"') ("got " + $r.code + " " + $r.body)
+Check "editor round-trips the GBK text" ($r.body -match ([regex]::Escape($zh))) ("body: " + $r.body)
+Check "editor reports the original CRLF style" ($r.body -match '"eol":"crlf"') ("body: " + $r.body)
+
+# 4) UTF-16LE round trip (must carry a BOM so other tools read it correctly).
+$r = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{
+  path = ($scratchName + "/enc-u16.txt"); content = $zh; encoding = "utf16le"; eol = "lf"
+}
+Check "save-file accepts utf16le" ($r.code -eq 200) ("got " + $r.code + " " + $r.body)
+$u16File = Join-Path $filesDir ($scratchName + "\enc-u16.txt")
+$u16Bytes = @()
+if (Test-Path -LiteralPath $u16File) { $u16Bytes = [System.IO.File]::ReadAllBytes($u16File) }
+$hasBom = ($u16Bytes.Length -ge 2 -and $u16Bytes[0] -eq 0xFF -and $u16Bytes[1] -eq 0xFE)
+Check "utf16le save writes a BOM" $hasBom ("first bytes=" + (($u16Bytes | Select-Object -First 2) -join ","))
+$u16Decoded = [System.Text.Encoding]::Unicode.GetString($u16Bytes)
+Check "utf16le bytes decode back to the original text" ($u16Decoded -match ([regex]::Escape($zh))) ("decoded=" + $u16Decoded)
+$r = Invoke-Api -Method GET -Path ("/api/fs/file?path=" + [uri]::EscapeDataString($scratchName + "/enc-u16.txt")) -Session $session
+Check "editor reads utf16le back" ($r.code -eq 200 -and $r.body -match '"encoding":"utf16le"') ("got " + $r.code + " " + $r.body)
+
+# 5) Characters the target encoding cannot express must be REJECTED instead of
+#    being silently replaced with "?". Big5 has no simplified "ce shi".
+$big5Only = ([string][char]0x6D4B) + ([string][char]0x8BD5)
+$r = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{
+  path = ($scratchName + "/enc-big5.txt"); content = $big5Only; encoding = "big5"; eol = "lf"
+}
+Check "save-file refuses characters Big5 cannot encode" ($r.code -eq 400) ("got " + $r.code + " " + $r.body)
+Check "rejection explains the problem instead of failing silently" ($r.body -match "UTF-8") ("body: " + $r.body)
+
+# 6) Unknown encodings must be rejected rather than guessed.
+$r = Invoke-Api -Method POST -Path "/api/fs/save-file" -Session $session -Body @{
+  path = ($scratchName + "/enc-bad.txt"); content = "x"; encoding = "not-a-real-encoding"; eol = "lf"
+}
+Check "save-file rejects an unknown encoding" ($r.code -eq 400) ("got " + $r.code + " " + $r.body)
+
+# 7) Binary files must not be opened as text.
+$binPath = Join-Path $filesDir ($scratchName + "\blob.bin")
+[System.IO.File]::WriteAllBytes($binPath, [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52))
+$r = Invoke-Api -Method GET -Path ("/api/fs/file?path=" + [uri]::EscapeDataString($scratchName + "/blob.bin")) -Session $session
+Check "editor refuses to open a binary file" ($r.code -eq 415) ("got " + $r.code + " " + $r.body)
+
+# 8) The editor endpoint must not leak files that are hidden from this context.
+$r = Invoke-Api -Method GET -Path "/api/fs/file?path=..%2F..%2Fetc%2Fpasswd" -Session $session
+Check "editor read rejects path traversal" ($r.code -ge 400) ("got " + $r.code + " " + $r.body)
+
+Section "19. Team todos stay well-formed when a superadmin disables them"
+# ---------------------------------------------------------------------------
+
+# Turning the feature off used to answer { todos: [], enabled: false } only, so the
+# client read data.leaderGroups.length on undefined and the whole page died with
+# "Cannot read properties of undefined (reading 'length')". The response must keep
+# the full shape no matter what.
+$null = Invoke-Api -Method PATCH -Path "/api/admin/config" -Session $session -Body @{ todoEnabled = $false }
+$r = Invoke-Api -Method GET -Path "/api/todos" -Session $session
+Check "todos list still answers 200 when disabled" ($r.code -eq 200) ("got " + $r.code + " " + $r.body)
+Check "disabled todos response reports enabled=false" ($r.body -match '"enabled":false') ("body: " + $r.body)
+Check "disabled todos response still carries leaderGroups" ($r.body -match '"leaderGroups"') ("body: " + $r.body)
+Check "disabled todos response still carries members" ($r.body -match '"members"') ("body: " + $r.body)
+Check "disabled todos response still carries canCreateAll" ($r.body -match '"canCreateAll"') ("body: " + $r.body)
+$r = Invoke-Api -Method POST -Path "/api/todos" -Session $session -Body @{ title = "should not be created"; scope = "all" }
+Check "creating a todo while disabled is refused" ($r.code -eq 403) ("got " + $r.code + " " + $r.body)
+$null = Invoke-Api -Method PATCH -Path "/api/admin/config" -Session $session -Body @{ todoEnabled = $true }
+$r = Invoke-Api -Method GET -Path "/api/todos" -Session $session
+Check "todos work again after re-enabling" ($r.code -eq 200 -and $r.body -match '"enabled":true') ("got " + $r.code + " " + $r.body)
 
 # ---------------------------------------------------------------------------
 # cleanup

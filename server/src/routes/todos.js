@@ -113,7 +113,18 @@ function validateTarget(data, req) {
 }
 
 router.get("/", (req, res) => {
-  if (getConfig().todoEnabled === false) return res.json({ todos: [], enabled: false })
+  // 关闭时也返回完整字段：早期版本这里只回 { todos, enabled }，
+  // 前端读 data.leaderGroups.length 就会抛
+  // "Cannot read properties of undefined (reading 'length')"，整个团队页白屏。
+  if (getConfig().todoEnabled === false) {
+    return res.json({
+      todos: [],
+      enabled: false,
+      canCreateAll: false,
+      leaderGroups: [],
+      members: [],
+    })
+  }
   const status = String(req.query.status || "all")
   const scope = String(req.query.scope || "all")
   const q = String(req.query.q || "").trim().toLowerCase()

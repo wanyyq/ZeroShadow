@@ -6,10 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Icon } from "@/components/icon"
+import { VERSION } from "@/version"
 
-// 版本号在此处写死是有意为之：项目约定版本号需与根 package.json、/api/meta 三处保持一致
-// （见 docs/开发者指南.md 的「常见改动指引」）。
-const VERSION = "1.1.0"
 const LICENSE = "Apache-2.0"
 const AUTHOR = "Wanyyq"
 const AUTHOR_URL = "https://github.com/wanyyq"
@@ -22,6 +20,7 @@ const DEPENDENCIES: { scope: "后端" | "前端"; name: string; version: string;
   { scope: "后端", name: "busboy", version: "1.6.0", license: "MIT" },
   { scope: "后端", name: "cookie-parser", version: "1.4.7", license: "MIT" },
   { scope: "后端", name: "express", version: "4.22.2", license: "MIT" },
+  { scope: "后端", name: "iconv-lite", version: "0.7.3", license: "MIT" },
   { scope: "后端", name: "jsonwebtoken", version: "9.0.3", license: "MIT" },
   { scope: "后端", name: "unzipper", version: "0.12.5", license: "MIT" },
   { scope: "前端", name: "react", version: "19.2.7", license: "MIT" },
@@ -67,7 +66,7 @@ const BUNDLED: { name: string; version: string; license: string; note: string; u
     name: "Google Sans Flex",
     version: "—",
     license: "OFL-1.1",
-    note: "界面字体。Google 于 2025 年 11 月以 SIL 开源字体许可（OFL-1.1）开放，可自由使用、修改与再分发（含商用）；仓库内为压缩后的子集文件。注意 OFL 不授予商标权，「Google Sans」名称仍归 Google。",
+    note: "界面字体。Google 于 2025 年 11 月以 SIL 开源字体许可（OFL-1.1）开放，可自由使用、修改与再分发（含商用）；OFL 全文随字体一同分发（public/resources/LICENSE-GoogleSansFlex.txt）。注意 OFL 不授予商标权，「Google Sans」名称仍归 Google。",
     url: "https://fonts.google.com/specimen/Google+Sans+Flex/license",
   },
 ]

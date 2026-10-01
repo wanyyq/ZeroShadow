@@ -86,7 +86,8 @@ X-Requested-With: XMLHttpRequest
 | 403 | 已登录但权限不足 → `{"error":"没有权限执行此操作"}`；CSRF 失败 → `请求校验失败` |
 | 404 | 目标不存在；访客访问了对其隐藏的路径、或成员访问了**当前小组不可见**的路径（都故意用 404 而不是 403） |
 | 409 | 已存在同名文件或文件夹 |
-| 413 | 上传体积超出限制，或在线编辑正文超过 16MB |
+| 413 | 上传体积超出限制，在线编辑正文超过 16MB，或在线阅读的文件超过 8MB |
+| 415 | 在线编辑打开的文件被判定为二进制（见下文 `GET /api/fs/file`） |
 | 429 | 被限流或账户被临时锁定（带 `Retry-After` 头时会给出建议等待秒数） |
 | 500 | 服务器内部错误（详情只进服务端日志） |
 
@@ -181,7 +182,7 @@ X-Requested-With: XMLHttpRequest
 <Callout type="info" title="version 是写死的，改版本号要动三处">
 `version` 与根 `package.json` 一致，但它是**写死**在代码里的，并没有从 `package.json` 读取。
 发版时三处必须同步修改：根 `package.json`、`server/index.js` 里的 `/api/meta`、
-以及「软件开源信息」页的 `web/src/pages/about-page.tsx`（`VERSION` 常量）。
+以及前端唯一的版本号来源 `web/src/version.ts`（导出 `VERSION`，供「软件开源信息」页与侧边栏共用）。
 </Callout>
 
 ---
@@ -330,6 +331,7 @@ X-Requested-With: XMLHttpRequest
 | `GET` | `/api/fs/compress/status` | 压缩为 Zip（`memberPerms.compressZip`） | 查询压缩任务进度 |
 | `POST` | `/api/fs/extract` | 解压 Zip（`memberPerms.extractZip` / `guestPerms.extractZip`） | 启动解压任务 |
 | `GET` | `/api/fs/extract/status` | 解压 Zip（`memberPerms.extractZip`） | 查询解压任务进度 |
+| `GET` | `/api/fs/file` | 浏览目录（`memberPerms.browse` / `guestPerms.browse`） | 按识别出的编码读取文本（在线编辑打开文件） |
 | `POST` | `/api/fs/save-file` | 在线编辑文件（`memberPerms.editFiles` / `guestPerms.editFiles`） | 把文本内容写回文件 |
 | `POST` | `/api/fs/download-url` | 多线程下载器（`memberPerms.downloadUrl`） | 让服务端抓取远程直链 |
 | `GET` | `/api/fs/download-url/status` | 多线程下载器（`memberPerms.downloadUrl`） | 查询链接下载任务进度 |
@@ -636,14 +638,88 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 - 查询参数：`job`（形如 `/api/fs/extract/status?job=<jobId>`）
 - 响应：任务状态对象，见 [任务状态对象](#任务状态对象)；任务不存在或不属于调用者时 `state` 为 `gone`。
 
+### GET /api/fs/file
+
+按识别出的编码把文本读出来，供在线编辑器打开文件。**这是在线编辑的读取侧**，
+与 [`POST /api/fs/save-file`](#post-apifssave-file) 成对使用。
+
+- 权限：浏览目录（`memberPerms.browse` / `guestPerms.browse`）
+- 查询参数：
+
+| 参数 | 必填 | 说明 |
+|:--|:--|:--|
+| `path` | 是 | 文件相对路径 |
+| `encoding` | 否 | 强制用某个编码解码；**省略 = 自动识别**。取值必须是下面编码表里的 id |
+
+- 成功响应（`application/json`）：
+
+```json
+{
+  "path": "notes/gbk.txt",
+  "name": "gbk.txt",
+  "size": 42,
+  "mtime": 1737000000000,
+  "encoding": "gb18030",
+  "encodingConfident": true,
+  "eol": "crlf",
+  "content": "第一行\n第二行\n",
+  "softReadOnly": false,
+  "encodings": [{ "id": "utf8", "label": "UTF-8", "bom": "none" }]
+}
+```
+
+| 字段 | 说明 |
+|:--|:--|
+| `encoding` | 实际用于解码的编码 id |
+| `encodingConfident` | `false` 表示编码是**猜的**，前端应提示用户「如果乱码请手动切换编码」 |
+| `eol` | 原始换行风格：`crlf` / `lf` / `cr`（内容里一律是 `\n`，见下） |
+| `content` | 解码后的正文，**换行已统一成 `\n`**；BOM 已剥掉 |
+| `softReadOnly` | `true` = 位于只读映射目录，编辑器只读 |
+| `encodings` | 可选的编码列表（id / label / bom），供前端下拉框使用 |
+
+- 支持的编码 id：`utf8`、`utf8bom`、`utf16le`、`utf16be`、`gb18030`（GBK / 简体中文）、
+  `big5`（繁体中文）、`shift_jis`（日文）、`euc-kr`（韩文）、`windows-1252`、`iso-8859-1`。
+- 识别顺序：**BOM → 无 BOM 的 UTF-16 → 严格 UTF-8 → 按常用字频率逐个候选编码打分**。
+  打分是为了解决"GB18030 几乎能解码任意字节"的问题——用错编码解出来的是一片生僻字，
+  用对编码才有大量高频字，因此 Big5 不会被误判成 GB18030、Shift_JIS 也不会被误判成 UTF-16。
+- 错误：
+
+| 状态 | 原因 |
+|:--|:--|
+| 400 | 非法路径 |
+| 404 | 文件不存在（或者不是普通文件） |
+| 413 | 文件大于 **8 MB**（`EDITOR_MAX_BYTES`），提示 `文件过大（NMB），在线编辑上限 8MB` |
+| 415 | 判定为二进制文件（含 NUL 字节，或控制字符比例 > 10%），提示 `这看起来是二进制文件，不能当文本编辑` |
+
+<Callout type="info" title="UTF-16 文件天然含 NUL，不会被 415 误拦">
+带 BOM 或识别为 UTF-16 的内容会跳过 NUL 检查，所以"英文内容的 UTF-16 文件"依然可以正常编辑。
+</Callout>
+
 ### POST /api/fs/save-file
 
 把文本内容写回文件（在线编辑保存）。
 
 - 权限：在线编辑文件（`memberPerms.editFiles` / `guestPerms.editFiles`）
-- 请求体：`{ "path": "notes.md", "content": "……" }`
-- 响应：`{ "ok": true }`
-- 说明：以 UTF-8 写入；`content` 省略时写入空字符串。
+- 请求体：
+
+```json
+{ "path": "notes.md", "content": "……", "encoding": "utf8", "eol": "lf" }
+```
+
+| 字段 | 默认 | 说明 |
+|:--|:--|:--|
+| `path` | — | 目标文件相对路径 |
+| `content` | `""` | 正文；换行按 `\n` 提交 |
+| `encoding` | `utf8` | 写回用的编码，取值必须是上面列出的编码 id |
+| `eol` | `lf` | 写回时的换行风格：`crlf` / `lf` / `cr`（非法值退回 `lf`） |
+
+- 响应：`{ "ok": true, "bytes": 1234, "encoding": "utf8", "eol": "lf" }`
+- 说明：
+  - 编码为 `utf8bom` / `utf16le` / `utf16be` 时**会写入对应的 BOM**（UTF-16 没有 BOM 就无法区分字节序）；
+  - **目标编码表示不了的字符会被拒绝，而不是静默写成 `?`**：返回 **400**，
+    提示 `这些字符无法用 <编码名> 表示：<字符…>。请改用 UTF-8 保存。`
+    （最多列出 12 个字符）；例如把含简体字的文本存成 Big5、或把汉字存成 ISO-8859-1 都会命中这一条；
+  - 不支持的编码 id 直接返回 **400** `不支持的编码：xxx`。
 - **请求体上限单独放宽到 16 MB**：`server/index.js` 给这个端点挂了
   `express.json({ limit: SAVE_FILE_MAX_BYTES })`（`16 * 1024 * 1024`，定义在 `server/src/routes/fs.js`），
   **其余接口仍然是 1 MB**。超过上限返回 **413**，文案是 `内容过大（NMB），在线编辑上限 16MB`。
@@ -651,6 +727,7 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
   所以进程被杀 / 断电 / 磁盘写满都不会把原文件截断成半个（Windows 上 `rename` 覆盖失败时
   退化为"先删目标再改名"）；任何一步失败都会清理临时文件。
 - 不能写入只读映射目录（403）；路径落在当前小组可见范围之外返回 `404 文件或目录不存在`。
+- 编解码与探测的实现在 `server/src/encoding.js`，依赖 `iconv-lite`。
 - 这也是创建 `.zeropath` 快捷方式的底层接口。
 
 ### POST /api/fs/download-url

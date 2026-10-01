@@ -6,6 +6,7 @@ import type {
   MetricsResponse,
   BackupsResponse,
   UploadResult,
+  FileTextResponse,
 } from "@/lib/types"
 
 export class ApiError extends Error {
@@ -108,6 +109,24 @@ export function downloadUrl(path: string, inline = false) {
 
 export function zipUrl(paths: string[]) {
   return `/api/fs/zip?paths=${encodeURIComponent(JSON.stringify(paths))}${groupQuery()}`
+}
+
+/**
+ * 在线编辑：按服务端识别出的编码读取文本。
+ * 不传 encoding 就是「自动识别」；传了就按指定编码强制解码（用户手动改编码时用）。
+ */
+export function fetchFileText(path: string, encoding?: string) {
+  return api.get<FileTextResponse>("/fs/file", encoding ? { path, encoding } : { path })
+}
+
+/** 在线编辑：保存。encoding/eol 决定写回磁盘的字节，服务端会拒绝目标编码表示不了的字符。 */
+export function saveFileText(body: {
+  path: string
+  content: string
+  encoding: string
+  eol: string
+}) {
+  return api.post<{ ok: boolean; bytes: number; encoding: string; eol: string }>("/fs/save-file", body)
 }
 
 export function startCompressJob(paths: string[]): Promise<{ jobId: string }> {

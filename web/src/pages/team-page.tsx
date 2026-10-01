@@ -10,11 +10,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSeparator, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
@@ -23,6 +22,7 @@ import { DatePicker } from "@/components/ui/date-picker"
 import { Avatar } from "@/components/avatar"
 import { Icon } from "@/components/icon"
 import { PathPicker } from "@/components/browser/path-picker"
+import { animateListIn } from "@/lib/lucide"
 import { useAuth } from "@/state/auth"
 import { SUPER_OWNER } from "@/lib/avatar-cache"
 import { createTodo, deleteTodo, fetchTodos, patchTodo, setTodoDone, fetchLeaderGroups, addGroupMembers, patchLeaderGroup } from "@/lib/api"
@@ -72,6 +72,7 @@ export function TeamPage() {
   const [confirmDelete, setConfirmDelete] = React.useState<Todo | null>(null)
   const [ledGroups, setLedGroups] = React.useState<LeaderGroup[]>([])
   const [allMembers, setAllMembers] = React.useState<Member[]>([])
+  const listRef = React.useRef<HTMLDivElement>(null)
 
   const loadGroups = React.useCallback(() => {
     fetchLeaderGroups().then((d) => { setLedGroups(d.groups); setAllMembers(d.allMembers) }).catch(() => {})
@@ -81,11 +82,27 @@ export function TeamPage() {
   }, [ready, me.role, loadGroups])
 
   const load = React.useCallback(() => {
-    fetchTodos({ status, scope, q }).then(setData).catch((e) => toast.error((e as Error).message))
+    fetchTodos({ status, scope, q })
+      // 服务端在「团队待办已关闭」等情况下可能少给字段；这里统一补默认值，
+      // 保证 data.leaderGroups / data.members 永远是可读数组，页面不会白屏。
+      .then((d) => setData({
+        ...d,
+        todos: d.todos ?? [],
+        canCreateAll: !!d.canCreateAll,
+        leaderGroups: d.leaderGroups ?? [],
+        members: d.members ?? [],
+      }))
+      .catch((e) => toast.error((e as Error).message))
   }, [status, scope, q])
   React.useEffect(() => {
     if (ready && me.role !== "guest") load()
   }, [ready, me.role, load])
+
+  // 列表变化时错落入场（animateListIn 内部会判断「减少动画」）。
+  // 必须放在下面那些提前 return 之前 —— 否则会变成条件调用 Hook。
+  React.useEffect(() => {
+    requestAnimationFrame(() => animateListIn(listRef.current))
+  }, [data])
 
   if (!ready) return <AppShell><div className="p-8 text-center text-sm text-muted-foreground">加载中…</div></AppShell>
   if (me.role === "guest") {
@@ -101,6 +118,25 @@ export function TeamPage() {
             <Button onClick={() => navigate("/login")}>
               <Icon name="log-in" data-icon="inline-start" /> 去登录
             </Button>
+          </Empty>
+        </div>
+      </AppShell>
+    )
+  }
+
+  // 超管关掉团队待办后给出明确说明，而不是一个看起来坏掉的空页面
+  if (data && data.enabled === false) {
+    return (
+      <AppShell>
+        <div className="flex flex-1 items-center justify-center p-8">
+          <Empty className="max-w-sm border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Icon name="clipboard-list" /></EmptyMedia>
+              <EmptyTitle>团队待办已被关闭</EmptyTitle>
+              <EmptyDescription>
+                管理员在「设置 → 权限」里关闭了团队待办功能；重新开启后这里就能继续使用
+              </EmptyDescription>
+            </EmptyHeader>
           </Empty>
         </div>
       </AppShell>
@@ -135,8 +171,9 @@ export function TeamPage() {
   return (
     <AppShell>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-hidden px-4 py-6 sm:px-6">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        {/* 整页统一滚动，不再套「列表自己滚 + 外面不滚」的双层滚动区 */}
+        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
               <h1 className="font-heading text-2xl font-semibold tracking-tight">团队待办</h1>
               <p className="text-sm text-muted-foreground">超管与组长可下发任务，成员按指派推进</p>
@@ -148,10 +185,8 @@ export function TeamPage() {
             )}
           </div>
 
-          {ledGroups.length > 0 && <LeaderPanel groups={ledGroups} allMembers={allMembers} onChanged={loadGroups} />}
-
-          {/* 筛选条：状态与范围都是 2–3 个互斥选项，分段控件比两个下拉更直接 */}
-          <div className="mb-4 flex flex-wrap items-center gap-2">
+          {/* 筛选工具条：两组分段控件 + 搜索，收进同一块里，不再各占一行 */}
+          <div className="edge-highlight flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-3 py-2.5">
             <ToggleGroup
               size="sm"
               value={[status]}
@@ -161,6 +196,8 @@ export function TeamPage() {
               <ToggleGroupItem value="done">已完成</ToggleGroupItem>
               <ToggleGroupItem value="all">全部</ToggleGroupItem>
             </ToggleGroup>
+
+            <span className="hidden h-5 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
 
             <ToggleGroup
               size="sm"
@@ -172,13 +209,20 @@ export function TeamPage() {
               <ToggleGroupItem value="member">成员</ToggleGroupItem>
             </ToggleGroup>
 
-            <InputGroup className="h-8 w-full sm:ml-auto sm:w-52">
+            <InputGroup className="h-8 w-full sm:ml-auto sm:w-48">
               <InputGroupAddon><Icon name="search" /></InputGroupAddon>
               <InputGroupInput placeholder="搜索待办…" value={q} onChange={(e) => setQ(e.target.value)} />
             </InputGroup>
           </div>
 
-          <ScrollArea className="min-h-0 flex-1 rounded-xl border border-border bg-card">
+          {/* 任务列表：页面的主体，放在最显眼的位置 */}
+          <div className="edge-highlight flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <Icon name="list-checks" className="size-3.5" />
+              <span>共 {todos.length} 条</span>
+              {status !== "done" && <span>· 未完成 {openCount} 条</span>}
+            </div>
+
             {todos.length === 0 ? (
               <Empty className="border-0">
                 <EmptyHeader>
@@ -190,25 +234,24 @@ export function TeamPage() {
                 </EmptyHeader>
               </Empty>
             ) : (
-              <>
-                <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
-                  <Icon name="list-checks" className="size-3.5" />
-                  共 {todos.length} 条{status !== "done" ? ` · 未完成 ${openCount} 条` : ""}
-                </div>
-                <div className="divide-y divide-border/50">
-                  {todos.map((todo) => (
-                    <TodoRow
-                      key={todo.id}
-                      todo={todo}
-                      onToggle={() => toggleDone(todo)}
-                      onEdit={() => { setEditing(todo); setEditorOpen(true) }}
-                      onDelete={() => setConfirmDelete(todo)}
-                    />
-                  ))}
-                </div>
-              </>
+              <div ref={listRef} className="divide-y divide-border/50">
+                {todos.map((todo) => (
+                  <TodoRow
+                    key={todo.id}
+                    todo={todo}
+                    onToggle={() => toggleDone(todo)}
+                    onEdit={() => { setEditing(todo); setEditorOpen(true) }}
+                    onDelete={() => setConfirmDelete(todo)}
+                  />
+                ))}
+              </div>
             )}
-          </ScrollArea>
+          </div>
+
+          {/* 小组管理是次要动作，放到列表下面，避免一进页面先看到一大块管理面板 */}
+          {ledGroups.length > 0 && (
+            <LeaderPanel groups={ledGroups} allMembers={allMembers} onChanged={loadGroups} />
+          )}
         </div>
       </div>
 
@@ -249,7 +292,7 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
   return (
     <ContextMenu>
       <ContextMenuTrigger render={<div />}>
-        <div className={cn("dense-row flex items-start gap-3 px-3 transition-colors hover:bg-muted/30", todo.done && "opacity-60")}>
+        <div className={cn("dense-row flex items-start gap-3 px-3 transition-colors hover:bg-muted/30", todo.done && "opacity-60")} data-animate-item>
       <Checkbox
         className="mt-0.5"
         checked={todo.done}
@@ -369,7 +412,7 @@ function LeaderPanel({ groups, allMembers, onChanged }: { groups: LeaderGroup[];
   const managing = managingId ? groups.find((g) => g.id === managingId) ?? null : null
 
   return (
-    <Card className="mb-4 gap-0 py-0 edge-highlight">
+    <Card className="gap-0 py-0 edge-highlight">
       <CardHeader className="gap-1 border-b border-border/60 py-4">
         <div className="flex items-center gap-2">
           <CardTitle className="text-sm">我管理的小组</CardTitle>
@@ -691,107 +734,151 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{isNew ? "新建待办" : "编辑待办"}</DialogTitle>
           <DialogDescription>
-            {isNew ? "选择下发范围与优先级，被指派者会看到这条任务。" : "下发范围只有创建者与管理者能改动。"}
+            {isNew
+              ? "选择下发范围与优先级，被指派者会看到这条任务。"
+              : "标题、备注、优先级与截止日期都能改；下发范围只有创建者与管理者能改。"}
           </DialogDescription>
         </DialogHeader>
 
-        <FieldGroup className="gap-5">
-          <Field data-invalid={titleError ? true : undefined}>
-            <FieldLabel htmlFor="todo-title">标题</FieldLabel>
-            <Input
-              id="todo-title"
-              value={title}
-              autoFocus
-              aria-invalid={titleError ? true : undefined}
-              placeholder="要做什么？"
-              onChange={(e) => { setTitle(e.target.value); if (titleError) setTitleError(null) }}
-            />
-            {titleError && <p role="alert" className="text-sm font-normal text-destructive">{titleError}</p>}
-          </Field>
+        {/* 内容区限高滚动：字段多起来时不再把对话框撑出屏幕 */}
+        <ScrollArea className="-mx-1 max-h-[58vh] px-1">
+          <FieldGroup className="gap-6 pb-1">
+            <Field data-invalid={titleError ? true : undefined}>
+              <FieldLabel htmlFor="todo-title">标题</FieldLabel>
+              <Input
+                id="todo-title"
+                value={title}
+                autoFocus
+                aria-invalid={titleError ? true : undefined}
+                placeholder="要做什么？"
+                onChange={(e) => { setTitle(e.target.value); if (titleError) setTitleError(null) }}
+              />
+              {titleError
+                ? <FieldError>{titleError}</FieldError>
+                : <FieldDescription>一句话说清要做什么。</FieldDescription>}
+            </Field>
 
-          <Field>
-            <FieldLabel htmlFor="todo-note">备注</FieldLabel>
-            <Textarea id="todo-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="补充说明（可选）" />
-          </Field>
+            <Field>
+              <FieldLabel htmlFor="todo-note">备注</FieldLabel>
+              <Textarea
+                id="todo-note"
+                rows={4}
+                className="resize-y"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="补充说明、验收标准、相关路径…（可选）"
+              />
+            </Field>
 
-          <Field orientation="horizontal">
-            <FieldLabel>优先级</FieldLabel>
-            <ToggleGroup
-              size="sm"
-              value={[priority]}
-              onValueChange={(v) => { const next = v[v.length - 1] as Todo["priority"] | undefined; if (next) setPriority(next) }}
-            >
-              <ToggleGroupItem value="high">高</ToggleGroupItem>
-              <ToggleGroupItem value="normal">中</ToggleGroupItem>
-              <ToggleGroupItem value="low">低</ToggleGroupItem>
-            </ToggleGroup>
-          </Field>
+            <FieldSeparator />
 
-          <Field orientation="horizontal">
-            <FieldLabel htmlFor="todo-due">截止日期</FieldLabel>
-            <DatePicker id="todo-due" value={dueAt || null} onChange={(v) => setDueAt(v || "")} />
-          </Field>
+            <FieldSet className="gap-5">
+              <FieldLegend variant="label">安排</FieldLegend>
 
-          {isNew && scopeOptions.length > 0 && (
-            <>
-              <Separator />
-              <FieldSet>
-                <FieldLegend variant="label">下发范围</FieldLegend>
+              <Field orientation="horizontal">
+                <FieldLabel>优先级</FieldLabel>
                 <ToggleGroup
                   size="sm"
-                  className="flex-wrap"
-                  value={[scope]}
-                  onValueChange={(v) => { const next = v[v.length - 1] as Todo["scope"] | undefined; if (next) setScope(next) }}
+                  className="w-fit"
+                  value={[priority]}
+                  onValueChange={(v) => { const next = v[v.length - 1] as Todo["priority"] | undefined; if (next) setPriority(next) }}
                 >
-                  {scopeOptions.includes("all") && <ToggleGroupItem value="all">{scopeLabels.all}</ToggleGroupItem>}
-                  {scopeOptions.includes("group") && <ToggleGroupItem value="group">{scopeLabels.group}</ToggleGroupItem>}
-                  {scopeOptions.includes("member") && <ToggleGroupItem value="member">{scopeLabels.member}</ToggleGroupItem>}
+                  <ToggleGroupItem value="high">高</ToggleGroupItem>
+                  <ToggleGroupItem value="normal">中</ToggleGroupItem>
+                  <ToggleGroupItem value="low">低</ToggleGroupItem>
                 </ToggleGroup>
+              </Field>
 
-                {scope === "group" && (
-                  <Select value={groupId} onValueChange={(v) => setGroupId(v || "")}>
-                    <SelectTrigger className="mt-3 w-full">
-                      <SelectValue render={(_p, s) => <>{data.leaderGroups.find((g) => g.id === s.value)?.name || "选择小组"}</>}>
-                        选择小组
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {data.leaderGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                )}
-                {scope === "member" && (
-                  <Select value={memberId} onValueChange={(v) => setMemberId(v || "")}>
-                    <SelectTrigger className="mt-3 w-full">
-                      <SelectValue render={(_p, s) => <>{data.members.find((m) => m.id === s.value)?.username || "选择成员"}</>}>
-                        选择成员
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {data.members.map((m) => <SelectItem key={m.id} value={m.id}>{m.username}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                )}
-              </FieldSet>
-            </>
-          )}
+              <Field orientation="horizontal">
+                <FieldLabel htmlFor="todo-due">截止日期</FieldLabel>
+                <DatePicker id="todo-due" value={dueAt || null} onChange={(v) => setDueAt(v || "")} />
+              </Field>
+            </FieldSet>
 
-          <Field orientation="horizontal" data-disabled={canToggleAllowEdit ? undefined : true}>
-            <FieldLabel htmlFor="todo-allow-edit" className="flex-auto font-normal">
-              允许被指派成员编辑内容
-            </FieldLabel>
-            <Checkbox
-              id="todo-allow-edit"
-              checked={allowAssigneeEdit}
-              disabled={!canToggleAllowEdit}
-              onCheckedChange={(v) => setAllowAssigneeEdit(!!v)}
-            />
-          </Field>
-        </FieldGroup>
+            {isNew && scopeOptions.length > 0 && (
+              <>
+                <FieldSeparator />
+
+                <FieldSet className="gap-5">
+                  <FieldLegend variant="label">下发范围</FieldLegend>
+
+                  <ToggleGroup
+                    size="sm"
+                    className="w-fit flex-wrap"
+                    value={[scope]}
+                    onValueChange={(v) => { const next = v[v.length - 1] as Todo["scope"] | undefined; if (next) setScope(next) }}
+                  >
+                    {scopeOptions.includes("all") && <ToggleGroupItem value="all">{scopeLabels.all}</ToggleGroupItem>}
+                    {scopeOptions.includes("group") && <ToggleGroupItem value="group">{scopeLabels.group}</ToggleGroupItem>}
+                    {scopeOptions.includes("member") && <ToggleGroupItem value="member">{scopeLabels.member}</ToggleGroupItem>}
+                  </ToggleGroup>
+
+                  {/* 之前这里是一个带 mt-3 的裸 Select，既没有标签也没跟着 FieldSet 的间距走 */}
+                  {scope === "group" && (
+                    <Field>
+                      <FieldLabel htmlFor="todo-group">选择小组</FieldLabel>
+                      <Select value={groupId} onValueChange={(v) => setGroupId(v || "")}>
+                        <SelectTrigger id="todo-group">
+                          <SelectValue render={(_p, s) => <>{data.leaderGroups.find((g) => g.id === s.value)?.name || "选择小组"}</>}>
+                            选择小组
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {data.leaderGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>该小组的成员都会看到这条待办。</FieldDescription>
+                    </Field>
+                  )}
+
+                  {scope === "member" && (
+                    <Field>
+                      <FieldLabel htmlFor="todo-member">选择成员</FieldLabel>
+                      <Select value={memberId} onValueChange={(v) => setMemberId(v || "")}>
+                        <SelectTrigger id="todo-member">
+                          <SelectValue render={(_p, s) => <>{data.members.find((m) => m.id === s.value)?.username || "选择成员"}</>}>
+                            选择成员
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {data.members.map((m) => <SelectItem key={m.id} value={m.id}>{m.username}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>只有被指派的成员（和你）能看到这条待办。</FieldDescription>
+                    </Field>
+                  )}
+
+                  {scope === "all" && (
+                    <FieldDescription>所有成员都会看到这条待办。</FieldDescription>
+                  )}
+                </FieldSet>
+              </>
+            )}
+
+            <FieldSeparator />
+
+            <Field orientation="horizontal" data-disabled={canToggleAllowEdit ? undefined : true}>
+              <div className="flex flex-auto flex-col gap-1">
+                <FieldLabel htmlFor="todo-allow-edit" className="font-normal">
+                  允许被指派成员编辑内容
+                </FieldLabel>
+                <FieldDescription>
+                  {canToggleAllowEdit ? "开启后，被指派者也能改标题与备注。" : "只有创建者或管理者能改动这一项。"}
+                </FieldDescription>
+              </div>
+              <Checkbox
+                id="todo-allow-edit"
+                checked={allowAssigneeEdit}
+                disabled={!canToggleAllowEdit}
+                onCheckedChange={(v) => setAllowAssigneeEdit(!!v)}
+              />
+            </Field>
+          </FieldGroup>
+        </ScrollArea>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>

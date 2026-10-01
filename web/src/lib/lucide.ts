@@ -6,6 +6,7 @@ declare global {
     gsap?: {
       from: (targets: unknown, vars: Record<string, unknown>) => unknown
       to: (targets: unknown, vars: Record<string, unknown>) => unknown
+      fromTo: (targets: unknown, fromVars: Record<string, unknown>, toVars: Record<string, unknown>) => unknown
       set: (targets: unknown, vars: Record<string, unknown>) => unknown
     }
   }
@@ -85,6 +86,44 @@ export function animatePageIn(el: HTMLElement | null) {
       y: 10,
       duration: 0.35,
       ease: "power2.out",
+      clearProps: "all",
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 切换明暗主题时给整页一个很轻的淡入。
+ * 只淡 opacity，不动布局，所以不会引起重排；「减少动画」开启时直接跳过。
+ */
+export function animateThemeSwap(el: HTMLElement | null) {
+  if (!el || !window.gsap) return
+  if (document.documentElement.dataset.reduceMotion === "1") return
+  try {
+    window.gsap.fromTo(
+      el,
+      { opacity: 0.55 },
+      { opacity: 1, duration: 0.24, ease: "power1.out", clearProps: "opacity" }
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 侧边栏导航首次渲染时的轻微错落入场（只跑一次，之后交给 CSS hover） */
+export function animateSidebarIn(container: HTMLElement | null) {
+  if (!container || !window.gsap) return
+  if (document.documentElement.dataset.reduceMotion === "1") return
+  const rows = container.querySelectorAll("button")
+  if (!rows.length || rows.length > 20) return
+  try {
+    window.gsap.from(rows, {
+      opacity: 0,
+      x: -8,
+      duration: 0.3,
+      ease: "power2.out",
+      stagger: 0.03,
       clearProps: "all",
     })
   } catch {

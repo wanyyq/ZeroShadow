@@ -145,9 +145,11 @@ function AppearanceSection() {
               <FieldDescription className="mt-2">任意页面按 `D` 键也能循环切换主题。</FieldDescription>
             </FieldSet>
 
+            <Separator />
+
             <FieldSet>
               <FieldLegend variant="label">界面</FieldLegend>
-              <div className="flex flex-col gap-5">
+              <div className="flex flex-col divide-y divide-border/60 [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
                 <SettingRow label="界面密度" hint="紧凑会收紧列表行高与卡片内边距，一屏能放下更多条目。">
                   <ToggleGroup
                     value={[settings.density]}
@@ -223,9 +225,11 @@ function AppearanceSection() {
               </ToggleGroup>
             </FieldSet>
 
+            <Separator />
+
             <FieldSet>
               <FieldLegend variant="label">排序</FieldLegend>
-              <div className="flex flex-col gap-5">
+              <div className="flex flex-col divide-y divide-border/60 [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
                 <SettingRow label="排序字段">
                   <ToggleGroup
                     value={[settings.sortBy]}

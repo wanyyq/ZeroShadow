@@ -15,11 +15,17 @@ icon: Boxes
 | 前端 | React 19 + TypeScript + Vite 8 + Tailwind CSS v4 | 路径别名 `@` → `web/src`；组件用 shadcn CLI 生成 |
 | UI 组件底座 | `@base-ui/react`（**不是 Radix**） | `web/src/components/ui/*` 都建立在它之上 |
 | 图标 | 本地 `lucide.min.js` + `<i data-lucide>` 占位，由 `createIcons()` 渲染 | 不用 CDN，内网离线可用 |
-| 动画 | 本地 `gsap.min.js` + CSS 过渡 | 列表入场与页面入场动画 |
+| 动画 | 本地 `gsap.min.js` + CSS 过渡 | 列表入场与页面入场动画（「减少动画」偏好会关掉它们） |
+| 文本编码 | `iconv-lite` 0.7.3（MIT） | 在线编辑器的编码识别与写回；**服务端唯一为编解码引入的依赖**，其余模块都是手写的 |
 | 打包 | Vite（前端）/ esbuild + pkg（后端） | esbuild 先把 ESM 打成 CJS，再由 pkg 生成可执行文件 |
 
 根 `package.json` **没有依赖**，只是一个脚本入口；依赖分别装在 `server/` 与 `web/` 两个子项目里，
 各自有独立锁文件（`lockfileVersion: '9.0'`）。
+
+`server/package.json` 的 `dependencies` 就是后端全部第三方运行时依赖，共 8 个：
+`archiver`、`bcryptjs`、`busboy`、`cookie-parser`、`express`、`iconv-lite`、`jsonwebtoken`、`unzipper`。
+完整清单（含版本与许可证）在「软件开源信息」页（`/about`）与
+[使用手册](/docs/zeroshadow/guide/manual) 的「软件开源信息页」一节。
 
 <Callout type="warn" title="依赖底座容易被误判">
 网上大量 shadcn 代码片段是按 **Radix** 的 API 写的，而本项目的 `ui/*` 组件底座是
@@ -39,6 +45,7 @@ icon: Boxes
       <File name="config.js" />
       <File name="context.js" />
       <File name="env.js" />
+      <File name="encoding.js" />
       <File name="files.js" />
       <File name="groups.js" />
       <File name="integrity.js" />
@@ -70,11 +77,13 @@ icon: Boxes
     <Folder name="src">
       <File name="main.tsx" />
       <File name="App.tsx" />
+      <File name="version.ts" />
       <File name="index.css" />
       <Folder name="pages" />
       <Folder name="components">
         <Folder name="ui">
           <File name="toggle-group.tsx" />
+          <File name="context-menu.tsx" />
         </Folder>
       </Folder>
       <Folder name="state" />
@@ -104,6 +113,7 @@ icon: Boxes
   <File name="package-release.ps1" />
   <File name="security-test.ps1" />
   <File name="smoke-test.ps1" />
+  <File name="encoding-test.mjs" />
   <File name="package.json" />
   <File name=".env.example" />
 </Files>
@@ -120,6 +130,7 @@ icon: Boxes
 | `config.js` | 运行时配置 + 权限矩阵 + 各类上限计算（**权限的唯一真相来源**），并负责小组权限收窄 |
 | `context.js` | 请求上下文：解析小组（`X-ZS-Group` 头 / `?group=` 兜底）并算出 `req.perms` |
 | `env.js` | `.env` 加载、密钥生成、目录准备、只读映射目录解析 |
+| `encoding.js` | 在线编辑器的编解码与编码探测（`iconv-lite`；导出 `EDITOR_MAX_BYTES` / `EDITOR_ENCODINGS` / `detectEncoding` 等纯函数） |
 | `files.js` | 目录列举、条目信息、递归统计、搜索、复制 / 移动 |
 | `groups.js` | 小组读写、可见范围判定、组长能力校验 |
 | `integrity.js` | 启动自检：损坏的 JSON 移入 `data/backups/corrupt/` 隔离、清理 tmp 残留 |
@@ -135,7 +146,7 @@ icon: Boxes
 | `tunnel.js` | SSH 反向隧道生命周期 |
 | `users.js` | 成员增删改查、bcrypt 校验 |
 | `routes/auth.js` | `/api/auth/*` |
-| `routes/fs.js` | `/api/fs/*`（最大的一块） |
+| `routes/fs.js` | `/api/fs/*`（最大的一块；在线编辑的读取 / 保存端点与 `SAVE_FILE_MAX_BYTES` 也在这里） |
 | `routes/admin.js` | `/api/admin/*`（整个 router 都套了 `requireRole("superadmin")`） |
 | `routes/avatars.js` | `/api/avatars/*`（头像读写） |
 | `routes/groups.js` | `/api/groups/*`（组长自助，受超管勾选的 `leaderCaps` 约束） |
@@ -145,10 +156,11 @@ icon: Boxes
 
 | 目录 | 内容 |
 |:--|:--|
-| `pages/` | 页面：浏览 / 登录 / 设置 / 团队 / 预览 / 编辑 / HTML / 工具 / 关于；设置页的「日志与指标」「小组」「数据与保留」拆在 `pages/settings/` 下 |
-| `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件） |
+| `pages/` | 页面：浏览 / 登录 / 设置 / 团队 / 预览 / 编辑 / HTML / 工具 / 软件开源信息；`editor-page.tsx` 是在线编辑器，设置页的「日志与指标」「小组」「数据与保留」拆在 `pages/settings/` 下 |
+| `version.ts` | 前端唯一的版本号来源（导出 `VERSION`，关于页与侧边栏共用） |
+| `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件，含 `ui/context-menu.tsx`） |
 | `state/` | 六个 Provider：auth / groups / client-settings / clipboard / uploads / operations |
-| `lib/` | api / types / format / conflict / lucide / utils / avatar-cache / avatar-image |
+| `lib/` | api / types / format / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
 
 `components/ui/toggle-group.tsx` 是基于 `@base-ui/react` 的**分段控件**（2–4 个互斥选项），
 团队待办的筛选与编辑器、同名处理对话框都改用了它。
@@ -320,6 +332,35 @@ GET /api/fs/compress/status?job=<jobId>  → { state, percent, processed, total,
 - 状态机：`running` → `done` / `error`；任务被清理后查询返回 `state: "gone"`；
 - 失败时（含解压中途超限）会清理临时产物——解压还会**整个删掉半成品目录**。
 
+## 在线编辑的编码处理（`server/src/encoding.js`）
+
+在线编辑器的编解码**全部收在服务端**这一个模块里，前端只拿最终文本：
+
+| 导出 | 作用 |
+|:--|:--|
+| `EDITOR_ENCODINGS` / `encodingList()` | 支持的编码表（id / label / bom），前端下拉框直接用 |
+| `detectEncoding(buf)` | 识别编码，返回 `{ encoding, bom, confident }`；`confident: false` 表示是靠打分猜的，前端会提示用户手动切换 |
+| `decodeBuffer(buf, encoding)` | 解码并剥掉 BOM |
+| `detectEol(text)` / `applyEol(text, eol)` | 换行风格探测与还原（读取时统一成 `\n`，保存时按选择写回 `crlf` / `lf` / `cr`） |
+| `encodeText(text, encoding)` | 编码并**回读比对**，返回 `{ buffer, unmappable }`；目标编码表示不了的字符由调用方报 400 |
+| `looksBinary(buf)` | 二进制判定（NUL 字节，或控制字符比例 > 10%） |
+| `EDITOR_MAX_BYTES` | 单次读取上限 8 MB |
+
+识别的判定顺序（每一步都有理由，改之前请先读懂）：
+
+1. **BOM**：`utf8bom` / `utf16le` / `utf16be`，最确定，直接采信；
+2. **无 BOM 的 UTF-16**：按 16 位单元落在「可打印 ASCII / CJK / 常用标点」里的比例打分，
+   两种字节序差距 > 0.1 才认（只看 NUL 字节是不够的——纯中文的 UTF-16 一个 NUL 都没有）；
+3. **严格 UTF-8**：`TextDecoder("utf-8", { fatal: true })` 不抛异常就认定 UTF-8（含 NUL 时跳过这一步）；
+4. **逐个候选编码打分**：`gb18030` / `big5` / `shift_jis` / `euc-kr` / `windows-1252` / `iso-8859-1`，
+   用「命中常用字的数量 ×3 − 替换字符 ×100 − 控制字符 ×20」排序取最高分。
+   只数替换字符是不够的：GB18030 几乎能解码任意字节序列，拿它去解 Big5 文件往往一个替换字符都没有，但内容是错的；
+5. **候选都不像正常文本时**才回头采信第 2 步的 UTF-16 结果（顺序很关键：
+   Shift_JIS 的假名字节按 UTF-16BE 读会落在汉字区，让候选编码先表态才不会把日文误判成 UTF-16）。
+
+写回时的两条硬约束：**BOM 要按编码补上**（UTF-16 没有 BOM 就无法区分字节序），
+**表示不了的字符宁可拒绝也不静默写成 `?`**（`encodeText` 回读比对，最多列出 12 个字符交给前端提示）。
+
 ## 想加一个接口
 
 ```js
@@ -352,7 +393,7 @@ ThemeProvider(zs-theme)
     └── AuthProvider            身份 + perms，30 秒轮询 /api/auth/me
         └── GroupsProvider      我可切换的小组 + 当前小组上下文（localStorage: zs-group-context）
             ├── AvatarSync            登录后按 md5 增量同步头像（配 IndexedDB 缓存）
-            └── ClientSettingsProvider   视图/排序偏好（localStorage: zs-client-settings）
+            └── ClientSettingsProvider   外观与浏览偏好（localStorage: zs-client-settings，含界面密度 / 字号 / 减少动画）
                 └── ClipboardProvider    复制/剪切的内存剪贴板
                     └── UploadsProvider  上传任务队列与进度
                         └── OperationsProvider  压缩/解压/链接下载的轮询与进度
@@ -365,8 +406,10 @@ ThemeProvider(zs-theme)
 更新模块级的 `X-ZS-Group` 请求头（`lib/api.ts` 的 `setGroupContext`）并刷新身份，
 所以后续所有请求都会带上新的上下文。
 
-桌面侧边栏的折叠状态不进 Provider：它由 `components/layout/app-shell.tsx`
-直接读写 `localStorage: zs-sidebar-collapsed`。
+桌面侧边栏的折叠状态现在由 `ClientSettingsProvider` 统一持有
+（键 `zs-client-settings.sidebarCollapsed`），这样「设置 → 外观」也能改它，
+并且会从旧的 `zs-sidebar-collapsed` 键自动迁移；`AppearanceSection` 把外观类偏好写到 `<html>` 的
+`data-density` / `data-font-scale` / `data-noise` / `data-reduce-motion` 属性上，交给 CSS 统一生效。
 
 <Callout type="info" title="主题切换是自己实现的">
 项目**没有**用 `next-themes`（虽然它在 `package.json` 里，但全代码库零引用）。
@@ -384,15 +427,20 @@ ThemeProvider(zs-theme)
 | `/settings` | `pages/settings/index.tsx` | 设置，九个标签页；「日志与指标」「小组」「数据与保留」已拆成同目录下的独立文件 |
 | `/team` | `pages/team-page.tsx` | 团队待办（访客看到"登录后可查看"的空状态） |
 | `/preview` | `pages/preview-page.tsx` | 预览（全屏，不自带外壳） |
-| `/editor` | `pages/editor-page.tsx` | 在线编辑（全屏） |
+| `/editor` | `pages/editor-page.tsx` | 在线编辑（全屏，按识别出的编码读写，见 `server/src/encoding.js`） |
 | `/html-preview` | `pages/html-page.tsx` | HTML 沙箱预览（全屏） |
 | `/tools` | `pages/tools-page.tsx` | 单位换算 + 链接下载器 |
-| `/about` | `pages/about-page.tsx` | 软件开源信息 |
+| `/about` | `pages/about-page.tsx` | 软件开源信息（版本号取自 `web/src/version.ts`） |
 | `*` | 重定向到 `/` | |
 
-页面外边套的是 `components/layout/app-shell.tsx`：桌面固定侧边栏（**可折叠成图标条**，状态存
-`zs-sidebar-collapsed`）+ 顶栏（搜索、小组切换器、主题、账户卡片）+ 窄屏抽屉。
+页面外边套的是 `components/layout/app-shell.tsx`：桌面固定侧边栏（**可折叠成图标条**，品牌区显示
+`ZeroShadow` 与 `v<版本号>`，状态存 `zs-client-settings` 的 `sidebarCollapsed`，旧键
+`zs-sidebar-collapsed` 会自动迁移）+ 顶栏（搜索、小组切换器、主题、账户卡片）+ 窄屏抽屉。
+侧边栏导航项、侧边栏空白处与顶栏用户按钮都挂了右键菜单（`components/ui/context-menu.tsx`）。
 preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
+
+前端只有一份版本号：`web/src/version.ts` 导出 `VERSION`，关于页与侧边栏都从它读，
+`about-page.tsx` 里**不再**有硬编码的版本常量。
 
 ### 交互组件
 
@@ -409,9 +457,10 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 | `settings/data-section.tsx` | 头像、团队待办、默认可见范围、日志与指标保留、备份与回滚 |
 | `settings/logs-metrics-section.tsx` | 系统指标曲线、请求指标与慢请求、操作日志 |
 | `components/icon.tsx` | 渲染 `<i data-lucide>` 占位 |
-| `components/avatar.tsx` | 头像（配合 `lib/avatar-cache.ts` 的 IndexedDB 缓存与 `lib/avatar-image.ts` 的 128×128 WebP 转换） |
+| `components/avatar.tsx` | 头像（配合 `lib/avatar-cache.ts` 的 IndexedDB 缓存、`lib/avatar-image.ts` 的 128×128 WebP 转换与 `lib/avatar-default.ts` 的默认头像生成） |
 | `lib/conflict.ts` | 冲突检测与 `名字 (1)` 生成 |
 | `lib/avatar-cache.ts` / `lib/avatar-image.ts` | 头像的 IndexedDB 缓存与浏览器端裁切（128×128 WebP） |
+| `lib/avatar-default.ts` | 默认头像：`HUE_STEPS`（色相 24 档）、`SECOND_HUE_OFFSETS`（副色相 4 档）、`LIGHTNESS`（明度 3 档）共 288 种组合，`avatarInitials()` 生成两个字符的缩写 |
 
 <Callout type="warn" title="上传分批常量必须两边一致">
 `web/src/state/uploads.tsx` 里的 `MAX_FILES_PER_REQUEST = 100` **必须与**
@@ -426,6 +475,7 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
   **MutationObserver 监听到新节点**时调用 `window.lucide.createIcons()`，
   这样动态渲染出来的图标也能正确显示；
 - `animateListIn()` / `animatePageIn()` 用 GSAP 做入场动画；GSAP 不存在时**静默跳过**，不影响功能。
+  两者都会先看「设置 → 外观 → 减少动画」（判断 `html[data-reduce-motion="1"]`），关掉后不再播放入场动画。
 
 <Callout type="warn" title="存在两套图标体系">
 应用代码走 `Icon` 组件 + 全局 `lucide.min.js` + `createIcons()` 扫描 DOM；
@@ -481,7 +531,7 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 | 改团队待办字段 | `server/src/todos.js` 的 `sanitizeTodo` 与 `allowed` 白名单 + `routes/todos.js` + `pages/team-page.tsx`（类型在 `lib/types.ts`） |
 | 加一个设置项 | `server/src/config.js` 的 `DEFAULTS` → `routes/admin.js` 的 `PATCH /config` 白名单（数值要进 `NUMERIC_KEYS` 并给上下限）→ `web/src/lib/types.ts` → `settings/index.tsx`（或拆出去的 `settings/groups-section.tsx` / `data-section.tsx` / `logs-metrics-section.tsx`） |
 | 加一项组长能力 | `server/src/groups.js` 的 `LEADER_CAPS` / `DEFAULT_LEADER_CAPS` → 对应路由用 `leaderHasCap()` 校验 → `web/src/lib/types.ts` → `settings/groups-section.tsx` 的 `CAP_ITEMS` |
-| 改在线编辑的大小上限 | `server/src/routes/fs.js` 的 `SAVE_FILE_MAX_BYTES`（`index.js` 用它给该端点单独放宽 `express.json`） |
+| 改在线编辑的大小上限 | 读取上限在 `server/src/encoding.js` 的 `EDITOR_MAX_BYTES`；保存上限在 `server/src/routes/fs.js` 的 `SAVE_FILE_MAX_BYTES`（`index.js` 用它给该端点单独放宽 `express.json`） |
 | 改小组可见性规则 | `server/src/groups.js` 的 `isVisibleInVisibility()` / `visibilityFor()`；文件路由统一走 `assertContextVisible()`，打包 / 压缩另有 `zipVisibility()` 做递归过滤 |
 | 改头像尺寸 | `server/src/avatars.js` 的 `AVATAR_SIZE` 与 `web/src/lib/avatar-image.ts` 的 `TARGET` **必须一起改** |
 | 改日志 / 指标 / 备份的保留策略 | `logger.js` 的 `sweepLogs`、`metrics.js` 的 `cleanupOldMetrics`、`backup.js` 的 `rotate` + `settings/data-section.tsx` |
@@ -491,4 +541,6 @@ preview / editor / html 三个页面例外，它们用全屏 `fixed inset-0`。
 | 调整隧道行为 | `server/src/tunnel.js`（`buildArgs` 拼 ssh 参数） |
 | 加一个内置隧道服务商 | `tunnel.js` 的 `buildArgs` + `routes/admin.js` 的 mode 白名单 + `settings/index.tsx` 的 select 选项 |
 | 改界面配色 / 圆角 | `web/src/index.css` 的 `@theme` 与 `:root` / `.dark` 变量 |
-| 改产品版本号 | 三处必须同步（版本号是写死的，不从 `package.json` 读）：根 `package.json`、`server/index.js` 的 `/api/meta`、`web/src/pages/about-page.tsx` 的 `VERSION` |
+| 改产品版本号 | 三处必须同步（版本号是写死的，不从 `package.json` 读）：根 `package.json`、`server/index.js` 的 `/api/meta`、`web/src/version.ts` 的 `VERSION`。前端只有这一份版本号，关于页与侧边栏都从它读 |
+| 改在线编辑的编码 / 上限 | `server/src/encoding.js`（编码表、探测顺序、`EDITOR_MAX_BYTES`）+ `routes/fs.js` 的 `/file` 与 `/save-file` + `web/src/pages/editor-page.tsx`；改完跑 `node encoding-test.mjs` 与 `security-test.ps1` 第 18 组 |
+| 改默认头像的配色 / 缩写 | `web/src/lib/avatar-default.ts`（`HUE_STEPS` / `SECOND_HUE_OFFSETS` / `LIGHTNESS` 与 `avatarInitials`） |

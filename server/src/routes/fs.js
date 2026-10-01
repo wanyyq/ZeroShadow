@@ -35,6 +35,18 @@ import {
   uniqueName,
 } from "../files.js"
 import { info } from "../logger.js"
+import {
+  EDITOR_MAX_BYTES,
+  applyEol,
+  decodeBuffer,
+  detectEncoding,
+  detectEol,
+  encodeText,
+  encodingLabel,
+  encodingList,
+  isSupportedEncoding,
+  looksBinary,
+} from "../encoding.js"
 import { isVisibleForContext } from "../groups.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
 import { rateLimit } from "../ratelimit.js"
@@ -1095,6 +1107,58 @@ router.get("/extract/status", requirePerm("extractZip"), (req, res, next) => {
  */
 export const SAVE_FILE_MAX_BYTES = 16 * 1024 * 1024
 
+/**
+ * 在线编辑：按识别出的编码把文本读出来。
+ *
+ * 旧实现是前端直接 fetch 下载地址再 .text()，也就是一律按 UTF-8 解，
+ * 于是 GBK/Big5 的文件打开就是乱码。这里改成服务端识别编码后回 JSON，
+ * 同时把原始换行风格一起带回，保存时再还原。
+ */
+router.get("/file", requirePerm("browse"), async (req, res, next) => {
+  try {
+    const { abs, rel, isSoft } = resolveSafe(req.query?.path)
+    assertContextVisible(req, rel)
+    if (!rel) throw httpError(400, "非法路径")
+    const stat = await fs.promises.stat(abs).catch(() => null)
+    if (!stat || !stat.isFile()) throw httpError(404, "文件不存在")
+    if (stat.size > EDITOR_MAX_BYTES) {
+      throw httpError(
+        413,
+        `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB），在线编辑上限 ${EDITOR_MAX_BYTES / 1024 / 1024}MB`
+      )
+    }
+
+    const buf = await fs.promises.readFile(abs)
+    const forced = String(req.query?.encoding || "")
+    const detected = isSupportedEncoding(forced)
+      ? { encoding: forced, bom: forced === "utf8bom", confident: true }
+      : detectEncoding(buf)
+
+    // UTF-16 文本天然含 NUL 字节，不能按二进制拦掉
+    const isUtf16 = detected.encoding === "utf16le" || detected.encoding === "utf16be"
+    if (!isUtf16 && looksBinary(buf)) {
+      throw httpError(415, "这看起来是二进制文件，不能当文本编辑")
+    }
+
+    const raw = decodeBuffer(buf, detected.encoding)
+    res.json({
+      path: rel,
+      name: path.basename(abs),
+      size: stat.size,
+      mtime: stat.mtimeMs,
+      encoding: detected.encoding,
+      // false 表示编码是猜的，前端会提示「乱码就手动换编码」
+      encodingConfident: detected.confident,
+      eol: detectEol(raw),
+      content: raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n"),
+      softReadOnly: !!isSoft,
+      encodings: encodingList(),
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
   let tmp = null
   try {
@@ -1102,15 +1166,36 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
     blockSoft(rel)
     assertContextVisible(req, rel)
     if (!rel) throw httpError(400, "非法路径")
+
     const content = String(req.body?.content ?? "")
-    const bytes = Buffer.byteLength(content, "utf8")
-    if (bytes > SAVE_FILE_MAX_BYTES) {
-      throw httpError(413, `内容过大（${Math.round(bytes / 1024 / 1024)}MB），在线编辑上限 ${SAVE_FILE_MAX_BYTES / 1024 / 1024}MB`)
+    const encoding = String(req.body?.encoding || "utf8")
+    if (!isSupportedEncoding(encoding)) throw httpError(400, `不支持的编码：${encoding}`)
+    const rawEol = String(req.body?.eol || "lf")
+    const eol = ["crlf", "lf", "cr"].includes(rawEol) ? rawEol : "lf"
+
+    const text = applyEol(content, eol)
+    const encoded = encodeText(text, encoding)
+    if (encoded.error) throw httpError(400, encoded.error)
+    // 目标编码表示不了的字符会被 iconv 静默写成「?」——宁可拒绝保存，也不要悄悄改坏内容
+    if (encoded.unmappable?.length) {
+      const shown = encoded.unmappable.slice(0, 12).join(" ")
+      throw httpError(
+        400,
+        `这些字符无法用 ${encodingLabel(encoding)} 表示：${shown}${encoded.unmappable.length > 12 ? " …" : ""}。请改用 UTF-8 保存。`
+      )
     }
+    const buffer = encoded.buffer
+    if (buffer.length > SAVE_FILE_MAX_BYTES) {
+      throw httpError(
+        413,
+        `内容过大（${Math.round(buffer.length / 1024 / 1024)}MB），在线编辑上限 ${SAVE_FILE_MAX_BYTES / 1024 / 1024}MB`
+      )
+    }
+
     // 原子替换：先写同目录临时文件再 rename。直接 writeFile 到目标时，
     // 写盘中断（进程被杀/断电/磁盘满）会把原文件截断成半个。
     tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.${process.pid}.${Date.now()}.tmp`)
-    await fs.promises.writeFile(tmp, content, "utf8")
+    await fs.promises.writeFile(tmp, buffer)
     try {
       await fs.promises.rename(tmp, abs)
     } catch {
@@ -1119,8 +1204,8 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
       await fs.promises.rename(tmp, abs)
     }
     tmp = null
-    info("save_file", { msg: rel, ...actor(req) })
-    res.json({ ok: true })
+    info("save_file", { msg: `${rel} (${encoding}, ${eol})`, ...actor(req) })
+    res.json({ ok: true, bytes: buffer.length, encoding, eol })
   } catch (err) {
     next(err)
   } finally {

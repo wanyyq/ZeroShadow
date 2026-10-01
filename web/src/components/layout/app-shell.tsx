@@ -3,7 +3,7 @@ import * as React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Icon } from "@/components/icon"
@@ -13,6 +13,8 @@ import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
 import { useGroups } from "@/state/groups"
 import { useClientSettings } from "@/state/client-settings"
+import { animatePageIn, animateSidebarIn, animateThemeSwap } from "@/lib/lucide"
+import { VERSION } from "@/version"
 import { cn } from "@/lib/utils"
 import { api, uploadAvatar } from "@/lib/api"
 import { ownerForMe, primeAvatar } from "@/lib/avatar-cache"
@@ -309,6 +311,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [searchText, setSearchText] = React.useState("")
   const { sidebarCollapsed: collapsed, update: updateSettings } = useClientSettings()
 
+  // —— GSAP 动画挂载点（全部在 lib/lucide.ts 里判断「减少动画」，开了就自动跳过）——
+  const pageRef = React.useRef<HTMLDivElement>(null)
+  const sidebarNavRef = React.useRef<HTMLDivElement>(null)
+  const firstThemeRef = React.useRef(true)
+  // 换页面时重放一次入场动画
+  React.useEffect(() => {
+    animatePageIn(pageRef.current)
+  }, [location.pathname])
+  // 侧边栏首次出现时错落入场，只跑一次
+  React.useEffect(() => {
+    animateSidebarIn(sidebarNavRef.current)
+  }, [])
+  // 明暗切换时轻微淡入；首次挂载不播（否则会闪一下）
+  React.useEffect(() => {
+    if (firstThemeRef.current) {
+      firstThemeRef.current = false
+      return
+    }
+    animateThemeSwap(document.documentElement)
+  }, [theme])
+
   const toggleCollapsed = React.useCallback(() => {
     updateSettings({ sidebarCollapsed: !collapsed })
   }, [updateSettings, collapsed])
@@ -359,6 +382,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </div>
   )
 
+  // 侧边栏空白处右键：与单个导航项的菜单互补，这里放全局动作。
+  // 菜单挂在导航区的外层，点空白处（列表下方那片）也能唤出。
+  const sidebarBackgroundMenu = (
+    <ContextMenuContent className="w-52">
+      {me.role !== "guest" && (
+        <ContextMenuItem onClick={() => { navigate("/team"); setMobileOpen(false) }}>
+          <Icon name="list-checks" /> 团队待办
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem onClick={() => { navigate("/settings"); setMobileOpen(false) }}>
+        <Icon name="settings" /> 打开设置
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <Icon name={themeIcon} /> 主题
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuItem onClick={() => setTheme("light")}><Icon name="sun" /> 浅色</ContextMenuItem>
+          <ContextMenuItem onClick={() => setTheme("dark")}><Icon name="moon" /> 深色</ContextMenuItem>
+          <ContextMenuItem onClick={() => setTheme("system")}><Icon name="monitor" /> 跟随系统</ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuItem onClick={toggleCollapsed}>
+        <Icon name={collapsed ? "panel-left-open" : "panel-left-close"} />
+        {collapsed ? "展开侧边栏" : "收起侧边栏"}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => copyLink(window.location.href, "已复制当前页面链接")}>
+        <Icon name="clipboard-copy" /> 复制当前页面链接
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => window.location.reload()}>
+        <Icon name="refresh-cw" /> 重新载入页面
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+
   return (
     <ShellContext.Provider value={{ searchText, searchEl, onSearchChange: setSearchText }}>
       <div className="flex h-dvh overflow-hidden">
@@ -369,23 +429,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             collapsed ? "w-14" : "w-48"
           )}
         >
-          <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pt-3">
-            {/* 品牌：与导航行共用同一套栅格（32px 图标槽 + gap-2.5 + px-2），保证文字与图标都对齐 */}
-            <div
-              className={cn(
-                "mb-3 flex items-center rounded-lg",
-                collapsed ? "mx-auto size-9 justify-center gap-0" : "gap-2.5 px-2 py-1.5"
-              )}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Icon name="hard-drive" className="size-4" />
-              </span>
-              <div className={cn("min-w-0 transition-all duration-200 ease-out", collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100")}>
-                <p className="text-sm leading-tight font-semibold">Wangyq</p>
-                <p className="text-[10px] leading-tight text-muted-foreground">ZeroShadow</p>
-              </div>
-            </div>
-            {sidebarNav(collapsed)}
+          <div className="flex flex-1 flex-col overflow-y-auto px-2 pt-3">
+            <ContextMenu>
+              {/* min-h-full 让触发区铺满可见高度，列表下方的空白处也能右键 */}
+              <ContextMenuTrigger render={<div ref={sidebarNavRef} className="flex min-h-full flex-col gap-0.5" />}>
+                {/* 品牌：与导航行共用同一套栅格（32px 图标槽 + gap-2.5 + px-2），保证文字与图标都对齐 */}
+                <div
+                  className={cn(
+                    "mb-3 flex items-center rounded-lg",
+                    collapsed ? "mx-auto size-9 justify-center gap-0" : "gap-2.5 px-2 py-1.5"
+                  )}
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <Icon name="hard-drive" className="size-4" />
+                  </span>
+                  <div className={cn("min-w-0 transition-all duration-200 ease-out", collapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100")}>
+                    <p className="text-sm leading-tight font-semibold">ZeroShadow</p>
+                    <p className="text-[10px] leading-tight text-muted-foreground">v{VERSION}</p>
+                  </div>
+                </div>
+                {sidebarNav(collapsed)}
+              </ContextMenuTrigger>
+              {sidebarBackgroundMenu}
+            </ContextMenu>
           </div>
 
           {/* 折叠开关：与导航行同栅格 —— 展开时和导航左对齐，折叠时图标落在同一竖线上 */}
@@ -472,13 +538,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             mobileOpen ? "translate-x-0" : "-translate-x-full")}>
             <div className="flex h-12 items-center gap-2.5 border-b border-border/30 px-3">
               <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"><Icon name="hard-drive" className="size-3.5" /></span>
-              <span className="font-heading text-sm font-semibold">Wangyq ZeroShadow</span>
+              <span className="font-heading text-sm font-semibold">ZeroShadow <span className="font-normal text-muted-foreground">v{VERSION}</span></span>
             </div>
-            <div className="flex flex-col gap-1 p-3">{sidebarNav(false)}</div>
+            <div className="flex min-h-0 flex-1 flex-col p-3">
+              <ContextMenu>
+                <ContextMenuTrigger render={<div className="flex min-h-full flex-col gap-1" />}>
+                  {sidebarNav(false)}
+                </ContextMenuTrigger>
+                {sidebarBackgroundMenu}
+              </ContextMenu>
+            </div>
           </div>
 
           {/* 主内容 */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
+          {/* 页面容器：每次换路由做一次轻微的入场动画（见 lib/lucide.ts，尊重「减少动画」） */}
+          <div ref={pageRef} className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
         </div>
 
         <UserCard open={userCardOpen} onOpenChange={setUserCardOpen} me={me} logout={logout} navigate={navigate} themeIcon={themeIcon} cycleTheme={cycleTheme} />

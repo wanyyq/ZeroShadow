@@ -107,15 +107,15 @@ cp docs/mdx/public/img/* <你的站点>/public/img/
 | 介绍 | `/docs` | 产品定位、功能特性、权限概览、技术栈、阅读指引 |
 | 快速开始 | `/docs/getting-started/quickstart` | 环境要求、三步启动、开发模式、工作目录规则、从发布包运行 |
 | 常见问题 | `/docs/getting-started/faq` | 按现象分类的排查清单 |
-| 使用手册 | `/docs/guide/manual` | 界面、小组切换、上传下载、预览、在线编辑、搜索、压缩解压、快捷方式、链接下载器、团队待办、头像、冲突处理、快捷键 |
+| 使用手册 | `/docs/guide/manual` | 界面、小组切换、上传下载、预览、在线编辑（编码 / 换行符 / 查找替换）、搜索、压缩解压、快捷方式、链接下载器、团队待办（含组长管理对话框）、头像（含默认头像规则）、冲突处理、右键菜单、快捷键、软件开源信息页 |
 | 权限与角色 | `/docs/guide/permissions` | 三角色完整权限矩阵、权限依赖、小组收窄与组长能力、访客隐藏规则 |
 | 管理员指南 | `/docs/admin/admin-guide` | 设置页九个标签页逐项说明（含小组、数据与保留、日志与指标） |
-| 配置参考 | `/docs/admin/configuration` | `.env` 全部变量 + `config.json` 全部字段与默认值 |
+| 配置参考 | `/docs/admin/configuration` | `.env` 全部变量 + `config.json` 全部字段与默认值 + 浏览器本地存储键 |
 | 公网访问与隧道 | `/docs/admin/tunnel` | 四种隧道模式、真实 ssh 命令、`TRUST_PROXY` 用法与排查 |
-| 安全设计 | `/docs/security/design` | 认证、CSRF、路径安全、SSRF 防护、沙箱、限流、密钥卫生 |
+| 安全设计 | `/docs/security/design` | 认证、CSRF、路径安全、SSRF 防护、沙箱、限流与资源上限、在线编辑的编码与二进制拦截、密钥卫生 |
 | 架构与目录结构 | `/docs/development/architecture` | 技术底座、目录树、请求链、权限判定、数据存放、前端组织 |
 | 开发与构建 | `/docs/development/build` | 工作目录规则、本地开发、构建、常见坑 |
-| 测试脚本 | `/docs/development/testing` | 冒烟测试与安全回归测试的用法与断言清单 |
+| 测试脚本 | `/docs/development/testing` | 冒烟测试、安全回归测试与编码单测的用法与断言清单 |
 | 打包与 CI | `/docs/development/release` | 五平台矩阵、发布包组成、密钥门禁、GitHub Actions |
 | API 参考 | `/docs/api/reference` | 全部 HTTP 接口、参数、权限要求与错误码 |
 

@@ -1,18 +1,19 @@
 ---
 title: 测试脚本
-description: 冒烟测试与安全回归测试的用法、参数、断言清单，以及改脚本时必须保留的性质。
+description: 冒烟测试、安全回归测试与编码单测的用法、参数、断言清单，以及改脚本时必须保留的性质。
 icon: FlaskConical
 ---
 
-仓库自带两个 PowerShell 测试脚本。它们的价值在于**把结论固化成可重复执行的断言**——
+仓库自带两个 PowerShell 测试脚本与一个 Node 单测脚本。它们的价值在于**把结论固化成可重复执行的断言**——
 改完代码跑一遍，就知道有没有退化。
 
-| 脚本 | 定位 | 断言数 | 退出码 |
-|:--|:--|:--|:--|
-| `smoke-test.ps1` | 端到端功能冒烟 | 38 项 | 失败项数量 |
-| `security-test.ps1` | 安全回归 | 17 组 | 失败项数量 |
+| 脚本 | 定位 | 断言数 | 需要起服务 | 退出码 |
+|:--|:--|:--|:--|:--|
+| `smoke-test.ps1` | 端到端功能冒烟 | 38 项 | 是 | 失败项数量 |
+| `security-test.ps1` | 安全回归 | 19 组（93 项） | 是 | 失败项数量 |
+| `encoding-test.mjs` | 在线编辑器编码单测 | 60 项 | **否** | 失败项数量（0 / 1） |
 
-两个脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过。
+三个脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过。
 
 ## 冒烟测试 `smoke-test.ps1`
 
@@ -147,7 +148,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 | `2` | 超管登录失败 |
 | 其它 | 失败项数量 |
 
-### 17 组断言
+### 19 组断言
+
+脚本里的 `Section "1."` ～ `Section "19."`，第 5 组另带一个可选的 `5b`：
 
 | 组 | 主题 |
 |:--|:--|
@@ -168,8 +171,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 | 15 | 访客可见性随重命名同步 |
 | 16 | 路径解析加固 |
 | 17 | 上传与归档回归（文件夹上传保留目录结构、`maxFilesPerRequest`、相对路径覆盖且不留副本、`targetNames` 重命名、`stats=0`、在线编辑 2 MB 上限与原子写） |
+| 18 | 在线编辑编码（UTF-8 / GB18030 / UTF-16 读写回环，GBK 字节与 .NET 代码页 936 直接比对，CRLF 转换、BOM、Big5 不可表示字符拒绝、未知编码拒绝、二进制 415、路径穿越） |
+| 19 | 团队待办被超管关闭后仍不报错（响应字段齐全、`enabled:false`、创建被拒、重新开启后恢复） |
 
-### 它会临时改动什么
+<Callout type="info" title="断言总数与可选开关">
+脚本里共 **98 处 `Check` 调用**，其中 **14 处只在带可选开关时执行**（第 5b 组 3 处需 `-PositiveProbeUrl`、
+第 10 组 3 处需 `-TestLockout`、第 13 组 3 处需 `-SoftDirName`、第 14 组 5 处需 `-TestJobOwnership`）。
+有若干断言写在循环里，所以默认路径实际执行 **93 项**（不是 98 − 14）。
+</Callout>
+
+## 编码单测 `encoding-test.mjs`
+
+```bash
+node encoding-test.mjs
+```
+
+- 直接 `import` `server/src/encoding.js` 里的纯函数，**不需要起服务**，也不需要超管账号；
+- **60 项断言**，逐项打印 `ok` / `FAIL`，全部通过时退出码 `0`；
+- 覆盖：带 BOM 的三种识别与解码、无 BOM 的 UTF-16LE / BE、GBK / Big5 / Shift_JIS / EUC-KR
+  的识别与往返、UTF-8 与纯 ASCII 不误判、写回时 GB18030 字节与原文件一致、
+  `utf8bom` / `utf16le` / `utf16be` 的 BOM 写入、GB18030 对 emoji 的 4 字节表示、
+  Big5 与 ISO-8859-1 的「不可表示字符」检出、CRLF / LF / CR 探测与幂等转换、二进制判定、编码白名单；
+- 它读的是 `server/node_modules/iconv-lite`，所以跑之前要先 `pnpm setup`（本仓库的依赖装在子项目里）。
+
+改 `server/src/encoding.js` 后请跑一遍这个脚本——`security-test.ps1` 的第 18 组验证的是**服务行为**，
+这个脚本验证的是**算法本身**，两者互补。
+
+## 它会临时改动什么
 
 - 第 4 组会改访客权限开关、第 11 组会改解压总量上限——都在各自段落结束时**还原成你原来的值**；
 - `-TestJobOwnership` 会临时创建一个成员账号并在结束时删除；
@@ -239,6 +267,11 @@ pnpm build
 ### 安全回归
 
 起一个独立实例跑 `security-test.ps1`，**退出码为 0**。
+</Step>
+<Step>
+### 编码单测
+
+动了 `server/src/encoding.js` 时，跑一次 `node encoding-test.mjs`（**退出码为 0**）。
 </Step>
 <Step>
 ### 冒烟测试

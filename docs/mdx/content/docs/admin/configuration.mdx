@@ -233,6 +233,12 @@ SESSION_HOURS=72
 要停掉限流请直接关掉 `rateLimitEnabled`，而不是把 `rateLimitPerMin` 设成 0。
 </Callout>
 
+<Callout type="warn" title="在线编辑的两个上限不在 config.json 里">
+在线编辑的**读取**上限 8 MB（`EDITOR_MAX_BYTES`，`server/src/encoding.js`）与**保存**上限 16 MB
+（`SAVE_FILE_MAX_BYTES`，`server/src/routes/fs.js`）都是**写死在代码里**的，后台没有开关，
+改它们要改源码并重新构建。
+</Callout>
+
 ### 3.2 布尔开关
 
 | 字段 | 默认值 | 说明 |
@@ -243,7 +249,7 @@ SESSION_HOURS=72
 | `downloadUrlAllowPrivate` | `false` | 链接下载是否允许访问内网地址 |
 | `csrfOriginCheck` | `true` | 写操作是否校验 `Origin` / `Sec-Fetch-Site` |
 | `avatarEnabled` | `true` | 是否允许上传 / 修改头像；关闭后成员与超管都改不了 |
-| `todoEnabled` | `true` | 是否启用团队待办；关闭后成员看不到待办功能 |
+| `todoEnabled` | `true` | 是否启用团队待办；关闭后成员看不到待办功能，`/team` 显示「团队待办已被关闭」的空状态 |
 | `backupEnabled` | `true` | 是否启用数据快照；关闭后连写入前的自动快照也不再产生 |
 | `requestMetricsEnabled` | `true` | 是否采集请求指标（QPS、状态码分布、慢请求） |
 
@@ -328,9 +334,26 @@ SESSION_HOURS=72
 | 键名 | 内容 | 谁写入 |
 |:--|:--|:--|
 | `zs-theme` | 主题（浅色 / 深色 / 跟随系统） | 顶栏主题按钮、「设置 → 外观」 |
-| `zs-client-settings` | 文件浏览偏好：视图模式、排序字段、排序方向、文件夹置顶 | 「设置 → 外观 → 浏览偏好」、文件浏览器工具栏 / 空白处右键 |
+| `zs-client-settings` | 外观与浏览偏好：界面密度、字号、减少动画、背景噪点、桌面侧边栏默认折叠，以及视图模式、排序字段、排序方向、文件夹置顶 | 「设置 → 外观」、文件浏览器工具栏 / 空白处右键、侧边栏折叠按钮 |
 | `zs-group-context` | 当前选择的**小组上下文** id（`default` 表示默认上下文） | 顶栏的小组切换器 |
-| `zs-sidebar-collapsed` | 桌面侧边栏是否折叠（`"1"` 折叠、`"0"` / 不存在则展开） | 侧边栏底部的「折叠 / 展开」按钮 |
+| `zs-sidebar-collapsed` | **旧键**：桌面侧边栏是否折叠（`"1"` 折叠、`"0"` / 不存在则展开）。只在首次读取时迁移进 `zs-client-settings.sidebarCollapsed`，之后只读旧键、不再写入 | 旧版本的侧边栏「折叠 / 展开」按钮 |
+
+`zs-client-settings` 是一个 JSON 对象，字段与默认值如下（缺字段或值非法时按默认值处理）：
+
+| 字段 | 类型 | 默认 | 含义 |
+|:--|:--|:--|:--|
+| `view` | `list` / `grid` | `list` | 文件列表默认视图 |
+| `sortBy` | `name` / `size` / `mtime` | `name` | 默认排序字段 |
+| `sortDir` | `asc` / `desc` | `asc` | 默认排序方向 |
+| `foldersFirst` | 布尔 | `true` | 文件夹置顶 |
+| `density` | `comfortable` / `compact` | `comfortable` | 界面密度 |
+| `fontScale` | `sm` / `base` / `lg` | `base` | 全局字号 |
+| `reduceMotion` | 布尔 | `false` | 减少动画（同时关闭 GSAP 入场动画与界面过渡） |
+| `noise` | 布尔 | `true` | 背景噪点纹理 |
+| `sidebarCollapsed` | 布尔 | `false` | 桌面侧边栏默认折叠 |
+
+这些偏好会同步到 `<html>` 的 `data-density` / `data-font-scale` / `data-noise` / `data-reduce-motion`
+属性上，由 `web/src/index.css` 里的选择器统一生效。
 
 <Callout type="info" title="小组上下文还会发给服务端">
 `zs-group-context` 除了存在浏览器里，还会以 `X-ZS-Group` 请求头的形式带给服务端；

@@ -93,6 +93,23 @@ export interface TodosResponse {
   members: { id: string; username: string }[]
 }
 
+/** 在线编辑：读取文本文件的结果（编码与换行风格由服务端识别） */
+export interface FileTextResponse {
+  path: string
+  name: string
+  size: number
+  mtime: number
+  /** 识别出的编码 id，见服务端 EDITOR_ENCODINGS */
+  encoding: string
+  /** false 表示编码是猜的，界面应提示「乱码可手动切换编码」 */
+  encodingConfident: boolean
+  eol: "crlf" | "lf" | "cr"
+  /** 换行已统一成 \n（textarea 只认 \n） */
+  content: string
+  softReadOnly: boolean
+  encodings: { id: string; label: string; bom: string }[]
+}
+
 export interface LeaderGroup {
   id: string
   name: string
