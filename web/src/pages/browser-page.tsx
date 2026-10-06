@@ -1078,6 +1078,18 @@ export function BrowserPage() {
       <div className="border-t border-border/30 px-3 py-2 sm:px-5">
         <div className="mx-auto w-full max-w-4xl text-center text-[11px] leading-relaxed text-muted-foreground">
           当前为“{ROLE_LABEL[me.role]}”模式{me.role !== "superadmin" ? "，其他功能需要管理员模式" : ""}
+          <span className="mx-1.5 text-border">|</span>
+          {/* 兼容模式是独立的静态页（public/robustness/index.html），不参与前端构建，
+              所以这里用原生 <a> + 新标签页打开，而不是 react-router 的 <Link>。 */}
+          <a
+            href="/robustness/index.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 transition-colors hover:text-foreground"
+            title="面向 IE11 / 旧版浏览器：仅登录与基本文件操作"
+          >
+            无法渲染？使用兼容模式
+          </a>
         </div>
       </div>
 

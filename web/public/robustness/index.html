@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="referrer" content="no-referrer" />
+<title>ZeroShadow 兼容模式</title>
+<!--
+  主题引导放在 <head> 里同步执行，避免深色用户先看到一闪的亮色。
+  必须是外部脚本：后端给 WEB_DIST 下的 .html 挂了 script-src 'self' 的 CSP，
+  内联 <script> 会被浏览器拦掉（这是刻意的，见 server/index.js 的 SHELL_CSP）。
+-->
+<script src="/robustness/theme-boot.js"></script>
+<link rel="stylesheet" href="/robustness/index.css" />
+</head>
+<body>
+<noscript>
+  <div class="ns-notice">此页面需要启用 JavaScript 才能使用。</div>
+</noscript>
+
+<div id="app">
+  <div class="loading">正在加载…</div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="/robustness/index.js"></script>
+</body>
+</html>
