@@ -221,6 +221,20 @@ export function DataSection() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
+          {/* 这个开关此前在前端完全没有入口，只能手改 data/config.json，
+              而文档里又说「快照默认开启」——两边对不上。 */}
+          <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">启用数据快照</p>
+              <p className="text-xs text-muted-foreground">
+                关闭后不再写入 data/backups/（覆盖写前的自动快照与每日快照都会停止）
+              </p>
+            </div>
+            <Switch
+              checked={config.backupEnabled !== false}
+              onCheckedChange={(v) => patch({ backupEnabled: !!v }, "已更新")}
+            />
+          </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <span className="w-28 shrink-0 text-sm text-muted-foreground">每个文件保留</span>

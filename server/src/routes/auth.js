@@ -15,6 +15,7 @@ import { effectivePerms, uploadLimitMB } from "../config.js"
 import bcrypt from "bcryptjs"
 import { verifyLogin, findById, resetPassword } from "../users.js"
 import { groupsForUser, listGroups } from "../groups.js"
+import { filesystemCaseInsensitive } from "../safety.js"
 import { info, warn } from "../logger.js"
 
 const router = Router()
@@ -125,6 +126,9 @@ router.get("/me", (req, res) => {
     uploadLimitMB: uploadLimitMB(role),
     groupId: req.groupId || "default",
     group: req.group ? publicGroup(req.group) : null,
+    // 文件系统是否不区分大小写：前端做同名冲突检测时必须用与服务端一致的规则，
+    // 否则跨平台部署时会出现"界面说冲突、服务端不冲突"这类分叉（见 safety.js）。
+    caseInsensitive: filesystemCaseInsensitive(),
   })
 })
 

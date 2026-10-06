@@ -2,6 +2,7 @@ import type {
   OperationStatus,
   AvatarMeta,
   Group,
+  LeaderCapKey,
   TodosResponse,
   MetricsResponse,
   BackupsResponse,
@@ -15,6 +16,23 @@ export class ApiError extends Error {
     super(message)
     this.status = status
   }
+}
+
+/**
+ * 从任意抛出物里取出可展示的错误信息。
+ *
+ * 为什么不能只写 `err.message`：抛出来的不一定是 Error —— 原生 confirm/alert 被
+ * 某些扩展改写、或某处 reject 了字符串时，`.message` 是 undefined，界面会显示
+ * 空白。这里统一兜底成一句中文，避免"点了确定，什么都没发生也没提示"。
+ */
+export function getErrorMessage(err: unknown, fallback = "操作失败，请重试"): string {
+  if (err instanceof Error && err.message) return err.message
+  if (typeof err === "string" && err) return err
+  if (err && typeof err === "object" && "message" in err) {
+    const message = String((err as { message: unknown }).message || "")
+    if (message) return message
+  }
+  return fallback
 }
 
 type Query = Record<string, string | number | undefined>
@@ -253,7 +271,9 @@ export function fetchMyGroups() {
 export function fetchAdminGroups() {
   return api.get<{
     groups: Group[]
-    leaderCaps: string[]
+    // 服务端的 LEADER_CAPS 清单，给界面渲染用。用真实联合类型而不是 string[]，
+    // 免得把任意字符串当能力键传回去（服务端会静默忽略未知键）。
+    leaderCaps: LeaderCapKey[]
     members: { id: string; username: string; disabled: boolean; createdAt: string }[]
   }>("/admin/groups")
 }

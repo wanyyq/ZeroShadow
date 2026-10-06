@@ -49,10 +49,14 @@ export function GroupsProvider({ children }: { children: ReactNode }) {
     void refresh()
   }, [refresh])
 
-  // 若当前所选小组已不存在或不可用（含登出），回退到"默认"
+  // 若当前所选小组已不存在或不可用（含登出），回退到"默认"。
+  // 注意必须等 ready：AuthProvider 的初始 me 是 GUEST，不等它就会在首帧
+  // 命中 me.role === "guest" 分支，把 localStorage 里记住的小组覆写成 default
+  // —— 表现为"顶栏选的小组一刷新就丢"。
   useEffect(() => {
+    if (!ready) return
     if (currentId === "default") return
-    const unavailable = me.role === "guest" || (groups.length && !groups.some((g) => g.id === currentId))
+    const unavailable = me.role === "guest" || (groups.length > 0 && !groups.some((g) => g.id === currentId))
     if (unavailable) {
       setCurrentId("default")
       setGroupContext("default")
@@ -62,7 +66,7 @@ export function GroupsProvider({ children }: { children: ReactNode }) {
         /* ignore */
       }
     }
-  }, [groups, currentId, me.role])
+  }, [ready, groups, currentId, me.role])
 
   const setCurrent = useCallback((id: string) => {
     const next = id || "default"

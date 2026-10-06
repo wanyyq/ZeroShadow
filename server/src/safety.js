@@ -5,6 +5,17 @@ import { getConfig } from "./config.js"
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin"
 
+/**
+ * 本机文件系统是否不区分大小写。
+ *
+ * 导出它是为了让前端用**同一个规则**做同名冲突检测：前端原先靠浏览器 UA 猜，
+ * 「Windows 上的浏览器访问 Linux 服务端」就会分叉（误报冲突，或静默把一个文件
+ * 存成 "A (1).txt"）。现在由服务端通过 /api/auth/me 告知，两边不可能不一致。
+ */
+export function filesystemCaseInsensitive() {
+  return CASE_INSENSITIVE
+}
+
 export function normRel(input = "") {
   const raw = String(input).replace(/\\/g, "/")
   if (raw.includes("\0")) throw badPath()

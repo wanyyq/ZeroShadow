@@ -83,7 +83,10 @@ export function LogsMetricsSection() {
       <Card className="edge-highlight">
         <CardHeader>
           <CardTitle>系统指标</CardTitle>
-          <CardDescription>每分钟采样；内存保留最近 {metrics?.config.memMinutes ?? 15} 分钟，磁盘保留 7 天</CardDescription>
+          <CardDescription>
+            每分钟采样；内存保留最近 {metrics?.config.memMinutes ?? 15} 分钟，
+            落盘文件按「指标落盘保留」清理（可在「数据与保留」里调整）
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="edge-highlight grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">

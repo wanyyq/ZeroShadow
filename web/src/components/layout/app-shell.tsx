@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
@@ -38,9 +37,16 @@ function navItems(loggedIn: boolean) {
 // （键 zs-client-settings.sidebarCollapsed），这样「设置 → 外观」也能改它，
 // 并且会从旧的 zs-sidebar-collapsed 键自动迁移。
 
-/** 复制纯文本并给出反馈；隐私模式等场景下 navigator.clipboard 可能不可用 */
+/** 复制纯文本并给出反馈。
+ *  必须显式判断 navigator.clipboard 是否存在：可选链在它缺失时会让整条
+ *  then 短路，成功与失败回调都不执行 —— 用户点了「复制链接」毫无反应。 */
 function copyLink(text: string, okMsg: string) {
-  void navigator.clipboard?.writeText(text).then(
+  const clipboard = navigator.clipboard
+  if (!clipboard?.writeText) {
+    toast.error("当前环境不支持自动复制，请手动复制")
+    return
+  }
+  void clipboard.writeText(text).then(
     () => toast.success(okMsg),
     () => toast.error("复制失败，请手动复制")
   )
@@ -124,9 +130,21 @@ interface ShellContextValue {
   searchEl: React.ReactNode
   onSearchChange: (v: string) => void
 }
-const ShellContext = React.createContext<ShellContextValue>({ searchText: "", searchEl: null, onSearchChange: () => {} })
-export function useShellSearch() { return React.useContext(ShellContext) }
 
+const ShellContext = React.createContext<ShellContextValue>({
+  searchText: "",
+  searchEl: null,
+  onSearchChange: () => {},
+})
+
+/**
+ * 外壳搜索上下文。
+ *
+ * 历史：这里曾导出 `useShellSearch()` 让页面接管顶栏搜索框，但从来没有消费者
+ * （文件浏览器的搜索框在自己的工具栏里），`searchEl` 也从未被渲染。现在它只
+ * 作为一个包装用的 Provider 存在，`searchEl` 恒为 null —— 新增页面不要再依赖它，
+ * 顶栏搜索相关的需求请直接看 AppShell 里的 searchText/submitSearch。
+ */
 function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTheme }: {
   open: boolean; onOpenChange: (o: boolean) => void; me: Me;
   logout: () => Promise<void>; navigate: (p: string) => void; themeIcon: string; cycleTheme: () => void;
@@ -328,20 +346,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     else navigate("/")
   }
 
-  const searchEl = (
-    <form
-      className="relative hidden max-w-xs sm:block"
-      onSubmit={(e) => { e.preventDefault(); submitSearch() }}
-    >
-      <Icon name="search" className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        value={searchText}
-        placeholder="搜索文件…"
-        className="h-8 border-transparent bg-muted/50 pl-8 text-sm focus:bg-background hover:bg-muted"
-        onChange={(e) => setSearchText(e.target.value)}
-      />
-    </form>
-  )
+  // 搜索框：宽屏不在顶栏（在文件浏览器自己的工具栏里），只有窄屏这里有一个。
+  // 原先这里还构造过一个 `searchEl`（宽屏用的表单）通过 ShellContext 往外传，
+  // 但从未有任何页面消费它、也从未渲染过，已删除。
 
   // 导航行：折叠时只留图标（窄屏抽屉传 false，始终完整显示）
   const sidebarNav = (isCollapsed: boolean) => (
@@ -398,7 +405,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <ShellContext.Provider value={{ searchText, searchEl, onSearchChange: setSearchText }}>
+    // 这里的 Provider 只是把外壳包起来（搜索框在窄屏顶栏里直接用局部 state）。
+    // 原先它还通过 context 外传 useShellSearch / searchEl 给页面接管顶栏搜索，
+    // 但从未有任何消费者、searchEl 也从未渲染，那套接口已删除。
+    <ShellContext.Provider value={{ searchText, searchEl: null, onSearchChange: setSearchText }}>
       <div className="flex h-dvh overflow-hidden">
         {/* 桌面侧边栏（可折叠为仅图标；窄屏隐藏，改用下方抽屉） */}
         <aside

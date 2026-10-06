@@ -72,7 +72,13 @@ const BUNDLED: { name: string; version: string; license: string; note: string; u
 ]
 
 function copyText(text: string, okMsg: string) {
-  void navigator.clipboard?.writeText(text).then(
+  // 显式判断 clipboard 是否存在：可选链会让两个回调都不执行，表现为"点了没反应"
+  const clipboard = navigator.clipboard
+  if (!clipboard?.writeText) {
+    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    return
+  }
+  void clipboard.writeText(text).then(
     () => toast.success(okMsg),
     () => toast.error("复制失败，请手动选择文本")
   )

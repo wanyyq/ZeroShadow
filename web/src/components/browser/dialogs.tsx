@@ -22,7 +22,7 @@ import { fileKind, formatBytes, formatDate, joinPath, previewType } from "@/lib/
 import type { Entry, EntryStat } from "@/lib/types"
 import { toast } from "sonner"
 import { detectConflicts } from "@/lib/conflict"
-import { CONFLICT_CANCELLED } from "@/lib/conflict"
+import { CONFLICT_CANCELLED, isCaseInsensitive } from "@/lib/conflict"
 import type { ConflictResolution } from "@/lib/conflict"
 import { ConflictDialog } from "@/components/browser/conflict-dialog"
 
@@ -123,7 +123,12 @@ export function RenameDialog({
       const listData = await api.get<{ entries: Entry[] }>("/fs/list", { path: parentPath })
       const filtered = listData.entries.filter((e) => e.name.toLowerCase() !== entry.name.toLowerCase())
       const existingNames = filtered.map((e) => e.name)
-      const isDirConflict = filtered.some((e) => e.name === newName && e.type === "dir")
+      // 冲突判定必须与服务端同规则（Windows/macOS 不区分大小写）。这里原先用
+      // 裸 === 比较，于是"仅改大小写的重命名"撞上已存在的同名目录时会被归类成
+      // 文件冲突，并给出「覆盖 / 合并」这两个对文件无意义的选项。
+      const ci = isCaseInsensitive()
+      const same = (a: string, b: string) => (ci ? a.toLowerCase() === b.toLowerCase() : a === b)
+      const isDirConflict = filtered.some((e) => same(e.name, newName) && e.type === "dir")
       const conflicts = detectConflicts([newName], new Set(existingNames))
       if (conflicts.length === 0) {
         await api.post("/fs/rename", { path: joinPath(path, entry.name), newName })

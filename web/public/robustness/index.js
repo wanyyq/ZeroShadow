@@ -1035,7 +1035,7 @@
     }
 
     wrap.appendChild(el("span", { cls: "sep", text: "|" }));
-    wrap.appendChild(el("a", { href: "/", cls: "linkbtn", text: "无法正常渲染？返回正常页面" }));
+    wrap.appendChild(el("a", { href: "/", cls: "linkbtn", text: "返回正常页面" }));
 
     wrap.appendChild(el("span", { cls: "sep", text: "|" }));
     wrap.appendChild(el("span", { text: "兼容模式（旧浏览器专用）" }));

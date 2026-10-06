@@ -93,6 +93,19 @@ export function LoginPage() {
               </form>
             </CardContent>
           </Card>
+          {/* 未登录时看不到文件浏览器底部的状态条，所以这里必须也给一个入口，
+              否则"跑不动正常页面"的旧电脑连登录界面都进不去就没退路了。 */}
+          <p className="mt-4 text-center text-[11px] text-muted-foreground">
+            页面显示异常 / 浏览器过旧？
+            <a
+              href="/robustness/index.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mx-1 underline underline-offset-2 transition-colors hover:text-foreground"
+            >
+              使用兼容模式
+            </a>
+          </p>
         </div>
       </div>
     </AppShell>

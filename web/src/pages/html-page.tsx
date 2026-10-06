@@ -18,7 +18,7 @@ export default function HtmlPage() {
           <span className="truncate text-sm font-medium">{name}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="icon-xs" variant="ghost" onClick={() => window.open(url, "_blank")}>
+          <Button size="icon-xs" variant="ghost" onClick={() => window.open(url, "_blank", "noopener")}>
             <Icon name="external-link" />
           </Button>
           <Button size="icon-xs" variant="ghost" onClick={() => navigate(-1)}><Icon name="x" /></Button>

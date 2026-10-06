@@ -17,10 +17,26 @@ export const CONFLICT_CANCELLED = Symbol("conflict-cancelled")
 
 export type ConflictResolution = ConflictItem[] | typeof CONFLICT_CANCELLED
 
-// Windows / macOS 的文件系统不区分大小写，服务端 safety.js 也用同一规则判定，
-// 因此冲突检测与重名生成都必须忽略大小写，否则会把 A.txt 静默存成 A (1).txt。
-const CASE_INSENSITIVE =
+// 大小写是否敏感，必须与**服务端实际所在的操作系统**一致：
+// 服务端 safety.js 是按 process.platform 判定的（win32 / darwin 不区分大小写）。
+// 这里原先用 navigator.userAgent 猜，于是「Windows 上的浏览器访问 Linux 服务端」
+// 必然分叉 —— 要么把 A.txt 误判成与 a.txt 冲突，要么静默生成 A (1).txt。
+//
+// 现在以服务端返回的 caseInsensitive 为准（见 server 的 /api/auth/me）。
+// 在身份拿到之前先用一个保守的初始值，拿到后由 auth 状态调用
+// setCaseInsensitive() 覆盖。
+let CASE_INSENSITIVE =
   typeof navigator !== "undefined" && /Windows|Mac OS X|Macintosh/i.test(navigator.userAgent || "")
+
+/** 由服务端告知"文件系统是否不区分大小写"；传 undefined/null 则忽略（保留旧值） */
+export function setCaseInsensitive(value: boolean | undefined | null) {
+  if (typeof value === "boolean") CASE_INSENSITIVE = value
+}
+
+/** 供测试与调试查看当前生效的判定 */
+export function isCaseInsensitive() {
+  return CASE_INSENSITIVE
+}
 
 function norm(name: string): string {
   return CASE_INSENSITIVE ? name.toLowerCase() : name

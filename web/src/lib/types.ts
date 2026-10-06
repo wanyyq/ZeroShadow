@@ -37,6 +37,11 @@ export interface Me {
   uploadLimitMB: number
   groupId: string
   group: PublicGroup | null
+  /**
+   * 服务端所在文件系统是否不区分大小写（win32 / darwin 为 true）。
+   * 前端的同名冲突检测必须用它，不能用浏览器 UA 猜——两者可能不在同一台机器上。
+   */
+  caseInsensitive?: boolean
 }
 
 export interface Group {

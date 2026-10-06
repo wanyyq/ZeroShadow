@@ -37,13 +37,31 @@ type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 function noPermToast() { toast.warning("此功能您没权限") }
 function noPermSoftToast() { toast.warning("外部映射目录仅支持只读操作") }
 
-/** 复制纯文本并给出反馈；隐私模式等场景下 navigator.clipboard 可能不可用 */
+/**
+ * 复制纯文本并给出反馈。
+ * 注意分支：`navigator.clipboard` 不存在（非安全上下文 / 老浏览器）时，
+ * 可选链会让整条 then 直接短路 —— 成功与失败两个回调都不会执行，
+ * 用户点了「复制链接」却没有任何反应。所以这里要显式判断。
+ */
 function copyText(text: string, okMsg: string) {
-  void navigator.clipboard?.writeText(text).then(
+  const clipboard = navigator.clipboard
+  if (!clipboard?.writeText) {
+    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    return
+  }
+  void clipboard.writeText(text).then(
     () => toast.success(okMsg),
     () => toast.error("复制失败，请手动选择文本")
   )
 }
+
+/** 可在线编辑的扩展名（模块级常量：原先内联在 JSX 里，且两处重复声明了 ext） */
+const EDITABLE = [
+  "txt", "md", "mdx", "py", "cpp", "log", "html", "htm", "js", "ts", "css", "json",
+  "xml", "yml", "yaml", "ini", "conf", "sh", "java", "c", "rs", "go", "rst", "adoc",
+  "tex", "bat", "ps1", "vbs", "lua", "rb", "php", "pl", "sql", "toml", "properties",
+  "graphql", "rtf", "org", "cmake", "gradle", "gitignore", "env", "dockerfile", "makefile",
+]
 
 // 文件夹上传时，把 webkitRelativePath 写回 File.name，便于服务端还原目录结构
 function withRelativePath(f: File): File {
@@ -483,6 +501,13 @@ export function BrowserPage() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     if (!me.perms.upload) return noPermToast()
+    // 搜索模式下 onDragOver 不显示"松开以上传"遮罩，这里也必须一致地拒绝：
+    // 否则拖进去会静默上传到 path（而 path 在搜索模式下是空的/上一次的目录），
+    // 用户完全不知道文件去了哪里。
+    if (query) {
+      toast.warning("搜索结果里不能上传，请先点「清除」回到目录浏览")
+      return
+    }
     if (sorted.length > 0 && sorted.every((en) => en.softReadOnly)) return noPermSoftToast()
     const items = e.dataTransfer.items
     if (items && items.length) {
@@ -599,23 +624,21 @@ export function BrowserPage() {
         </ContextMenuItem>
       )
     }
-    {const ext = (entry.name.split(".").pop() || "").toLowerCase()
-    if (single && entry.type === "file" && (ext === "html" || ext === "htm")) {
+    const entryExt = (entry.name.split(".").pop() || "").toLowerCase()
+    if (single && entry.type === "file" && (entryExt === "html" || entryExt === "htm")) {
       items.push(
         <ContextMenuItem key="htmlpreview" disabled={!me.perms.htmlPreview} onClick={() => { if (!me.perms.htmlPreview) noPermToast(); else doHtmlPreview(entry) }}>
           <Icon name="globe" /> HTML 预览
         </ContextMenuItem>
       )
-    }}
-    {const ext = (entry.name.split(".").pop() || "").toLowerCase()
-    const EDITABLE = ["txt", "md", "mdx", "py", "cpp", "log", "html", "htm", "js", "ts", "css", "json", "xml", "yml", "yaml", "ini", "conf", "sh", "java", "c", "rs", "go", "rst", "adoc", "tex", "bat", "ps1", "vbs", "lua", "rb", "php", "pl", "sql", "toml", "properties", "graphql", "rtf", "org", "cmake", "gradle", "gitignore", "env", "dockerfile", "makefile"]
-    if (single && entry.type === "file" && EDITABLE.includes(ext)) {
+    }
+    if (single && entry.type === "file" && EDITABLE.includes(entryExt)) {
       items.push(
         <ContextMenuItem key="edit" disabled={!me.perms.editFiles || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
           <Icon name="pencil-line" /> 在线编辑
         </ContextMenuItem>
       )
-    }}
+    }
     if (single && entry.type === "file" && entry.name.toLowerCase().endsWith(".zip")) {
       items.push(
         <ContextMenuItem key="extract" disabled={!me.perms.extractZip || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
@@ -1040,7 +1063,15 @@ export function BrowserPage() {
                 <div className="flex-1 overflow-auto p-2">
                   {results.map((r) => (
                     <div key={r.path} className="flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/70"
-                      onDoubleClick={() => r.type === "dir" ? goto(r.path) : (me.perms.downloadFile || me.perms.preview) && triggerDownload(downloadUrl(r.path)).catch(() => {})}>
+                      onDoubleClick={() => {
+                        if (r.type === "dir") { goto(r.path); return }
+                        // 搜索结果的文件：有下载权限才下载，只有预览权限时去预览。
+                        // 旧写法是 `(downloadFile || preview) && triggerDownload(...)`，
+                        // 于是"只给预览不给下载"的成员依然会把文件下载下来。
+                        if (me.perms.downloadFile) { triggerDownload(downloadUrl(r.path)).catch(() => {}); return }
+                        if (me.perms.preview) { navigate(`/preview?path=${encodeURIComponent(r.path)}`); return }
+                        noPermToast()
+                      }}>
                       <Icon name={fileKind(r.name, r.type, r.softReadOnly).icon} className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{r.name}</p>

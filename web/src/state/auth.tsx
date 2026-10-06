@@ -2,6 +2,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 import { api, setOnPermissionDenied } from "@/lib/api"
+import { setCaseInsensitive } from "@/lib/conflict"
 import type { Me } from "@/lib/types"
 
 const GUEST: Me = {
@@ -48,13 +49,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [me, setMe] = React.useState<Me>(GUEST)
   const [ready, setReady] = React.useState(false)
 
+  /** 把服务端告知的"文件系统是否区分大小写"同步给冲突检测模块 */
+  const applyMe = React.useCallback((next: Me) => {
+    setCaseInsensitive(next.caseInsensitive)
+    setMe(next)
+  }, [])
+
   const refresh = React.useCallback(async () => {
     try {
-      setMe(await api.get<Me>("/auth/me"))
+      applyMe(await api.get<Me>("/auth/me"))
     } catch {
       setMe(GUEST)
     }
-  }, [])
+  }, [applyMe])
 
   React.useEffect(() => {
     refresh().finally(() => setReady(true))
@@ -77,10 +84,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (username: string, password: string) => {
       await api.post("/auth/login", { username, password })
       const next = await api.get<Me>("/auth/me")
-      setMe(next)
+      applyMe(next)
       return next
     },
-    []
+    [applyMe]
   )
 
   const logout = React.useCallback(async () => {

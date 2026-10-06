@@ -91,8 +91,7 @@ export function SettingsPage() {
 /* ==================== 外观 ==================== */
 
 /** 设置行：左侧文字 + 右侧控件，说明另起一行 —— 比把控件挤进 label 里更好读 */
-function SettingRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
+function SettingRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {  return (
     <Field>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <FieldLabel className="flex-auto">{label}</FieldLabel>
@@ -130,6 +129,10 @@ function AppearanceSection() {
                 confirmText: "恢复默认",
               }))) return
               settings.reset()
+              // 主题不归 ClientSettingsProvider 管（它在 ThemeProvider 自己的
+              // "zs-theme" 键里）。不在这里一起重置的话，确认框承诺了"主题回到
+              // 出厂设置"但实际不会生效。
+              setTheme("system")
               toast.success("已恢复默认外观")
             }}>
               <Icon name="rotate-ccw" data-icon="inline-start" /> 恢复默认
@@ -375,20 +378,22 @@ function MembersSection() {
     }
   }
 
-  const removeAvatar = async (m: Member) => {
-    if (!(await confirm({
+  const removeAvatar = (m: Member) => {
+    const owner = ownerForUser(m.id)
+    void confirm({
       title: `把「${m.username}」的头像恢复成默认？`,
       description: "已上传的头像文件会被删除，无法恢复。",
       confirmText: "恢复默认头像",
-    }))) return
-    try {
-      await deleteAvatar(ownerForUser(m.id))
-      await forgetAvatar(ownerForUser(m.id))
-      toast.success("已恢复默认头像")
-      load()
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
+      // 把动作交给确认框执行：成功才关、失败会留在框里显示原因。
+      // 旧写法是"先 await 确认、再自己 try/catch"，失败时框已经关了，
+      // 用户只能从右下角一条 toast 里猜到底成没成。
+      onConfirm: async () => {
+        await deleteAvatar(owner)
+        await forgetAvatar(owner)
+        toast.success("已恢复默认头像")
+        load()
+      },
+    })
   }
 
   const genPassword = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6)
@@ -468,7 +473,7 @@ function MembersSection() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {members.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">还没有成员，点击"添加成员"创建</TableCell></TableRow>}
+              {members.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">还没有成员，点击"添加成员"创建</TableCell></TableRow>}
               {members.map((m) => (
                 <ContextMenu key={m.id}>
                   <ContextMenuTrigger render={
@@ -543,7 +548,31 @@ function MembersSection() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setResetTarget(null); setResetBatch(false) }}>取消</Button>
-            <Button onClick={resetBatch ? async () => { if (batchNewPassword.length < 6) return; for (const id of selected) await api.post(`/admin/members/${id}/password`, { password: batchNewPassword }); toast.success(`已重置 ${selected.size} 个密码`); setResetBatch(false); setBatchNewPassword(""); load() } : doReset} disabled={resetBatch ? batchNewPassword.length < 6 : resetPassword.length < 6}>确定</Button>
+            <Button onClick={resetBatch ? async () => {
+              if (batchNewPassword.length < 6) return
+              // 逐条重置：旧实现在这里没有 try/catch，任一条失败就是一个未处理的
+              // Promise rejection，而成功分支照样提示"已重置 N 个密码"——用户
+              // 根本不知道有几条没成功。
+              const ids = [...selected]
+              let ok = 0
+              const failed: string[] = []
+              for (const id of ids) {
+                const who = members.find((m) => m.id === id)?.username || id
+                try {
+                  await api.post(`/admin/members/${id}/password`, { password: batchNewPassword })
+                  ok += 1
+                } catch (err) {
+                  failed.push(`${who}：${(err as Error).message}`)
+                }
+              }
+              if (ok) toast.success(`已重置 ${ok} 个密码`)
+              if (failed.length) {
+                toast.error(`${failed.length} 个未重置`, { description: failed.join("\n") })
+              }
+              setResetBatch(false)
+              setBatchNewPassword("")
+              load()
+            } : doReset} disabled={resetBatch ? batchNewPassword.length < 6 : resetPassword.length < 6}>确定</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -612,15 +641,18 @@ function PermsSection() {
     } catch (e) { toast.error((e as Error).message) }
   }
 
-  const unhide = async (p: string) => {
-    if (!(await confirm({
+  const unhide = (p: string) => {
+    void confirm({
       title: `恢复访客对「${p}」的可见性？`,
       description: "该目录会重新出现在访客的列表里。",
       confirmText: "恢复可见",
       destructive: false,
-    }))) return
-    try { const next = await api.del<AdminConfig>("/admin/hidden-paths", { path: p }); setConfig(next); toast.success("已恢复访客可见") }
-    catch (e) { toast.error((e as Error).message) }
+      onConfirm: async () => {
+        const next = await api.del<AdminConfig>("/admin/hidden-paths", { path: p })
+        setConfig(next)
+        toast.success("已恢复访客可见")
+      },
+    })
   }
 
   // 用可视化目录选择器直接指定要隐藏的文件夹，不必先回到文件页右键

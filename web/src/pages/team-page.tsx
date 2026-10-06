@@ -523,17 +523,17 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
     } catch (e) { toast.error((e as Error).message) } finally { setBusyId(null) }
   }
   const remove = async (m: Member) => {
-    // 移出会连带取消组长身份，属于容易误点且不好恢复的操作，必须二次确认
-    if (!(await confirm({
+    // 移出会连带取消组长身份，属于容易误点且不好恢复的操作，必须二次确认。
+    // 动作交给确认框执行：请求失败时框会保持打开并显示原因，不会"看起来成功"。
+    await confirm({
       title: `把「${m.username}」移出「${group.name}」？`,
       description: "移出后 TA 将看不到本组可见的内容；如果 TA 是本组组长，组长身份也会一并取消。",
       confirmText: "移出小组",
-    }))) return
-    setBusyId(m.id)
-    try {
-      await addGroupMembers(group.id, [m.id], "remove")
-      onChanged()
-    } catch (e) { toast.error((e as Error).message) } finally { setBusyId(null) }
+      onConfirm: async () => {
+        await addGroupMembers(group.id, [m.id], "remove")
+        onChanged()
+      },
+    })
   }
   const saveVisibility = async () => {
     setSaving(true)

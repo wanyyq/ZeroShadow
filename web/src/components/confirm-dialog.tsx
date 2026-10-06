@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
+import { getErrorMessage } from "@/lib/api"
+import { Icon } from "@/components/icon"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +32,13 @@ export interface ConfirmOptions {
   cancelText?: string
   /** 默认 true：确认按钮用危险色。纯提示性确认可传 false */
   destructive?: boolean
+  /**
+   * 可选：确认后要执行的动作。
+   * 传了它，对话框会在动作**成功完成后**才关闭；失败则保持打开并把错误
+   * 显示在按钮上方。这是为了消灭"点了确定、对话框关了、但操作其实失败了"
+   * 这类静默失败（throw 会让旧写法留下一个未处理的 Promise rejection）。
+   */
+  onConfirm?: () => void | Promise<void>
 }
 
 type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>
@@ -38,11 +47,15 @@ const ConfirmContext = React.createContext<ConfirmFn | null>(null)
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = React.useState<ConfirmOptions | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  const [failure, setFailure] = React.useState("")
   const resolverRef = React.useRef<((ok: boolean) => void) | null>(null)
 
   const confirm = React.useCallback<ConfirmFn>((options) => {
     // 上一次还没答复就先当取消，避免 Promise 永远悬着
     resolverRef.current?.(false)
+    setFailure("")
+    setBusy(false)
     setPending(options)
     return new Promise<boolean>((resolve) => {
       resolverRef.current = resolve
@@ -53,12 +66,32 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     resolverRef.current?.(ok)
     resolverRef.current = null
     setPending(null)
+    setFailure("")
+    setBusy(false)
   }, [])
+
+  /** 确认：有 onConfirm 就先跑它，成功才关闭；失败保持打开并显示原因 */
+  const handleConfirm = React.useCallback(async () => {
+    const action = pending?.onConfirm
+    if (!action) {
+      settle(true)
+      return
+    }
+    setFailure("")
+    setBusy(true)
+    try {
+      await action()
+      settle(true)
+    } catch (err) {
+      setFailure(getErrorMessage(err))
+      setBusy(false)
+    }
+  }, [pending, settle])
 
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      <AlertDialog open={pending !== null} onOpenChange={(o) => { if (!o) settle(false) }}>
+      <AlertDialog open={pending !== null} onOpenChange={(o) => { if (!o && !busy) settle(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{pending?.title}</AlertDialogTitle>
@@ -66,14 +99,21 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               <AlertDialogDescription>{pending.description}</AlertDialogDescription>
             ) : null}
           </AlertDialogHeader>
+          {failure ? (
+            <p role="alert" className="text-sm text-destructive">
+              {failure}
+            </p>
+          ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => settle(false)}>
+            <AlertDialogCancel disabled={busy} onClick={() => settle(false)}>
               {pending?.cancelText || "取消"}
             </AlertDialogCancel>
             <AlertDialogAction
               className={pending?.destructive === false ? undefined : "bg-destructive/10 text-destructive hover:bg-destructive/20"}
-              onClick={(e) => { e.preventDefault(); settle(true) }}
+              disabled={busy}
+              onClick={(e) => { e.preventDefault(); void handleConfirm() }}
             >
+              {busy && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />}
               {pending?.confirmText || "确定"}
             </AlertDialogAction>
           </AlertDialogFooter>

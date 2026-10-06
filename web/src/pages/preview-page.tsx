@@ -9,8 +9,24 @@ import { previewType } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/state/auth"
 
-export default function PreviewPage() {
-  const [params] = useSearchParams()
+/**
+ * 复制纯文本并给反馈。
+ * 显式判断 navigator.clipboard：可选链在它缺失时会让整条 then 短路，
+ * 成功与失败回调都不执行 —— 用户点了「复制链接」没有任何反应。
+ */
+function copyToClipboard(text: string, okMsg: string) {
+  const clipboard = navigator.clipboard
+  if (!clipboard?.writeText) {
+    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    return
+  }
+  void clipboard.writeText(text).then(
+    () => toast.success(okMsg),
+    () => toast.error("复制失败，请手动选择文本")
+  )
+}
+
+export default function PreviewPage() {  const [params] = useSearchParams()
   const navigate = useNavigate()
   const { me } = useAuth()
   const entryPath = params.get("path") || ""
@@ -123,9 +139,10 @@ export default function PreviewPage() {
   }
 
   const zoomIn = () => {
+    // 只调用一次 setScale：旧实现连调两次，第二次在"尚未进入缩放态"时会
+    // 覆盖第一次的结果，于是第一次放大只能到 fitScale*1.5（而不是 1.25）。
     const current = isZoomed ? scale : fitScale
     setScale(Math.min(10, current * 1.25))
-    if (!isZoomed) setScale(Math.min(10, fitScale * 1.5))
   }
   const zoomOut = () => {
     if (!isZoomed) return
@@ -224,11 +241,11 @@ export default function PreviewPage() {
         <ContextMenuItem onClick={() => window.open(url, "_blank", "noopener")}>
           <Icon name="external-link" /> 在新标签页打开
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => { void navigator.clipboard?.writeText(new URL(url, window.location.origin).href).then(() => toast.success("已复制链接"), () => toast.error("复制失败")) }}>
+        <ContextMenuItem onClick={() => copyToClipboard(new URL(url, window.location.origin).href, "已复制链接")}>
           <Icon name="clipboard-copy" /> 复制链接
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => { void navigator.clipboard?.writeText(entryPath).then(() => toast.success("已复制相对路径"), () => toast.error("复制失败")) }}>
+        <ContextMenuItem onClick={() => copyToClipboard(entryPath, "已复制相对路径")}>
           <Icon name="clipboard-list" /> 复制相对路径
         </ContextMenuItem>
         <ContextMenuItem onClick={() => navigate(-1)}>

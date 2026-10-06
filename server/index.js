@@ -119,6 +119,24 @@ const SHELL_CSP = [
 ].join("; ")
 
 if (fs.existsSync(WEB_DIST)) {
+  // 兼容模式（web/public/robustness/）是独立于前端的静态页，这里必须显式处理：
+  //   1. 它是个目录，而 express.static 配了 index:false，直接访问 /robustness/
+  //      拿不到 index.html，会落到下面的 SPA fallback —— 表现就是"打开兼容模式
+  //      却跳回了首页"，非常难查。所以把目录形式重定向到具体文件。
+  //   2. 文件还不存在时（public/ 的改动尚未 pnpm build，没被复制进 dist），
+  //      旧行为同样是静默回落到 SPA 首页。这里改成明确的 503 提示。
+  const ROBUSTNESS_FILE = path.join(WEB_DIST, "robustness", "index.html")
+  app.get(["/robustness", "/robustness/"], (_req, res) => {
+    res.redirect(302, "/robustness/index.html")
+  })
+  app.get("/robustness/index.html", (_req, res, next) => {
+    if (fs.existsSync(ROBUSTNESS_FILE)) return next()
+    res
+      .status(503)
+      .type("text/plain; charset=utf-8")
+      .send("兼容模式页面尚未生成：请先运行 pnpm build（会把 web/public/robustness/ 复制到 web/dist/），然后重启服务。")
+  })
+
   app.use(
     express.static(WEB_DIST, {
       index: false,

@@ -519,4 +519,31 @@ if ($r.Status -eq 503) {
   Check "resources" ($r.Status -eq 200) "期望 200，实际 $($r.Status)"
 }
 
+# --------------------------------------------- 10. 兼容模式页面 ------------
+# web/public/robustness/ 是给旧浏览器（IE11 / 老 Chrome）用的独立静态页，
+# 不经过 Vite 打包。这里断言它能被托管、且与后端 CSP 不冲突。
+Section "10. 兼容模式页面（robustness）"
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/robustness/index.html"; Method = "GET" }
+if ($r.Status -eq 503 -or $r.Status -eq 404) {
+  Skip "robustness-page" "前端未构建或未包含 robustness（需先 pnpm build）"
+} else {
+  Check "robustness-page" ($r.Status -eq 200) "期望 200，实际 $($r.Status)"
+
+  # 页面外壳的 CSP 是 script-src 'self'，内联 <script> 会被浏览器拦掉 ——
+  # 所以这份页面必须只引用外部脚本。这条断言防的是"后来有人往 HTML 里塞内联脚本"。
+  $inlineScript = [regex]::Matches($r.Content, '<script(?![^>]*\bsrc=)', "IgnoreCase").Count
+  Check "robustness-no-inline-script" ($inlineScript -eq 0) "发现 $inlineScript 处内联脚本（会被 CSP 拦掉）"
+
+  foreach ($asset in @("/robustness/index.css", "/robustness/index.js", "/robustness/theme-boot.js")) {
+    $a = Invoke-Api -Parameters @{ Uri = "$BaseUrl$asset"; Method = "GET" }
+    # 若文件不存在，SPA fallback 会返回 index.html（text/html），这里正是要抓这种情况
+    $ok = $a.Status -eq 200 -and $a.Content -notmatch '<!doctype html'
+    Check ("robustness-asset " + $asset) $ok "$($a.Status) $($a.Headers['Content-Type'])"
+  }
+
+  # 首页底部必须有进入兼容模式的入口
+  $home = Invoke-Api -Parameters @{ Uri = "$BaseUrl/"; Method = "GET" }
+  Check "robustness-entry-on-home" ($home.Content -match '/robustness/index\.html') "首页未找到兼容模式入口链接"
+}
+
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })

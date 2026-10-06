@@ -85,6 +85,13 @@ async function idbDelete(owner: string): Promise<void> {
   await tx((s) => s.delete(owner))
 }
 
+/** 取出库里所有 owner（清理服务端已删除的头像时要用） */
+async function idbKeys(): Promise<string[]> {
+  const keys = await tx<IDBValidKey[]>((s) => s.getAllKeys())
+  if (!Array.isArray(keys)) return []
+  return keys.map((k) => String(k))
+}
+
 // --------------------------------------------------------------- 运行时状态 --
 const objectUrls = new Map<string, { md5: string; url: string }>()
 let version = 0
@@ -96,16 +103,10 @@ function emit() {
   for (const l of listeners) l()
 }
 
-function releaseAll() {
-  for (const { url } of objectUrls.values()) URL.revokeObjectURL(url)
-  objectUrls.clear()
-}
-
-/** 强制下一次 getAvatarUrl 重新从缓存/服务端取 */
-export function invalidateAvatars() {
-  releaseAll()
-  emit()
-}
+// 注：这里原先还有一个 `invalidateAvatars()`（releaseAll + emit），但它全库无人
+// 调用 —— 头像更新走 syncAvatars 的 md5 比对、上传走 primeAvatar、删除走
+// forgetAvatar，三条路径都会各自 emit，不需要一个额外的"整体失效"入口。
+// 与之配套的 releaseAll() 也一并删除，避免留下无引用的死代码。
 
 async function buildUrl(entry: CachedAvatar): Promise<string> {
   const existing = objectUrls.get(entry.owner)
@@ -154,15 +155,20 @@ export async function syncAvatars(): Promise<void> {
         /* 单个失败不影响整体 */
       }
     }
-    // 清理服务端已不存在的缓存
-    for (const owner of objectUrls.keys()) {
-      if (!wanted.has(owner)) {
-        await idbDelete(owner)
-        const existing = objectUrls.get(owner)
-        if (existing) URL.revokeObjectURL(existing.url)
-        objectUrls.delete(owner)
-        changed = true
-      }
+    // 清理服务端已不存在的缓存。
+    // 必须按 IndexedDB 里的全部键来扫，不能只看 objectUrls：objectUrls 里只有
+    // "曾经在界面上渲染过"的 owner，从没显示过的头像（成员很多、或换过 owner）
+    // 会一直留在本地库里，越攒越多。
+    const candidates = new Set<string>(await idbKeys())
+    for (const owner of objectUrls.keys()) candidates.add(owner)
+
+    for (const owner of candidates) {
+      if (wanted.has(owner)) continue
+      await idbDelete(owner)
+      const existing = objectUrls.get(owner)
+      if (existing) URL.revokeObjectURL(existing.url)
+      objectUrls.delete(owner)
+      changed = true
     }
     if (changed) emit()
   })().finally(() => {
