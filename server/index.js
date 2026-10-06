@@ -86,7 +86,7 @@ app.use(attachContext)
 app.use("/api", csrfGuard)
 
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "ZeroShadow", version: "1.1.0" })
+  res.json({ name: "ZeroShadow", version: "1.1.1" })
 })
 
 app.use("/api/auth", authRoutes)

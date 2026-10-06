@@ -459,7 +459,7 @@ Linux 归档里的 `ZeroShadow` 会带上可执行位（ZIP 的 external attribu
 ### 发布包内容
 
 ```
-ZeroShadow-1.1.0-windows-x64.zip
+ZeroShadow-1.1.1-windows-x64.zip
 ├── ZeroShadow.exe   /  ZeroShadow    后端可执行文件
 ├── web/dist/                         前端静态文件
 ├── .env.example                      配置模板（首次运行自动生成 .env）
@@ -497,6 +497,28 @@ ZeroShadow-1.1.0-windows-x64.zip
 | **构建** | Vite / esbuild / pkg |
 
 > 图标、字体、GSAP 全部走本地 `public/resources/`，**不依赖任何 CDN**，内网离线也能正常显示。
+
+---
+
+## 更新日志
+
+完整的版本变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+**v1.1.1（当前版本）** 以修复缺陷为主，并新增兼容模式页面：
+
+- **新增兼容模式** `/robustness/index.html`：面向跑不动 React / Tailwind 的老机器
+  （IE11、Win7 上的老版 Chrome），原生 HTML + CSS + ES5 手写，不引入外部库、
+  不放宽任何服务端安全设置。入口在文件浏览器底部状态条与登录页底部。
+- **修复**：顶栏所选小组刷新后丢失 · 长任务面板出现"看不见却还在弹提示"的幽灵任务 ·
+  头像本地缓存越攒越多 · 批量重置密码静默失败 · 预览页首次放大倍率被覆盖 ·
+  「恢复默认外观」不重置主题 · 重命名冲突判定的大小写规则与服务端不一致 ·
+  只有预览权限的人仍能下载搜索结果 · 搜索模式拖拽上传落到错误目录 ·
+  复制到剪贴板失败无提示（4 处）· 确认框内操作失败后无法得知原因 ·
+  `backupEnabled` 在前端无入口 · 日志页保留天数文案写死。
+- **修复（服务端路由）**：`/robustness/` 会被 SPA fallback 吞掉并返回首页；
+  现在显式重定向到具体文件，文件缺失时返回 503 并提示先构建。
+
+更早的版本（1.1.0 的小组 / 待办 / 头像 / 编码支持，1.0.0 的首发）见 CHANGELOG.md。
 
 ---
 

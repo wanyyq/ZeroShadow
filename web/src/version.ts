@@ -9,4 +9,4 @@
  *   2. server/index.js 的 /api/meta
  *   3. 本文件
  */
-export const VERSION = "1.1.0"
+export const VERSION = "1.1.1"
