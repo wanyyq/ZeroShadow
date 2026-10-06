@@ -8,8 +8,10 @@ import { attachContext } from "./src/context.js"
 import { getConfig, reloadConfig } from "./src/config.js"
 import { error as logError, info, sweepLogs, warn } from "./src/logger.js"
 import { applyTunnelConfig, stopTunnel } from "./src/tunnel.js"
+import { createWebdavRouter, webdavStartupNotice } from "./src/webdav.js"
 import { lanAddresses } from "./src/status.js"
 import { runIntegrityCheck } from "./src/integrity.js"
+import { sweepTrash } from "./src/trash.js"
 import { reloadUsers } from "./src/users.js"
 import { reloadGroups } from "./src/groups.js"
 import { reloadTodos } from "./src/todos.js"
@@ -86,7 +88,7 @@ app.use(attachContext)
 app.use("/api", csrfGuard)
 
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "ZeroShadow", version: "1.1.1" })
+  res.json({ name: "ZeroShadow", version: "1.1.2" })
 })
 
 app.use("/api/auth", authRoutes)
@@ -99,6 +101,15 @@ app.use("/api/groups", groupRoutes)
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "接口不存在" })
 })
+
+// ===== WebDAV（实验性，默认关闭；只能在 .env 里用 WEBDAV=1 打开）=====
+// 必须挂在静态托管与 SPA fallback **之前**：否则 /dav/ 会被 fallback 吞掉、
+// 返回前端首页（浏览器里表现为"打开 /dav/ 看到网盘界面"，DAV 客户端则报
+// 协议错误）。未启用时完全不挂载，/dav/ 会正常 404。
+const webdav = createWebdavRouter()
+if (webdav) {
+  app.use(env.webdavPath, webdav)
+}
 
 // 应用外壳的 CSP：脚本只允许同源文件（构建产物 index.html 无内联脚本），样式
 // 保留 inline 以兼容 UI 库注入的 <style>；允许本站把预览页放进 iframe。
@@ -154,6 +165,24 @@ if (fs.existsSync(WEB_DIST)) {
       },
     })
   )
+  // WebDAV 未启用时，把挂载路径显式 404 掉。
+  // 必须放在 SPA fallback **之前**：那个 app.get("*") 会接住一切 GET，
+  // 于是 /dav、/dav/ 会返回前端首页 —— 用户把 /dav 填进客户端后拿到的是
+  // 网页而不是协议错误，非常难排查（PROPFIND 之类走不到 GET 路由，所以
+  // 之前表现为"GET 拿到网页、其他方法 404"这种自相矛盾的现象）。
+  if (!env.webdavEnabled) {
+    const davPrefix = env.webdavPath
+    app.use((req, res, next) => {
+      if (req.path !== davPrefix && !req.path.startsWith(davPrefix + "/")) return next()
+      res.setHeader("Allow", "OPTIONS")
+      res.status(404).json({
+        error:
+          `WebDAV 未启用（这是实验性功能，默认关闭）。如需使用，请在 .env 中设置 WEBDAV=1 后重启服务；` +
+          `启用后挂载地址为 ${davPrefix}/`,
+      })
+    })
+  }
+
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next()
     res.setHeader("Cache-Control", "no-cache")
@@ -175,7 +204,15 @@ app.use((err, req, res, _next) => {
     logError("server_error", { msg: `${req.method} ${req.path}: ${err.message}`, ip: req.ip })
   }
   if (res.headersSent) return res.destroy()
-  res.status(status).json({ error: status >= 500 ? "服务器内部错误" : err.message })
+  const body = { error: status >= 500 ? "服务器内部错误" : err.message }
+  // 少数错误需要带上结构化信息让前端能做后续动作，例如并发编辑冲突要告诉
+  // 客户端"服务器上的当前版本是哪个"（前端据此提供"重新加载"）。
+  // 这里刻意只在 err.code 存在时透传，避免把任意错误对象的字段泄漏出去。
+  if (err.code) {
+    body.code = String(err.code)
+    if (err.currentVersion !== undefined) body.currentVersion = err.currentVersion
+  }
+  res.status(status).json(body)
 })
 
 const server = app.listen(env.port, env.host, () => {
@@ -187,9 +224,12 @@ const server = app.listen(env.port, env.host, () => {
   sweepLogs().catch(() => {})
   const maintenance = setInterval(() => {
     sweepLogs().catch(() => {})
+    sweepTrash().catch(() => {})
     runDailySnapshot()
   }, 6 * 60 * 60 * 1000)
   maintenance.unref?.()
+  // 启动时也清一次回收站：长时间不重启的实例靠定时器，频繁重启的实例靠这里
+  sweepTrash().catch(() => {})
   if (!NOLOG) {
     console.log("")
     console.log("  ZeroShadow 网盘已启动")
@@ -198,6 +238,8 @@ const server = app.listen(env.port, env.host, () => {
       console.log(`  局域网访问: http://${addr}:${env.port}`)
     }
     console.log(`  文件目录:   ${FILES_DIR}`)
+    const davNotice = webdavStartupNotice()
+    if (davNotice) console.log(`  ${davNotice}`)
     if (avatarInit.removed) console.log(`  头像清理:   移除 ${avatarInit.removed} 个不合规文件`)
     if (env.trustProxy === false) {
       console.log("  客户端 IP:  直连（不信任代理头）")

@@ -89,7 +89,14 @@ function listLogFiles() {
   }
 }
 
-export async function queryLogs({ limit = 200, level = "", q = "", days = 5, auditOnly = false } = {}) {
+/**
+ * 查询日志。
+ * @param {{limit?:number, level?:string, q?:string, days?:number, auditOnly?:boolean, unlimited?:boolean}} options
+ *   `unlimited` 只给导出用：不截断到 limit，直接返回范围内的全部行。
+ *   界面查询必须保留 limit 上限，否则一次日志页刷新会把几万行读进内存并
+ *   塞进响应体。
+ */
+export async function queryLogs({ limit = 200, level = "", q = "", days = 5, auditOnly = false, unlimited = false } = {}) {
   limit = Math.min(Math.max(Number(limit) || 200, 1), 2000)
   days = Math.min(Math.max(Number(days) || 5, 1), 90)
   const search = String(q || "").toLowerCase()
@@ -119,6 +126,7 @@ export async function queryLogs({ limit = 200, level = "", q = "", days = 5, aud
       [r.ev, r.msg, r.user, r.ip, r.role].some((v) => v && String(v).toLowerCase().includes(search))
     )
   }
+  if (unlimited) return out
   return out.slice(-limit).reverse()
 }
 
@@ -147,8 +155,75 @@ export async function clearLogs() {
   await Promise.all(names.map((n) => fs.promises.rm(path.join(LOGS_DIR, n), { force: true })))
 }
 
-/** 按保留天数清理过期日志文件 */
-export async function sweepLogs() {
+// ============================================================ 日志导出 =====
+
+/** CSV 字段转义：含分隔符 / 引号 / 换行时用双引号包裹，内部引号翻倍 */
+function csvCell(value) {
+  const s = value === null || value === undefined ? "" : String(value)
+  if (!/[",\r\n]/.test(s)) return s
+  return `"${s.replace(/"/g, '""')}"`
+}
+
+const CSV_COLUMNS = [
+  ["t", "时间"],
+  ["lvl", "级别"],
+  ["ev", "事件"],
+  ["user", "用户"],
+  ["role", "角色"],
+  ["ip", "IP"],
+  ["audit", "审计"],
+  ["msg", "详情"],
+]
+
+/**
+ * 把日志行序列化成 CSV。
+ *
+ * 细节（都是踩过的坑）：
+ *   - 开头加 **UTF-8 BOM**：Excel（尤其中文 Windows）不加 BOM 会把 UTF-8
+ *     当成 ANSI 读，中文全变乱码；
+ *   - 用 **CRLF** 换行：同样是 Excel 的兼容性要求；
+ *   - audit 列输出 `是`/`否` 而不是 true/false，给非技术同事看更直观。
+ */
+export function logsToCsv(rows) {
+  const lines = [CSV_COLUMNS.map((c) => c[1]).join(",")]
+  for (const row of rows) {
+    lines.push(
+      CSV_COLUMNS.map(([key]) => {
+        if (key === "audit") return row.audit ? "是" : "否"
+        return csvCell(row[key])
+      })
+        .join(",")
+        .replace(/\r?\n/g, " ")
+    )
+  }
+  return "\uFEFF" + lines.join("\r\n") + "\r\n"
+}
+
+/** 把日志行序列化成 JSONL（与磁盘上的格式一致，便于直接喂给脚本） */
+export function logsToJsonl(rows) {
+  return rows.map((row) => JSON.stringify(row)).join("\n") + "\n"
+}
+
+/** 导出文件名：带上筛选条件与时间戳，多个导出文件不会互相覆盖 */
+export function logsExportName(format, { auditOnly, days }) {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, "0")
+  const stamp =
+    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+    `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  const scope = auditOnly ? "audit" : "all"
+  return `zeroshadow-logs-${scope}-${days}d-${stamp}.${format === "csv" ? "csv" : "jsonl"}`
+}
+
+/**
+ * ASCII 回退文件名（给非 RFC 5987 的老客户端）。
+ * 因为导出名里只有 ASCII 字符，直接复用同一个名字即可，不需要音译。
+ */
+export function logsExportNameAscii(format, opts) {
+  return logsExportName(format, opts)
+}
+
+/** 按保留天数清理过期日志文件 */export async function sweepLogs() {
   let days = 30
   try {
     days = Number(getConfig().logRetentionDays) || 30

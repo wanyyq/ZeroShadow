@@ -5,8 +5,9 @@ import { reloadConfig, getConfig, saveConfig } from "../config.js"
 import { batchMembers, createMembers, findById, findByUsername, listMembers, persist, reloadUsers, resetPassword } from "../users.js"
 import { getStatus } from "../status.js"
 import { applyTunnelConfig, tunnelStatus, validateCustomHost } from "../tunnel.js"
-import { aggregateLogs, clearLogs, info, queryLogs } from "../logger.js"
-import { samePath } from "../safety.js"
+import { aggregateLogs, clearLogs, info, logsExportName, logsToCsv, logsToJsonl, queryLogs } from "../logger.js"
+import { contentDisposition } from "../http.js"
+import { samePath, normRel, resolveAny } from "../safety.js"
 import {
   LEADER_CAPS,
   addMembers,
@@ -20,6 +21,7 @@ import {
 import { reloadTodos, removeGroupFromTodos, removeUserFromTodos } from "../todos.js"
 import { deleteAvatar, ownerForUser } from "../avatars.js"
 import { listBackups, restoreBackup, snapshotAll } from "../backup.js"
+import { emptyTrash, getTrash, listTrash, purgeTrash, restoreTrash, trashAvailable, trashStats } from "../trash.js"
 import { getMetrics, readMetricsHistory } from "../metrics.js"
 
 const router = Router()
@@ -50,6 +52,7 @@ const NUMERIC_KEYS = {
   avatarMaxKB: [1, 10240],
   backupKeep: [1, 500],
   logRetentionDays: [1, 3650],
+  trashRetentionDays: [1, 3650],
   metricsRetentionDays: [1, 365],
   metricsMemMinutes: [1, 1440],
   slowRequestMs: [1, 600000],
@@ -64,6 +67,7 @@ const BOOLEAN_KEYS = [
   "avatarEnabled",
   "todoEnabled",
   "backupEnabled",
+  "trashEnabled",
   "requestMetricsEnabled",
 ]
 
@@ -311,6 +315,38 @@ router.delete("/logs", async (req, res, next) => {
   }
 })
 
+/**
+ * 导出日志。
+ * 与 GET /logs 的区别：不截断（unlimited），并以附件形式下载。
+ * 这也是"操作日志"从"只能在线看"变成"能交给审计/同事"的关键一步。
+ */
+router.get("/logs/export", async (req, res, next) => {
+  try {
+    const format = String(req.query.format || "jsonl").toLowerCase()
+    if (format !== "jsonl" && format !== "csv") {
+      throw httpError(400, "format 只能是 jsonl 或 csv")
+    }
+    const days = Math.min(Math.max(Number(req.query.days) || 5, 1), 90)
+    const auditOnly = req.query.audit === "1" || req.query.audit === "true"
+    const rows = await queryLogs({
+      level: String(req.query.level || ""),
+      q: String(req.query.q || ""),
+      days,
+      auditOnly,
+      unlimited: true,
+    })
+    const body = format === "csv" ? logsToCsv(rows) : logsToJsonl(rows)
+    const name = logsExportName(format, { auditOnly, days })
+    res.setHeader("Content-Type", format === "csv" ? "text/csv; charset=utf-8" : "application/x-ndjson; charset=utf-8")
+    res.setHeader("Content-Disposition", contentDisposition("attachment", name))
+    res.setHeader("Cache-Control", "no-store")
+    info("logs_export", { msg: `${format} ${rows.length} 条 / ${days} 天`, ...actor(req) })
+    res.send(body)
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ================================================================ 指标 =====
 router.get("/metrics", (_req, res) => {
   res.json(getMetrics())
@@ -392,6 +428,75 @@ router.post("/tunnel", async (req, res, next) => {
     setTimeout(() => {
       res.json({ config: config.tunnel, status: tunnelStatus() })
     }, 600)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ================================================================ 回收站 =====
+// 为什么放在 requireRole("superadmin") 之下：
+//   删除是把内容移进一个"能还原"的暂存区，谁能看这个暂存区、谁能彻底销毁，
+//   属于管理动作。成员只要有 delete 权限就照常能删（内容进回收站），
+//   但浏览与还原统一由超管负责——权限面更小，也避免成员之间互相看到
+//   对方删掉的文件内容。真要开放给成员，再单独加权限点，不要顺手放开。
+router.get("/trash", async (_req, res, next) => {
+  try {
+    const items = listTrash()
+    const stats = await trashStats()
+    res.json({
+      items,
+      stats,
+      enabled: getConfig().trashEnabled !== false,
+      // 目录建不出来时（data/ 只读等）如实告知：此时删除不会进回收站
+      available: trashAvailable(),
+      retentionDays: getConfig().trashRetentionDays ?? 30,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.post("/trash/restore", async (req, res, next) => {
+  try {
+    const id = String(req.body?.id || "")
+    const meta = getTrash(id)
+    if (!meta) throw httpError(404, "回收站里找不到这个项目")
+    // 还原到原路径；也可以传 dest 还原到别处（前端暂未用到，但接口留出余地）
+    const targetRel = String(req.body?.dest ?? meta.rel)
+    const resolved = resolveAny(normRel(targetRel))
+    if (resolved.isSoft) throw httpError(403, "外部映射目录仅支持只读操作")
+    const result = await restoreTrash(id, resolved, !!req.body?.overwrite)
+    if (result && result.conflict) {
+      return res.status(409).json({
+        error: `「${meta.rel}」的位置上已经有一个同名项目。请先改名或删除它，或者选择覆盖。`,
+        code: "RESTORE_CONFLICT",
+      })
+    }
+    info("backup_restore", { msg: `回收站还原 ${meta.rel}`, ...actor(req) })
+    res.json({ ok: true, restored: resolved.rel })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.post("/trash/purge", async (req, res, next) => {
+  try {
+    const id = String(req.body?.id || "")
+    const meta = getTrash(id)
+    if (!meta) throw httpError(404, "回收站里找不到这个项目")
+    await purgeTrash(id)
+    info("trash_purge", { msg: meta.rel, ...actor(req) })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.post("/trash/empty", async (req, res, next) => {
+  try {
+    const n = await emptyTrash()
+    info("trash_empty", { msg: `${n} 项`, ...actor(req) })
+    res.json({ ok: true, removed: n })
   } catch (err) {
     next(err)
   }

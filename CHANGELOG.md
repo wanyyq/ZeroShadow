@@ -11,6 +11,61 @@
 
 ---
 
+## [1.1.2] - 2026-10-06
+
+以「防止数据丢失」为核心的一次更新，并提供两个新能力（其中一个带实验标记）。
+
+### 新增
+
+- **回收站**：删除不再直接销毁文件，而是移入 `data/trash/`，可在「设置 → 回收站」
+  里还原、覆盖还原、彻底删除或一键清空；保留天数可配置（默认 30 天），
+  超期由服务启动时与每 6 小时的维护任务自动清理。
+  - 删除时若回收站不可用（`data/` 只读、磁盘满等），会**降级为直接删除并明确告知**
+    哪些项目没有进回收站，而不是假装成功；
+  - 回收站的数据刻意放在 `data/` 而**不在网盘根目录内**：否则它会被列目录、被搜索、
+    被打包，甚至能按路径被访客直接下载；
+  - WebDAV 的 `DELETE` 与 Web 端行为一致（同样进回收站）。
+- **并发编辑保护**：在线编辑器打开时拿到文件的内容版本串（`mtime-size-内容哈希`），
+  保存时若服务端内容已变则**拒绝写入并返回 409**，界面给出「重新加载」与
+  「强制覆盖」两个明确选项，而不是静默覆盖别人刚保存的内容。
+  - 校验失败时磁盘内容保持不变；「强制覆盖」需用户显式确认。
+- **审计日志导出**：`GET /api/admin/logs/export?format=jsonl|csv`，可按天数、级别、
+  关键词、「仅审计事件」筛选后导出全部匹配记录（不再受界面 2000 条上限约束）。
+  - CSV 带 UTF-8 BOM 且用 CRLF 换行，Excel 打开不乱码；JSONL 与磁盘日志格式一致。
+- **WebDAV 挂载（实验性 / Beta，默认关闭）**：在 `.env` 里设 `WEBDAV=1` 后开启，
+  挂载点 `/dav`（可用 `WEBDAV_PATH` 改）。支持
+  `OPTIONS / PROPFIND / GET / HEAD / PUT / MKCOL / DELETE / COPY / MOVE / LOCK / UNLOCK`，
+  可被 Windows 资源管理器、macOS Finder、RaiDrive、rclone 等挂载为网络盘。
+
+### 变更
+
+- `/api/fs/delete` 返回值扩展为 `{ deleted, trashed, permanentlyDeleted }`，
+  前端据此区分「已移入回收站」与「已彻底删除」。
+- `GET /api/fs/file` 增加 `baseVersion` 字段；`POST /api/fs/save-file` 接受 `baseVersion`。
+  未携带该字段的旧客户端仍可保存，但会记录 `save_file_without_version` 日志。
+- 错误响应在 `err.code` 存在时透传 `code`（如 `VERSION_CONFLICT`）与 `currentVersion`。
+
+### 修复
+
+- **`/dav` 在 WebDAV 未启用时返回前端首页**：`GET /dav`、`/dav/` 会被 SPA fallback
+  接住并返回网盘界面（而 `PROPFIND` 是 404，现象自相矛盾）。现在未启用时统一 404
+  并提示"请在 .env 设置 WEBDAV=1"。
+- **`data/` 不可写会让整个服务无法启动**：回收站目录建不出来时会连登录界面都打不开。
+  现在降级处理并在启动日志里说明原因。
+
+### 实验性功能：WebDAV 的风险须知
+
+开启即表示已知悉并自行承担以下风险：
+
+| 风险 | 说明 |
+|:--|:--|
+| **凭据反复明文传输** | WebDAV 客户端普遍只支持 HTTP Basic 认证，用户名密码会在**每一个请求**里重复发送。请只在 HTTPS 或可信内网下使用 |
+| **仅成员账号可用** | 刻意**不接受超级管理员账号**（超管密码不应被客户端反复发送），也**不接受浏览器 Cookie 会话**（否则会变成绕过 CSRF 的后门） |
+| **客户端实现差异** | 各家客户端对协议细节的实现差异很大，行为无法像 HTTP 接口那样被完整覆盖 |
+| **锁是"礼节性"的** | `LOCK` 只让客户端认为锁生效；真正的并发保护靠版本比对，不是锁 |
+
+---
+
 ## [1.1.1] - 2026-10-06
 
 本次以**修复缺陷**为主，并新增一个面向旧浏览器的兼容模式页面。
@@ -128,6 +183,7 @@
 
 ---
 
+[1.1.2]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.2
 [1.1.1]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.1
 [1.1.0]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.0-rc1
 [1.0.0]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.0.0

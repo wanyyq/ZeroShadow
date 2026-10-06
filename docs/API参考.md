@@ -126,7 +126,7 @@ X-ZS-Group: <小组 id>
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.1.1" }
+{ "name": "ZeroShadow", "version": "1.1.2" }
 ```
 
 > `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：
@@ -230,13 +230,17 @@ X-ZS-Group: <小组 id>
   },
   "uploadLimitMB": 512,
   "groupId": "default",
-  "group": null
+  "group": null,
+  "caseInsensitive": true
 }
 ```
 
 - `perms` 是**当前分组上下文下的有效权限**（已把小组收窄算进去），不是全局配置的原始值；
 - `groupId` 是本次请求生效的小组 id（`default` 表示默认上下文），`group` 是对应的小组精简对象
   （`id` / `name` / `color` / `leaders`）或 `null`；
+- `caseInsensitive` 表示**服务端所在文件系统是否不区分大小写**（win32 / darwin 为 `true`）—— 前端的
+  同名冲突检测必须用它，不能用浏览器 UA 猜：两者可能不在同一台机器上（Windows 浏览器 + Linux 服务端
+  会分叉成"界面说冲突、服务端不冲突"）；
 - 访问者未登录时 `role` 为 `guest`、`username` 为 `null`、`userId` 为 `null`、`uploadLimitMB` 为 `0`。
 
 ---
@@ -389,9 +393,18 @@ X-ZS-Group: <小组 id>
 
 - 权限：`delete`
 - 请求体：`{ "paths": ["a.txt", "目录/b"] }`，最多 **500** 项
-- 响应：`{ "deleted": 2 }`
+- 响应（1.1.2 起）：`{ "deleted": 0, "trashed": 2, "permanentlyDeleted": [] }`
+
+| 字段 | 含义 |
+|:-------- |:--------------------------------------- |
+| `trashed` | 已**移入回收站**的数量（可由超管在 `/api/admin/trash` 还原） |
+| `deleted` | 被**彻底删除**的数量（回收站被关闭或不可用时才会大于 0） |
+| `permanentlyDeleted` | 没能进回收站、已彻底删除的路径列表 —— 前端据此明确告知用户"这些救不回来" |
+
 - 错误：`400 参数格式错误`、`400 不能删除根目录`
 - 副作用：清理与被删路径相关的访客隐藏记录。
+- 说明：回收站数据放在 `data/trash/`，**不在网盘目录内**（否则会被列目录、搜索、打包）。
+  WebDAV 的 `DELETE` 行为与此一致。
 
 ### `POST /api/fs/copy` / `POST /api/fs/move`
 
@@ -547,6 +560,7 @@ X-ZS-Group: <小组 id>
   "name": "gbk.txt",
   "size": 42,
   "mtime": 1737000000000,
+  "baseVersion": "1737000000000-42-Xq7vQ1mZk9pYt3Rw8sLd2A",
   "encoding": "gb18030",
   "encodingConfident": true,
   "eol": "crlf",
@@ -590,7 +604,7 @@ X-ZS-Group: <小组 id>
 - 请求体：
 
 ```json
-{ "path": "notes.md", "content": "……", "encoding": "utf8", "eol": "lf" }
+{ "path": "notes.md", "content": "……", "encoding": "utf8", "eol": "lf", "baseVersion": "1737000000000-42-Xq7vQ1mZk9pYt3Rw8sLd2A" }
 ```
 
 | 字段 | 默认 | 说明 |
@@ -599,8 +613,18 @@ X-ZS-Group: <小组 id>
 | `content` | `""` | 正文；换行按 `\n` 提交 |
 | `encoding` | `utf8` | 写回用的编码，取值必须是上面列出的编码 id |
 | `eol` | `lf` | 写回时的换行风格：`crlf` / `lf` / `cr`（非法值退回 `lf`） |
+| `baseVersion` | — | **并发编辑保护**：读取时 `GET /api/fs/file` 返回的 `baseVersion`，原样带回 |
 
 - 响应：`{ "ok": true, "bytes": 1234, "encoding": "utf8", "eol": "lf" }`
+- **并发编辑保护**（1.1.2 起）：
+  - 带上 `baseVersion` 时，服务端会把它与磁盘上当前内容的版本比对；
+    **不一致则拒绝写入**并返回 **409**：
+    `{ "error": "这个文件在您打开之后已被其他人修改……", "code": "VERSION_CONFLICT", "currentVersion": "<服务端当前版本>" }`。
+    此时**磁盘内容一字未动**，前端据此弹出「重新加载 / 强制覆盖」；
+  - 不带 `baseVersion` 时仍可保存（向后兼容第三方脚本），但服务端会记一条
+    `save_file_without_version` 日志；
+  - 目标文件不存在（新建）时不算冲突；
+  - 想强制覆盖，**省略** `baseVersion` 即可。
 - 说明：
   - 编码为 `utf8bom` / `utf16le` / `utf16be` 时**会写入对应的 BOM**（UTF-16 没有 BOM 就无法区分字节序）；
   - **目标编码表示不了的字符会被拒绝，而不是静默写成 `?`**：返回 **400**，
@@ -1160,6 +1184,73 @@ X-ZS-Group: <小组 id>
 
 - 响应：`{ "ok": true }`
 
+### `GET /api/admin/logs/export`
+
+把日志**下载导出**（1.1.2 起）。与 `GET /api/admin/logs` 的区别是**不截断**：
+不受界面那个 2000 条上限约束，返回筛选范围内的全部记录。
+
+- 查询参数：
+
+| 参数 | 默认 | 说明 |
+|:-------- |:------- |:--------------------------------------- |
+| `format` | `jsonl` | `jsonl`（每行一个 JSON，与磁盘格式一致）或 `csv`。其它值返回 **400** |
+| `days` | `5` | 读取最近几天的日志文件，1–90 |
+| `level` | — | `info` / `warn` / `error` |
+| `q` | — | 关键词，匹配事件名 / 详情 / 用户名 / IP / 角色 |
+| `audit` | — | `1` 或 `true` 时只导出审计事件 |
+
+- 响应：`Content-Type: application/x-ndjson` 或 `text/csv; charset=utf-8`，
+  带 `Content-Disposition: attachment`，文件名为 `zeroshadow-logs-<scope>-<days>d-<时间戳>.<ext>`。
+- CSV 细节：**首部带 UTF-8 BOM**、**使用 CRLF 换行**，列顺序为
+  `时间,级别,事件,用户,角色,IP,审计,详情`（`审计` 列输出 `是`/`否`）——
+  这样 Excel 打开中文不乱码。
+
+### `GET /api/admin/trash`
+
+回收站列表（1.1.2 起）。**回收站只对超级管理员开放**：成员只要有 `delete` 权限照常能删
+（内容进回收站），但浏览与还原属于管理动作。
+
+- 响应：
+
+```json
+{
+  "items": [
+    { "id": "20261006-153012-a1b2c3", "rel": "资料/旧稿", "name": "旧稿", "type": "dir",
+      "size": -1, "deletedAt": "2026-10-06T15:30:12.000Z",
+      "deletedBy": "Wangyq", "deletedByRole": "superadmin" }
+  ],
+  "stats": { "files": 3, "bytes": 10240, "newest": 1791300612000, "count": 1 },
+  "enabled": true,
+  "available": true,
+  "retentionDays": 30
+}
+```
+
+- `size` 对目录固定为 `-1`（不做递归统计，避免大目录卡住界面）；
+- `enabled` 是后台开关 `trashEnabled`；`available` 表示回收站目录是否真的可用 ——
+  **为 `false` 时删除会直接生效、不进回收站**。
+
+### `POST /api/admin/trash/restore`
+
+还原一条记录。
+
+- 请求体：`{ "id": "<条目 id>", "dest": "可选：还原到其它位置", "overwrite": false }`
+- 成功：`{ "ok": true, "restored": "资料/旧稿" }`
+- 目标位置已有同名项目且 `overwrite` 不为真时返回 **409**
+  `{ "error": "……位置已经有一个同名项目……", "code": "RESTORE_CONFLICT" }`。
+- 找不到条目返回 **404**；回收站内容丢失返回 **410**。
+
+### `POST /api/admin/trash/purge`
+
+彻底删除一条（不可恢复）。请求体 `{ "id": "……" }`，响应 `{ "ok": true }`。
+
+### `POST /api/admin/trash/empty`
+
+清空回收站。请求体可为空，响应 `{ "ok": true, "removed": 8 }`。
+
+> 超期清理由服务端自动进行（服务启动时 + 每 6 小时），天数取
+> `data/config.json` 的 `trashRetentionDays`。
+
 ### `GET /api/admin/status`
 
 服务器状态（前端每 10 秒拉一次）。
@@ -1300,8 +1391,9 @@ while True:
 | `/api/avatars` | 头像列表、读取、上传、删除 | 已登录（超管 / 成员） |
 | `/api/todos` | 团队待办 | 已登录（超管 / 成员） |
 | `/api/groups` | 组长自助：本组成员与可见范围 | 已登录，且受组长能力约束 |
-| `/api/admin` | 配置、成员、小组、日志、指标、备份、状态、隧道 | **仅超级管理员** |
+| `/api/admin` | 配置、成员、小组、日志（含导出）、指标、备份、**回收站**、状态、隧道 | **仅超级管理员** |
 | `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
-| 其它任意路径 | 返回前端应用（SPA fallback） | — |
+| `/dav`（可配） | **WebDAV（实验性，默认关闭）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话** | 成员账号（Basic） |
+| 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 未启用时 `/dav*` 返回 404 并提示如何开启，不会被 SPA 接住 | — |
 
 <p align="right"><a href="开发者指南.md">← 开发者指南</a> · <a href="README.md">文档中心 →</a></p>

@@ -104,6 +104,11 @@ export interface FileTextResponse {
   name: string
   size: number
   mtime: number
+  /**
+   * 内容版本串（`mtime-size-内容哈希`）。保存时必须原样带回：
+   * 服务端比对不一致会返回 409，从而避免覆盖别人在你打开之后的改动。
+   */
+  baseVersion: string
   /** 识别出的编码 id，见服务端 EDITOR_ENCODINGS */
   encoding: string
   /** false 表示编码是猜的，界面应提示「乱码可手动切换编码」 */
@@ -205,6 +210,10 @@ export interface AdminConfig {
   backupEnabled: boolean
   backupKeep: number
   logRetentionDays: number
+  /** 删除时是否移入回收站（关闭后删除立即生效） */
+  trashEnabled: boolean
+  /** 回收站保留天数，超期由服务端维护任务清理 */
+  trashRetentionDays: number
   metricsRetentionDays: number
   metricsMemMinutes: number
   requestMetricsEnabled: boolean
@@ -330,6 +339,30 @@ export interface BackupEntry {
 }
 
 export type BackupsResponse = Record<string, BackupEntry[]>
+
+/** 回收站条目（由服务端 data/trash/<id>/meta.json 得到） */
+export interface TrashItem {
+  id: string
+  /** 原位置（相对网盘根目录） */
+  rel: string
+  name: string
+  type: "dir" | "file"
+  /** 目录为 -1（不做递归统计），文件为字节数 */
+  size: number
+  deletedAt: string
+  deletedBy: string | null
+  deletedByRole: string | null
+}
+
+export interface TrashResponse {
+  items: TrashItem[]
+  stats: { files: number; bytes: number; newest: number | null; count: number }
+  /** 后台是否启用了回收站 */
+  enabled: boolean
+  /** 回收站目录是否真的可用（data/ 只读等情况下为 false，此时删除直接生效） */
+  available: boolean
+  retentionDays: number
+}
 
 export interface UploadResult {
   results: { name: string; ok: boolean; savedAs?: string; error?: string }[]

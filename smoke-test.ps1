@@ -218,6 +218,22 @@ function Get-Finished {
         ContentType = $jsonType; Body = (JsonBytes @{ paths = @($scratch) })
         WebSession = $session
       } | Out-Null
+      # 删除现在会**移入回收站**（1.1.2 起），所以还要把回收站里属于本次测试的
+      # 条目彻底清掉 —— 否则每跑一次冒烟测试就在实例回收站里留一条
+      # _smoketest-xxxx，跑多次就攒一堆。
+      # 只清理"原路径等于或位于本次 scratch 之下"的条目：绝不动用户在回收站里的东西。
+      $tr = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/trash"; WebSession = $session }
+      $mine = @()
+      try {
+        $mine = ($tr.Content | ConvertFrom-Json).items |
+          Where-Object { $_.rel -eq $scratch -or $_.rel -like "$scratch/*" }
+      } catch { }
+      foreach ($trashItem in $mine) {
+        Invoke-Api -Parameters @{
+          Uri = "$BaseUrl/api/admin/trash/purge"; Method = "POST"; Headers = $jsonHeaders
+          ContentType = $jsonType; Body = (JsonBytes @{ id = $trashItem.id }); WebSession = $session
+        } | Out-Null
+      }
     }
   } catch { }
   # 显式撤销访客隐藏设置。服务端在删除目录时也会顺手清理 hiddenPaths，但那是
@@ -531,8 +547,18 @@ if ($r.Status -eq 503 -or $r.Status -eq 404) {
 
   # 页面外壳的 CSP 是 script-src 'self'，内联 <script> 会被浏览器拦掉 ——
   # 所以这份页面必须只引用外部脚本。这条断言防的是"后来有人往 HTML 里塞内联脚本"。
-  $inlineScript = [regex]::Matches($r.Content, '<script(?![^>]*\bsrc=)', "IgnoreCase").Count
-  Check "robustness-no-inline-script" ($inlineScript -eq 0) "发现 $inlineScript 处内联脚本（会被 CSP 拦掉）"
+  #
+  # 三步，每一步都是踩过的坑：
+  #   1. 先剥掉 HTML 注释：页面里有一句注释写着"内联 <script> 会被拦掉"，
+  #      那个裸标签会被当成真的内联脚本；
+  #   2. 再把每个 <script ...> 开标签单独挑出来，看它**自己**有没有 src=；
+  #   3. 不要用 "<script(?![^>]*src=)" 负向前瞻：.NET 正则会从下一个 <script
+  #      重新尝试，一路匹配到后面标签的 src=，把合法外部脚本误报成内联脚本。
+  $stripped = [regex]::Replace($r.Content, '<!--.*?-->', '', 'Singleline')
+  $scriptTags = [regex]::Matches($stripped, '<script\b[^>]*>', "IgnoreCase")
+  $inlineCount = 0
+  foreach ($tag in $scriptTags) { if ($tag.Value -notmatch '\bsrc\s*=') { $inlineCount++ } }
+  Check "robustness-no-inline-script" ($inlineCount -eq 0) "发现 $inlineCount 处内联脚本（会被 CSP 拦掉）"
 
   foreach ($asset in @("/robustness/index.css", "/robustness/index.js", "/robustness/theme-boot.js")) {
     $a = Invoke-Api -Parameters @{ Uri = "$BaseUrl$asset"; Method = "GET" }
@@ -541,9 +567,177 @@ if ($r.Status -eq 503 -or $r.Status -eq 404) {
     Check ("robustness-asset " + $asset) $ok "$($a.Status) $($a.Headers['Content-Type'])"
   }
 
-  # 首页底部必须有进入兼容模式的入口
-  $home = Invoke-Api -Parameters @{ Uri = "$BaseUrl/"; Method = "GET" }
-  Check "robustness-entry-on-home" ($home.Content -match '/robustness/index\.html') "首页未找到兼容模式入口链接"
+  # 首页底部必须有进入兼容模式的入口。
+  # 变量名不能叫 $home：PowerShell 变量名不区分大小写，$HOME 是只读自动变量，
+  # 赋值会直接抛错并中断脚本 —— 早期就是踩了这个才让后面一条断言拿到状态码 0。
+  $homePage = Invoke-Api -Parameters @{ Uri = "$BaseUrl/"; Method = "GET" }
+  Check "robustness-entry-on-home" ($homePage.Content -match '/robustness/index\.html') "首页未找到兼容模式入口链接"
+}
+
+# --------------------------------------------- 11. 回收站 -----------------
+Section "11. 回收站"
+
+$trashDir = "$scratch/回收站探针"
+Invoke-Api -Parameters @{
+  Uri = "$BaseUrl/api/fs/mkdir"; Method = "POST"; Headers = $jsonHeaders
+  ContentType = $jsonType; Body = (JsonBytes @{ path = $scratch; name = "回收站探针" }); WebSession = $session
+} | Out-Null
+Invoke-Api -Parameters @{
+  Uri = "$BaseUrl/api/fs/save-file"; Method = "POST"; Headers = $jsonHeaders
+  ContentType = $jsonType; Body = (JsonBytes @{ path = "$trashDir/inside.txt"; content = "trash probe" }); WebSession = $session
+} | Out-Null
+
+$r = Invoke-Api -Parameters @{
+  Uri = "$BaseUrl/api/fs/delete"; Method = "POST"; Headers = $jsonHeaders
+  ContentType = $jsonType; Body = (JsonBytes @{ paths = @($trashDir) }); WebSession = $session
+}
+# 删除必须进回收站（trashed=1），而不是直接销毁
+Check "trash-delete-trashifies" ($r.Status -eq 200 -and $r.Content -match '"trashed"\s*:\s*1') "期望 trashed=1，实际 $($r.Status) $($r.Content)"
+
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/list?path=" + [uri]::EscapeDataString($scratch); WebSession = $session }
+Check "trash-hidden-after-delete" ($r.Content -notmatch "inside\.txt") "删除后仍能在列表里看到"
+
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/trash"; WebSession = $session }
+$trashItem = $null
+try { $trashItem = ($r.Content | ConvertFrom-Json).items | Where-Object { $_.rel -eq $trashDir } | Select-Object -First 1 } catch { }
+Check "trash-lists-item" ($null -ne $trashItem) "回收站里没找到该条目；响应前 200 字: $($r.Content.Substring(0, [Math]::Min(200, $r.Content.Length)))"
+Check "trash-records-origin" ([bool]($trashItem -and $trashItem.type -eq "dir" -and $trashItem.deletedBy)) "原类型与删除者应被记录"
+
+if ($trashItem) {
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/trash/restore"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; Body = (JsonBytes @{ id = $trashItem.id }); WebSession = $session
+  }
+  Check "trash-restore" ($r.Status -eq 200) "期望 200，实际 $($r.Status) $($r.Content)"
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/list?path=" + [uri]::EscapeDataString($trashDir); WebSession = $session }
+  Check "trash-restored-content" ($r.Content -match "inside\.txt") "还原后内容不在原位"
+
+  # 再删一次并彻底删除，避免测试在回收站里留下垃圾
+  Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/fs/delete"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; Body = (JsonBytes @{ paths = @($trashDir) }); WebSession = $session
+  } | Out-Null
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/trash"; WebSession = $session }
+  $again = $null
+  try { $again = ($r.Content | ConvertFrom-Json).items | Where-Object { $_.rel -eq $trashDir } | Select-Object -First 1 } catch { }
+  if ($again) {
+    $r = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/trash/purge"; Method = "POST"; Headers = $jsonHeaders
+      ContentType = $jsonType; Body = (JsonBytes @{ id = $again.id }); WebSession = $session
+    }
+    Check "trash-purge" ($r.Status -eq 200) "期望 200，实际 $($r.Status)"
+  } else {
+    Check "trash-purge" $false "回收站里找不到刚删除的探针"
+  }
+}
+
+# --------------------------------------------- 12. 并发编辑保护 -----------
+Section "12. 并发编辑保护"
+
+$conflictPath = "$scratch/conflict.txt"
+$r = Invoke-Api -Parameters @{
+  Uri = "$BaseUrl/api/fs/save-file"; Method = "POST"; Headers = $jsonHeaders
+  ContentType = $jsonType; Body = (JsonBytes @{ path = $conflictPath; content = "v1" }); WebSession = $session
+}
+Check "conflict-setup" ($r.Status -eq 200) "建立测试文件失败：$($r.Status) $($r.Content)"
+
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/file?path=" + [uri]::EscapeDataString($conflictPath); WebSession = $session }
+$baseVersion = $null
+try { $baseVersion = ($r.Content | ConvertFrom-Json).baseVersion } catch { }
+# 没有版本串就无法发现"别人已经改过"，这条断了整个并发保护就失效
+Check "conflict-baseversion-returned" ([bool]$baseVersion) "GET /api/fs/file 应返回 baseVersion"
+
+if ($baseVersion) {
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/fs/save-file"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; Body = (JsonBytes @{ path = $conflictPath; content = "v2"; baseVersion = $baseVersion }); WebSession = $session
+  }
+  Check "conflict-save-fresh-version" ($r.Status -eq 200) "带正确版本应能保存，实际 $($r.Status) $($r.Content)"
+
+  # 用同一个已过期的版本再保存一次，必须被拒绝
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/fs/save-file"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; Body = (JsonBytes @{ path = $conflictPath; content = "v3-should-be-rejected"; baseVersion = $baseVersion }); WebSession = $session
+  }
+  Check "conflict-stale-rejected" ($r.Status -eq 409) "过期版本应返回 409，实际 $($r.Status)"
+  # 409 的正文里应有 VERSION_CONFLICT 标记，前端据此弹出「重新加载 / 强制覆盖」。
+  # 但 Windows PowerShell 5.1 的 Invoke-WebRequest 不暴露非 2xx 响应的正文
+  # （读出来是 0 字节，curl 能正常拿到），所以读不到正文时只提示、不算失败 ——
+  # 状态码本身已经证明了拒绝行为，这一点在 5.1 与 7 上都成立。
+  if ($r.Content) {
+    Check "conflict-code-returned" ($r.Content -match "VERSION_CONFLICT") "409 正文应带 VERSION_CONFLICT 标记：$($r.Content)"
+  } else {
+    Note "PS 5.1 未暴露 409 正文，跳过 VERSION_CONFLICT 标记断言（可用 curl 手工核对）"
+  }
+
+  # 被拒绝的保存不得改动磁盘内容
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/file?path=" + [uri]::EscapeDataString($conflictPath); WebSession = $session }
+  Check "conflict-drive-unchanged" ($r.Content -match "v2" -and $r.Content -notmatch "should-be-rejected") "被拒绝的保存改动了磁盘内容"
+}
+
+# --------------------------------------------- 13. 审计日志导出 -----------
+Section "13. 审计日志导出"
+
+foreach ($fmt in @("jsonl", "csv")) {
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/logs/export?format=$fmt&days=5"; WebSession = $session }
+  Check "logs-export-$fmt" ($r.Status -eq 200 -and $r.Content.Length -gt 0) "期望 200 且有内容，实际 $($r.Status)"
+  $cd = [string]$r.Headers["Content-Disposition"]
+  Check "logs-export-$fmt-attachment" ($cd -match "attachment" -and $cd -match "\.$fmt") "缺少附件下载头：$cd"
+}
+# CSV 首字符必须是 UTF-8 BOM，否则 Excel 打开中文日志会乱码
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/logs/export?format=csv&days=5"; WebSession = $session }
+Check "logs-export-csv-bom" ([int][char]$r.Content[0] -eq 0xFEFF) ("首字符应为 BOM，实际 U+" + ([int][char]$r.Content[0]).ToString("X4"))
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/logs/export?format=xml"; WebSession = $session }
+Check "logs-export-invalid-format" ($r.Status -eq 400) "非法 format 应 400，实际 $($r.Status)"
+
+# --------------------------------------------- 14. WebDAV（实验性） -------
+Section "14. WebDAV（实验性，默认关闭）"
+
+# Invoke-WebRequest 无法构造 PROPFIND 这类自定义方法（会得到状态 0），
+# 所以 DAV 断言走 .NET 的 HttpWebRequest，它能直接设置任意 Method。
+function Invoke-Dav {
+  param([string]$Url, [string]$Method = "PROPFIND", [hashtable]$Headers = $null)
+  $req = [System.Net.HttpWebRequest]::Create($Url)
+  $req.Method = $Method
+  $req.AllowAutoRedirect = $false
+  $req.Timeout = 15000
+  if ($Headers) { foreach ($k in $Headers.Keys) { $req.Headers.Add($k, [string]$Headers[$k]) } }
+  try {
+    $resp = $req.GetResponse()
+  } catch [System.Net.WebException] {
+    if ($_.Exception.Response) { $resp = $_.Exception.Response } else { return [pscustomobject]@{ Status = 0; Body = "" } }
+  }
+  try {
+    [int]$code = [int]$resp.StatusCode
+    $body = ""
+    try {
+      $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+      $body = $reader.ReadToEnd()
+      $reader.Dispose()
+    } catch { }
+    return [pscustomobject]@{ Status = $code; Body = $body }
+  } finally {
+    try { $resp.Close() } catch { }
+  }
+}
+
+$davProbe = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers @{ Depth = "0" }
+if ($davProbe.Status -eq 207 -or $davProbe.Status -eq 401) {
+  Note "检测到 WebDAV 已启用，改验证安全边界"
+  # 只带 Cookie（无 Basic）必须 401：否则任意网页都能借登录态发起 DAV 请求，
+  # 等于一个绕过 CSRF 的后门（DAV 请求不带 X-Requested-With，走不到 csrfGuard）。
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/dav/"; Method = "PROPFIND"; Headers = @{ Depth = "0" }; WebSession = $session }
+  Check "webdav-cookie-rejected" ($r.Status -eq 401) "仅带 Cookie 的 DAV 请求必须 401，实际 $($r.Status)"
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/dav/"; Method = "OPTIONS" }
+  Check "webdav-options" ($r.Status -eq 200 -and ([string]$r.Headers["DAV"]) -match "1") "OPTIONS 应 200 且公告 DAV: 1"
+} else {
+  # 未启用时必须 404 且**不能**是前端首页 —— 早期 /dav 会被 SPA fallback 接住返回首页，
+  # 用户把地址填进客户端后拿到网页，非常难排查。
+  Check "webdav-disabled-propfind" ($davProbe.Status -eq 404) "未启用时 PROPFIND 应 404，实际 $($davProbe.Status)"
+  Check "webdav-disabled-not-spa" ($davProbe.Body -notmatch '<div id="root">') "未启用时不应返回前端首页"
+  # GET 也顺带验一次（这条以前用 Invoke-Api，能正常拿到状态码）
+  $davGet = Invoke-Dav -Url "$BaseUrl/dav/" -Method "GET"
+  Check "webdav-disabled-get-404" ($davGet.Status -eq 404) "未启用时 GET /dav/ 应 404，实际 $($davGet.Status)"
 }
 
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })

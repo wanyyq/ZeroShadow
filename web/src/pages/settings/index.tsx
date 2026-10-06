@@ -35,6 +35,7 @@ import type { AdminConfig, Member, ServerStatus, TunnelStatus } from "@/lib/type
 import { cn } from "@/lib/utils"
 import { GroupsSection } from "@/pages/settings/groups-section"
 import { DataSection } from "@/pages/settings/data-section"
+import { TrashSection } from "@/pages/settings/trash-section"
 import { LogsMetricsSection } from "@/pages/settings/logs-metrics-section"
 
 export function SettingsPage() {
@@ -59,6 +60,7 @@ export function SettingsPage() {
                     <TabsTrigger value="groups"><Icon name="layers" /> 小组</TabsTrigger>
                     <TabsTrigger value="perms"><Icon name="shield-check" /> 权限</TabsTrigger>
                     <TabsTrigger value="data"><Icon name="database" /> 数据与保留</TabsTrigger>
+                    <TabsTrigger value="trash"><Icon name="trash-2" /> 回收站</TabsTrigger>
                     <TabsTrigger value="security"><Icon name="lock" /> 安全</TabsTrigger>
                     <TabsTrigger value="tunnel"><Icon name="globe" /> 公网</TabsTrigger>
                   </>
@@ -73,6 +75,7 @@ export function SettingsPage() {
                   <TabsContent value="groups"><GroupsSection /></TabsContent>
                   <TabsContent value="perms"><PermsSection /></TabsContent>
                   <TabsContent value="data"><DataSection /></TabsContent>
+                  <TabsContent value="trash"><TrashSection /></TabsContent>
                   <TabsContent value="security"><SecuritySection /></TabsContent>
                   <TabsContent value="tunnel"><TunnelSection /></TabsContent>
                 </>

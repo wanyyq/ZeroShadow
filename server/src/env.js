@@ -120,6 +120,22 @@ if (!superPassword || superPassword === "change-me") {
   }
 }
 
+// ===== 实验性功能（Beta）=====
+// 这类功能默认关闭，必须由部署者显式在 .env 里打开，且自行承担风险。
+// 目前只有 WebDAV 一项（原因见 src/webdav.js 头部说明）。
+// 注意：这些常量必须在下面的 `env` 对象**之前**求值，否则会撞上 TDZ。
+function envFlag(name) {
+  return /^(1|true|yes|on)$/i.test(String(process.env[name] || "").trim())
+}
+
+export const WEBDAV_ENABLED = envFlag("WEBDAV")
+export const WEBDAV_PATH = (() => {
+  const raw = String(process.env.WEBDAV_PATH || "/dav").trim()
+  if (!raw) return "/dav"
+  const withSlash = raw.startsWith("/") ? raw : `/${raw}`
+  return withSlash.replace(/\/+$/, "") || "/dav"
+})()
+
 export const env = {
   port: clamp(toInt(process.env.PORT, 12345), 1, 65535),
   host: (process.env.HOST || "0.0.0.0").trim(),
@@ -128,6 +144,10 @@ export const env = {
   sessionHours: clamp(toInt(process.env.SESSION_HOURS, 72), 1, 24 * 365),
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   generatedPassword,
+  // WebDAV（实验性）：挂载路径。是否启用由 index.js 通过 createWebdavRouter 判断，
+  // 这里只把路径放进 env 供挂载使用。
+  webdavPath: WEBDAV_PATH,
+  webdavEnabled: WEBDAV_ENABLED,
 }
 
 export const DATA_DIR = path.join(ROOT_DIR, "data")

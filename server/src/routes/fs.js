@@ -34,7 +34,7 @@ import {
   statSafe,
   uniqueName,
 } from "../files.js"
-import { info } from "../logger.js"
+import { info, warn } from "../logger.js"
 import {
   EDITOR_MAX_BYTES,
   applyEol,
@@ -48,6 +48,9 @@ import {
   looksBinary,
 } from "../encoding.js"
 import { isVisibleForContext } from "../groups.js"
+import { compareVersion, versionOf } from "../version.js"
+import { moveToTrash } from "../trash.js"
+import { contentDisposition } from "../http.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
 import { rateLimit } from "../ratelimit.js"
 import { createJob, failJob, finishJob, jobCreatedBy, jobStatus, patchJob } from "../jobs.js"
@@ -183,12 +186,6 @@ const INLINE_TYPES = new Map(
 // 能在文档上下文中执行脚本的扩展名（HTML 与 SVG）：内联返回时必须用 CSP
 // sandbox 隔离，否则等于把攻击者上传的脚本放进网盘自身的源里执行。
 const SCRIPTABLE_EXT = new Set(["html", "htm", "svg"])
-
-function contentDisposition(type, filename) {
-  const fallback = filename.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'")
-  const encoded = encodeURIComponent(filename).replace(/['()]/g, escape)
-  return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`
-}
 
 router.get("/list", requirePerm("browse"), async (req, res, next) => {
   try {
@@ -702,22 +699,48 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
     if (!Array.isArray(paths) || !paths.length || paths.length > 500) {
       throw httpError(400, "参数格式错误")
     }
+    const useTrash = getConfig().trashEnabled !== false
     const deleted = []
+    // 回收站不可用（跨设备复制失败等）时记录原因，但仍继续删剩下的，
+    // 否则一个坏条目会让整批删除停在中途。
+    const trashed = []
+    const failedToTrash = []
     for (const p of paths) {
-      const { abs, rel } = resolveSafe(p)
-      blockSoft(rel)
-      assertContextVisible(req, rel)
-      if (!rel) throw httpError(400, "不能删除根目录")
-      await fs.promises.rm(abs, { recursive: true, force: true })
-      deleted.push(rel)
+      const resolved = resolveAny(normRel(p))
+      blockSoft(resolved.rel)
+      assertContextVisible(req, resolved.rel)
+      if (!resolved.rel) throw httpError(400, "不能删除根目录")
+      if (useTrash) {
+        const meta = await moveToTrash(resolved, actor(req))
+        if (meta) {
+          trashed.push(resolved.rel)
+          continue
+        }
+        failedToTrash.push(resolved.rel)
+      }
+      await fs.promises.rm(resolved.abs, { recursive: true, force: true })
+      deleted.push(resolved.rel)
     }
     await saveConfig((draft) => {
       draft.guestHiddenPaths = draft.guestHiddenPaths.filter(
-        (h) => !deleted.some((d) => isSameOrInside(h, d))
+        (h) => !deleted.concat(trashed).some((d) => isSameOrInside(h, d))
       )
     })
-    info("delete", { msg: deleted.join(", "), ...actor(req) })
-    res.json({ deleted: deleted.length })
+    info("delete", {
+      msg: useTrash
+        ? `${trashed.length} 项移入回收站${deleted.length ? `，${deleted.length} 项彻底删除` : ""}：${trashed.concat(deleted).join(", ")}`
+        : deleted.join(", "),
+      ...actor(req),
+    })
+    if (failedToTrash.length) {
+      warn("trash_unavailable_fallback", { msg: `未能移入回收站，已彻底删除：${failedToTrash.join(", ")}` })
+    }
+    res.json({
+      deleted: deleted.length,
+      trashed: trashed.length,
+      // 回收站没兜住的那部分：前端应当明确告知用户"这些是彻底删掉的"
+      permanentlyDeleted: failedToTrash,
+    })
   } catch (err) {
     next(err)
   }
@@ -1146,6 +1169,9 @@ router.get("/file", requirePerm("browse"), async (req, res, next) => {
       name: path.basename(abs),
       size: stat.size,
       mtime: stat.mtimeMs,
+      // 内容版本：编辑器保存时必须原样带回，服务端据此判断"我手里的这份是不是
+      // 还是最新的"。没有它就无法发现"别人已经改过、你正要覆盖"。
+      baseVersion: versionOf(buf, stat),
       encoding: detected.encoding,
       // false 表示编码是猜的，前端会提示「乱码就手动换编码」
       encodingConfident: detected.confident,
@@ -1172,6 +1198,29 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
     if (!isSupportedEncoding(encoding)) throw httpError(400, `不支持的编码：${encoding}`)
     const rawEol = String(req.body?.eol || "lf")
     const eol = ["crlf", "lf", "cr"].includes(rawEol) ? rawEol : "lf"
+
+    // ---- 并发编辑保护 ----
+    // 编辑器打开时拿到了 baseVersion，保存时带回来。这里读一次当前内容比对：
+    // 不一致就拒绝写入（409），而不是把别人刚保存的内容静默覆盖掉。
+    // 读一次是必要的成本：文件上限 8MB，而一次覆盖的数据丢失是不可逆的。
+    const existingBuf = await fs.promises.readFile(abs).catch(() => null)
+    const existingStat = existingBuf ? await fs.promises.stat(abs).catch(() => null) : null
+    const currentVersion = existingBuf && existingStat ? versionOf(existingBuf, existingStat) : null
+    const verdict = compareVersion(req.body?.baseVersion, currentVersion)
+    if (verdict === "conflict") {
+      const err = httpError(
+        409,
+        "这个文件在您打开之后已被其他人修改。为避免覆盖对方的改动，本次保存未执行。请重新打开（或刷新页面）查看最新内容后再决定怎么合并。"
+      )
+      // 把服务器上的当前版本一并回传，前端可以据此提示"重新加载"
+      err.code = "VERSION_CONFLICT"
+      err.currentVersion = currentVersion
+      throw err
+    }
+    if (verdict === "no-base" && currentVersion) {
+      // 第三方脚本 / 老客户端没带版本：放行，但留一条记录便于事后追查
+      warn("save_file_without_version", { msg: rel, ...actor(req) })
+    }
 
     const text = applyEol(content, eol)
     const encoded = encodeText(text, encoding)

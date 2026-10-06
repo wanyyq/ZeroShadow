@@ -242,8 +242,20 @@ export function DeleteDialog({
     if (busy) return
     setBusy(true)
     try {
-      await api.post("/fs/delete", { paths: names.map((n) => joinPath(path, n)) })
-      toast.success(`已删除 ${names.length} 项`)
+      const r = await api.post<{ deleted: number; trashed: number; permanentlyDeleted?: string[] }>(
+        "/fs/delete",
+        { paths: names.map((n) => joinPath(path, n)) }
+      )
+      if (r.permanentlyDeleted && r.permanentlyDeleted.length) {
+        // 回收站没兜住（目录不可用等）：必须明确告知，不能让用户以为还能还原
+        toast.warning(`已删除 ${names.length} 项，其中 ${r.permanentlyDeleted.length} 项未进入回收站`, {
+          description: `以下项目已被彻底删除，无法还原：${r.permanentlyDeleted.join("、")}`,
+        })
+      } else if (r.trashed > 0) {
+        toast.success(`已将 ${r.trashed} 项移入回收站`)
+      } else {
+        toast.success(`已删除 ${names.length} 项`)
+      }
       onOpenChange(false)
       onDone()
     } catch (err) {
@@ -259,8 +271,9 @@ export function DeleteDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>确认删除</AlertDialogTitle>
           <AlertDialogDescription>
-            将永久删除 {names.length === 1 ? `“${names[0]}”` : `选中的 ${names.length} 项`}
-            ，此操作不可撤销。
+            将把 {names.length === 1 ? `“${names[0]}”` : `选中的 ${names.length} 项`}
+            移入<strong>回收站</strong>，可在「设置 → 回收站」里还原（管理员操作）。
+            超过保留期或被清空后将无法恢复。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

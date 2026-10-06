@@ -6,6 +6,7 @@ import type {
   TodosResponse,
   MetricsResponse,
   BackupsResponse,
+  TrashResponse,
   UploadResult,
   FileTextResponse,
 } from "@/lib/types"
@@ -16,6 +17,20 @@ export class ApiError extends Error {
     super(message)
     this.status = status
   }
+}
+
+/** 保存时发现文件已被他人改动（409 VERSION_CONFLICT）时抛出的错误 */
+export class VersionConflictError extends ApiError {
+  currentVersion: string | null
+  constructor(message: string, currentVersion: string | null) {
+    super(409, message)
+    this.currentVersion = currentVersion
+  }
+}
+
+/** 判断某个异常是不是"并发编辑冲突" */
+export function isVersionConflict(err: unknown): err is VersionConflictError {
+  return err instanceof VersionConflictError
 }
 
 /**
@@ -93,10 +108,19 @@ async function request<T>(
     if (res.status === 401 || res.status === 403) {
       onPermissionDenied?.()
     }
-    const message =
-      data && typeof data === "object" && "error" in data
-        ? String((data as { error: string }).error)
-        : `请求失败 (${res.status})`
+    const detail = (data && typeof data === "object" ? data : {}) as {
+      error?: string
+      code?: string
+      currentVersion?: string | null
+    }
+    // 并发编辑冲突要带上服务端当前版本，前端才能提示"重新加载"
+    if (res.status === 409 && detail.code === "VERSION_CONFLICT") {
+      throw new VersionConflictError(
+        detail.error || "文件已被其他人修改",
+        detail.currentVersion ?? null
+      )
+    }
+    const message = detail.error ? String(detail.error) : `请求失败 (${res.status})`
     throw new ApiError(res.status, message)
   }
   return data as T
@@ -137,12 +161,18 @@ export function fetchFileText(path: string, encoding?: string) {
   return api.get<FileTextResponse>("/fs/file", encoding ? { path, encoding } : { path })
 }
 
-/** 在线编辑：保存。encoding/eol 决定写回磁盘的字节，服务端会拒绝目标编码表示不了的字符。 */
+/**
+ * 在线编辑：保存。encoding/eol 决定写回磁盘的字节，服务端会拒绝目标编码表示不了的字符。
+ *
+ * `baseVersion` 必须是读取时服务端给的版本串。服务端比对不一致会返回 409
+ * （`code: "VERSION_CONFLICT"`），不会覆盖别人在你打开之后保存的改动。
+ */
 export function saveFileText(body: {
   path: string
   content: string
   encoding: string
   eol: string
+  baseVersion?: string
 }) {
   return api.post<{ ok: boolean; bytes: number; encoding: string; eol: string }>("/fs/save-file", body)
 }
@@ -382,4 +412,33 @@ export function createBackup() {
 
 export function restoreBackup(name: string, id: string) {
   return api.post<{ ok: boolean }>("/admin/backups/restore", { name, id })
+}
+
+// ------------------------------------------------------------- 回收站 --
+export function fetchTrash() {
+  return api.get<TrashResponse>("/admin/trash")
+}
+
+/** 还原到原路径（或 dest 指定的位置）。目标同名且 overwrite=false 时抛 409。 */
+export function restoreTrash(id: string, dest?: string, overwrite = false) {
+  return api.post<{ ok: boolean; restored: string }>("/admin/trash/restore", { id, dest, overwrite })
+}
+
+export function purgeTrash(id: string) {
+  return api.post<{ ok: boolean }>("/admin/trash/purge", { id })
+}
+
+export function emptyTrash() {
+  return api.post<{ ok: boolean; removed: number }>("/admin/trash/empty")
+}
+
+/** 日志导出的下载直链（GET，无需请求头） */
+export function logsExportUrl(opts: { format: "jsonl" | "csv"; days?: number; auditOnly?: boolean; level?: string; q?: string }) {
+  const params = new URLSearchParams()
+  params.set("format", opts.format)
+  params.set("days", String(opts.days ?? 5))
+  if (opts.auditOnly) params.set("audit", "1")
+  if (opts.level) params.set("level", opts.level)
+  if (opts.q) params.set("q", opts.q)
+  return `/api/admin/logs/export?${params.toString()}`
 }

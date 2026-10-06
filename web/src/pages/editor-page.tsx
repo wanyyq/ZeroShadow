@@ -16,7 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Icon } from "@/components/icon"
-import { fetchFileText, saveFileText } from "@/lib/api"
+import { fetchFileText, isVersionConflict, saveFileText } from "@/lib/api"
 import type { FileTextResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -73,9 +73,16 @@ export default function EditorPage() {
   const [cursor, setCursor] = React.useState({ line: 1, col: 1, selected: 0 })
   const [pendingEncoding, setPendingEncoding] = React.useState<string | null>(null)
   const [confirmLeave, setConfirmLeave] = React.useState(false)
+  // 保存时与服务端版本冲突后置为非空：界面持续提示，直到用户重新加载或强制覆盖
+  const [staleSince, setStaleSince] = React.useState<string | null>(null)
 
   const taRef = React.useRef<HTMLTextAreaElement>(null)
   const gutterRef = React.useRef<HTMLDivElement>(null)
+  // 用户明确选择"强制覆盖"后，这一次保存不带 baseVersion（服务端据此放行）
+  const forceOverwriteRef = React.useRef(false)
+  // 保存实现放在 ref 里：冲突提示里的「强制覆盖」需要重新触发保存，而直接让
+  // save 递归引用自己会触发 react-hooks 的"声明前访问"报错，也让依赖数组写得别扭。
+  const saveRef = React.useRef<() => void>(() => {})
 
   const dirty = content !== original
   const lineHeight = Math.round(fontSize * 1.6)
@@ -94,6 +101,8 @@ export default function EditorPage() {
         setOriginal(d.content)
         setEncoding(d.encoding)
         setEol(d.eol)
+        setStaleSince(null)
+        forceOverwriteRef.current = false
         if (!d.encodingConfident) {
           toast.warning(`编码识别为 ${d.encoding}，如果显示乱码请在工具栏手动切换编码`)
         }
@@ -108,17 +117,59 @@ export default function EditorPage() {
   const save = React.useCallback(async () => {
     if (!entryPath || saving || !file || file.softReadOnly) return
     setSaving(true)
+    // 正常情况下带上打开时的版本，让服务端能发现"别人已经改过"
+    const baseVersion = forceOverwriteRef.current ? undefined : file.baseVersion
+    forceOverwriteRef.current = false
     try {
-      const r = await saveFileText({ path: entryPath, content, encoding, eol })
+      const r = await saveFileText({ path: entryPath, content, encoding, eol, baseVersion })
       setOriginal(content)
+      setStaleSince(null)
+      // 版本变了（写成功本身就是一次变更）：重新取一次，拿到新的 baseVersion，
+      // 否则连续保存第二次会被自己的上一次写入判成冲突。
+      void fetchFileText(entryPath, encoding).then((d) => {
+        setFile(d)
+        setEncoding(d.encoding)
+        setEol(d.eol)
+      }).catch(() => {})
       toast.success(`已保存（${(r.bytes / 1024).toFixed(1)} KB · ${encoding}${r.eol !== "lf" ? " · " + EOL_LABEL[r.eol] : ""}）`)
     } catch (err) {
-      // 服务端会明确说明「哪些字符用目标编码表示不了」，原样展示即可
-      toast.error((err as Error).message, { duration: 8000 })
+      if (isVersionConflict(err)) {
+        // 关键：**不覆盖**。客户端手里的内容基于旧版本，直接写会抹掉对方的改动。
+        const at = new Date().toLocaleString("zh-CN")
+        setStaleSince(at)
+        toast.error("保存被阻止：文件已被其他人修改", {
+          duration: 20000,
+          description:
+            "为避免覆盖对方的改动，本次保存没有执行。请先「重新加载」查看最新内容并手动合并；" +
+            "如果你确认要以当前内容覆盖服务端版本，也可以选择「强制覆盖」。",
+          action: {
+            label: "重新加载",
+            onClick: () => load(encoding),
+          },
+          cancel: {
+            label: "强制覆盖",
+            onClick: () => {
+              forceOverwriteRef.current = true
+              saveRef.current()
+            },
+          },
+        })
+      } else {
+        // 服务端会明确说明「哪些字符用目标编码表示不了」，原样展示即可
+        toast.error((err as Error).message, { duration: 8000 })
+      }
     } finally {
       setSaving(false)
     }
-  }, [entryPath, saving, file, content, encoding, eol])
+  }, [entryPath, saving, file, content, encoding, eol, load])
+
+  // 每次渲染后把最新的 save 放进 ref，供冲突提示里的「强制覆盖」调用。
+  // 放在 effect 里而不是渲染期：React 19 的 lint 禁止在渲染期间写 ref。
+  // toast 的动作按钮必然是在渲染（与本次 effect）之后才被点击，所以取到的
+  // 一定是最新实现。
+  React.useEffect(() => {
+    saveRef.current = save
+  }, [save])
 
   /* ---------------- 查找 ---------------- */
   const matches = React.useMemo<Match[]>(() => {
@@ -309,6 +360,12 @@ export default function EditorPage() {
         </span>
         {dirty && <Badge variant="secondary" className="text-[10px]">未保存</Badge>}
         {file?.softReadOnly && <Badge variant="outline" className="text-[10px]">只读目录</Badge>}
+        {/* 版本冲突后持续可见：避免用户以为"保存成功"了 */}
+        {staleSince && (
+          <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive" title={`检测到冲突的时间：${staleSince}`}>
+            已被他人修改
+          </Badge>
+        )}
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {/* 编码 */}

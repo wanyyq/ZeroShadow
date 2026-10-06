@@ -29,6 +29,9 @@ const DEFAULTS = {
   backupEnabled: true,
   backupKeep: 20,
   logRetentionDays: 30,
+  // ===== 回收站（删除改为移入回收站，超期自动清理）=====
+  trashEnabled: true,
+  trashRetentionDays: 30,
   metricsRetentionDays: 7,
   metricsMemMinutes: 15,
   requestMetricsEnabled: true,
