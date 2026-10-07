@@ -29,12 +29,10 @@ function quarantine(name) {
     fs.renameSync(src, path.join(dir, `${stamp}-${name}`))
     return true
   } catch {
-    try {
-      fs.rmSync(src, { force: true })
-      return true
-    } catch {
-      return false
-    }
+    // 隔离失败就**保持原样**：本模块的存在意义就是"绝不直接删除"，旧实现在这里
+    // 兜底 rmSync，遇到 backups 不可写/被占用时会把往往还能人工抢救的文件直接毁掉。
+    // 让调用方记一条 issue、由人来处理即可。
+    return false
   }
 }
 
@@ -42,19 +40,29 @@ function checkFile(name, type) {
   const abs = path.join(DATA_DIR, name)
   if (!fs.existsSync(abs)) return { name, status: "absent" }
   try {
-    const value = JSON.parse(fs.readFileSync(abs, "utf8"))
+    // 剥掉 UTF-8 BOM 再解析：记事本/PowerShell 保存的 "UTF-8 带 BOM" 完全合法，
+    // 不能当成损坏文件隔离 —— 那会让配置静默回到默认值、成员账号"消失"。
+    const value = JSON.parse(fs.readFileSync(abs, "utf8").replace(/^\uFEFF/, ""))
     const ok =
       type === "array"
         ? Array.isArray(value)
         : typeof value === "object" && value !== null && !Array.isArray(value)
     if (!ok) {
-      quarantine(name)
-      return { name, status: "quarantined", reason: `顶层类型应为 ${type}` }
+      const moved = quarantine(name)
+      return {
+        name,
+        status: moved ? "quarantined" : "error",
+        reason: moved ? `顶层类型应为 ${type}` : `顶层类型应为 ${type}，且隔离失败（文件已保留原样）`,
+      }
     }
     return { name, status: "ok" }
   } catch {
-    quarantine(name)
-    return { name, status: "quarantined", reason: "JSON 解析失败" }
+    const moved = quarantine(name)
+    return {
+      name,
+      status: moved ? "quarantined" : "error",
+      reason: moved ? "JSON 解析失败" : "JSON 解析失败，且隔离失败（文件已保留原样）",
+    }
   }
 }
 

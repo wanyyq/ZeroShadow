@@ -14,6 +14,7 @@ import {
   guestBlocked,
   isHiddenFromGuest,
   isSameOrInside,
+  isSensitiveAbs,
   isSoftPath,
   joinRel,
   normRel,
@@ -49,7 +50,7 @@ import {
 } from "../encoding.js"
 import { isVisibleForContext } from "../groups.js"
 import { compareVersion, versionOf } from "../version.js"
-import { moveToTrash } from "../trash.js"
+import { moveToTrash, trashAvailable } from "../trash.js"
 import { contentDisposition } from "../http.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
 import { rateLimit } from "../ratelimit.js"
@@ -96,7 +97,12 @@ function contextVisible(req, rel) {
 }
 
 function assertContextVisible(req, rel) {
-  if (!contextVisible(req, rel)) {
+  // 访客隐藏（guestHiddenPaths）必须在这里**统一**生效，不能依赖各端点自己记得调
+  // guestBlocked：旧实现只在 /list、/download、/search、/zip 里单独调了它，而
+  // /file（在线编辑读取）与 /save-file 只调用了本函数，于是它们完全绕过了隐藏规则
+  // —— 未登录访客能读取、甚至覆盖隐藏目录里的文件。
+  // 根目录（rel === ""）不会被判定为隐藏，因此列表接口不受影响。
+  if (guestBlocked(req, rel) || !contextVisible(req, rel)) {
     const err = new Error("文件或目录不存在")
     err.status = 404
     throw err
@@ -199,13 +205,16 @@ router.get("/list", requirePerm("browse"), async (req, res, next) => {
       const entries = await listDir(resolved.abs, rel, { forGuest: req.auth.role === "guest" })
       const marked = entries
         .filter((e) => contextVisible(req, joinRel(rel, e.name)))
+        // 软目录可能映射到项目根目录（例如 FILES_SOFT_DIR={"软件":"./"}），
+        // 那里有 .env 与 data/ —— 服务自身的凭据、会话密钥、日志一律不出现在列表里。
+        .filter((e) => !isSensitiveAbs(path.join(resolved.abs, e.name)))
         .map((e) => ({ ...e, softReadOnly: true }))
       res.json({ path: rel, entries: marked })
     } else {
       await assertDir(abs)
-      const entries = (await listDir(abs, rel, { forGuest: req.auth.role === "guest" })).filter((e) =>
-        contextVisible(req, joinRel(rel, e.name))
-      )
+      const entries = (await listDir(abs, rel, { forGuest: req.auth.role === "guest" }))
+        .filter((e) => !isSensitiveAbs(path.join(abs, e.name)))
+        .filter((e) => contextVisible(req, joinRel(rel, e.name)))
       let all = entries
       if (!rel) {
         let softs = getSoftDirEntries().filter((s) => contextVisible(req, s.name))
@@ -699,25 +708,36 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
     if (!Array.isArray(paths) || !paths.length || paths.length > 500) {
       throw httpError(400, "参数格式错误")
     }
-    const useTrash = getConfig().trashEnabled !== false
+    const useTrash = getConfig().trashEnabled !== false && trashAvailable()
     const deleted = []
     // 回收站不可用（跨设备复制失败等）时记录原因，但仍继续删剩下的，
     // 否则一个坏条目会让整批删除停在中途。
     const trashed = []
     const failedToTrash = []
+    // 回收站可用、但**这一项**没能入站的条目：绝不能回落到彻底删除（旧实现就是这样，
+    // 于是路径过长 / rename 失败的条目会无声消失，与"删除 = 可还原"的承诺不符）。
+    const failed = []
     for (const p of paths) {
       const resolved = resolveAny(normRel(p))
       blockSoft(resolved.rel)
       assertContextVisible(req, resolved.rel)
       if (!resolved.rel) throw httpError(400, "不能删除根目录")
       if (useTrash) {
-        const meta = await moveToTrash(resolved, actor(req))
+        let meta = null
+        try {
+          meta = await moveToTrash(resolved, actor(req))
+        } catch (err) {
+          failed.push({ path: resolved.rel, error: err?.message || "无法移入回收站" })
+          continue
+        }
         if (meta) {
           trashed.push(resolved.rel)
           continue
         }
-        failedToTrash.push(resolved.rel)
+        failed.push({ path: resolved.rel, error: "无法移入回收站" })
+        continue
       }
+      failedToTrash.push(resolved.rel)
       await fs.promises.rm(resolved.abs, { recursive: true, force: true })
       deleted.push(resolved.rel)
     }
@@ -735,11 +755,16 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
     if (failedToTrash.length) {
       warn("trash_unavailable_fallback", { msg: `未能移入回收站，已彻底删除：${failedToTrash.join(", ")}` })
     }
+    if (failed.length) {
+      warn("trash_failed_skipped", { msg: `未能移入回收站，已跳过（未删除）：${failed.map((f) => f.path).join(", ")}` })
+    }
     res.json({
       deleted: deleted.length,
       trashed: trashed.length,
       // 回收站没兜住的那部分：前端应当明确告知用户"这些是彻底删掉的"
       permanentlyDeleted: failedToTrash,
+      // 回收站可用但入站失败：这些项目**原样保留**，前端要明确报错而不是当成功
+      failed,
     })
   } catch (err) {
     next(err)
@@ -1018,6 +1043,35 @@ router.get("/compress/status", requirePerm("compressZip"), (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+/**
+ * 边解压边计数地把一个 zip 条目读进内存，超过 maxBytes 立刻停手。
+ *
+ * 为什么不能直接用 unzipper 的 file.buffer()：它内部是无上限累积分片再
+ * Buffer.concat，而 zip 中央目录里声明的 uncompressedSize 由压缩包作者完全控制
+ * （unzipper/lib/Open/directory.js 直接读该字段）。旧实现先用声明值做体积判断、
+ * 再整块读进内存，于是"声明 1000 字节、实际解压 40MB"的包能畅通无阻；按 deflate
+ * 的极限压缩比构造，可以让进程直接 OOM。这里只信实际读出来的字节数。
+ */
+async function readZipEntryLimited(entry, maxBytes) {
+  const chunks = []
+  let size = 0
+  const stream = entry.stream()
+  try {
+    for await (const chunk of stream) {
+      size += chunk.length
+      if (size > maxBytes) {
+        stream.destroy()
+        return { buffer: null, size, tooLarge: true }
+      }
+      chunks.push(chunk)
+    }
+  } catch (err) {
+    stream.destroy()
+    throw err
+  }
+  return { buffer: Buffer.concat(chunks), size, tooLarge: false }
+}
+
 router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
@@ -1067,6 +1121,9 @@ router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, n
       const destResolved = path.resolve(extractDestAbs)
       let count = 0
       let written = 0
+      // 所有条目**实际**解压出的字节，含被跳过的超大条目：只统计"写出去的部分"
+      // 会让攻击者用一串被跳过的炸弹条目无限消耗 CPU。
+      let consumed = 0
       for (const file of directory.files) {
         try {
           const entryPath = file.path
@@ -1080,19 +1137,21 @@ router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, n
             fs.mkdirSync(outPath, { recursive: true })
             continue
           }
+          // 声明值只用来"提前跳过明显超标的条目"，绝不能当作限额依据
           if (file.uncompressedSize > limits.maxSingleBytes) continue
+          const read = await readZipEntryLimited(file, limits.maxSingleBytes)
+          consumed += read.size
+          if (consumed > limits.extractMaxTotalBytes) {
+            throw new Error(`解压后总大小超出限制 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`)
+          }
+          // 声明值和实际不符（伪造包头 / 压缩炸弹）：丢弃该条目，不写盘
+          if (read.tooLarge) continue
           const dirName = path.dirname(outPath)
           if (dirName && dirName !== ".") {
             fs.mkdirSync(dirName, { recursive: true })
           }
-          const buf = await file.buffer()
-          if (buf.length > limits.maxSingleBytes) continue
-          // 用实际写出的字节累计，压缩包头里声明的大小不可信
-          written += buf.length
-          if (written > limits.extractMaxTotalBytes) {
-            throw new Error(`解压后总大小超出限制 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`)
-          }
-          await fs.promises.writeFile(outPath, buf)
+          await fs.promises.writeFile(outPath, read.buffer)
+          written += read.size
           count += 1
         } catch (err) {
           await abortExtract(err)

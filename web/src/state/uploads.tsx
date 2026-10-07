@@ -69,6 +69,7 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         const results: UploadResult["results"] = []
         let truncated = false
+        let dropped = 0
         let doneBytes = 0
         try {
           for (const batch of batches) {
@@ -79,7 +80,14 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
             currentAbort = task.abort
             const raw = (await task.promise) as UploadResult
             results.push(...raw.results)
-            if (raw.truncated) truncated = true
+            // 服务端用 busboy 的 files 上限，超出部分会被**静默跳过**，只回一个
+            // truncated 标志。正常情况前端已按 100 分片，这里兜住"服务端上限被
+            // 改小/分片失效"，让提示里的数字和实际结果一致，而不是笼统说"超出
+            // 部分未处理"。
+            if (raw.truncated || raw.results.length < batch.length) {
+              truncated = true
+              dropped += batch.length - raw.results.length
+            }
             doneBytes += batchBytes
             patch(id, { loaded: doneBytes })
           }
@@ -102,7 +110,7 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
             toast.success(`已上传 ${okCount} 个文件`)
           }
           if (truncated) {
-            toast.warning(`单次最多上传 ${MAX_FILES_PER_REQUEST} 个文件，超出部分未处理`, {
+            toast.warning(`单次最多上传 ${MAX_FILES_PER_REQUEST} 个文件，${dropped || "部分"}个未处理`, {
               description: "请分批再次上传剩余文件",
             })
           }

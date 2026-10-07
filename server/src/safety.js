@@ -1,6 +1,6 @@
 import path from "node:path"
 import fs from "node:fs"
-import { FILES_DIR, SOFT_DIRS } from "./env.js"
+import { DATA_DIR, ENV_FILE, FILES_DIR, SOFT_DIRS } from "./env.js"
 import { getConfig } from "./config.js"
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin"
@@ -50,13 +50,74 @@ export function resolveAny(rel) {
     const resolved = subRel ? path.resolve(base, subRel) : base
     // 必须按路径分隔符判断边界，否则 "D:\soft" 会误认为 "D:\soft-secret" 在内部
     if (resolved !== base && !resolved.startsWith(base + path.sep)) throw badPath()
+    // 软目录常被用来映射项目目录（模板里甚至给过 "./"），那里放着 .env（超管明文
+    // 密码）与 data/（会话签名密钥、口令哈希、日志、备份）。这些属于服务自身，
+    // 永远不能通过网盘接口读写 —— 与访客/成员身份无关。
+    if (isSensitiveAbs(resolved)) throw notFound()
     return { abs: resolved, rel, isSoft: true, softName: first, softBase: base }
   }
   const abs = rel ? path.join(FILES_DIR, ...rel.split("/")) : FILES_DIR
   const resolved = path.resolve(abs)
   const root = path.resolve(FILES_DIR)
   if (resolved !== root && !resolved.startsWith(root + path.sep)) throw badPath()
+  // 同样的拦截也要作用在网盘本体这一侧：如果有人把 FILES_DIR 设成项目根目录，
+  // 那么 .env 与 data/ 就都落在"网盘里"了，凭据与运行数据必须依然拿不到。
+  // 默认布局（FILES_DIR=data/files）下这条永远不成立，因此不影响正常使用。
+  if (isSensitiveAbs(resolved)) throw notFound()
   return { abs: resolved, rel, isSoft: false }
+}
+
+function notFound() {
+  const err = new Error("文件或目录不存在")
+  err.status = 404
+  return err
+}
+
+/**
+ * `data/` 下属于"服务自身运行数据"的条目名（相对 DATA_DIR 的第一段）。
+ * 不在这个集合里的（也就是 `files/`）才是网盘内容本体。
+ */
+const SENSITIVE_DATA_ENTRIES = new Set([
+  ".jwt-secret",
+  "config.json",
+  "users.json",
+  "groups.json",
+  "todos.json",
+  "backups",
+  "logs",
+  "metrics",
+  "tmp",
+  "trash",
+  "avatars",
+])
+
+/**
+ * 是不是"服务自身的运行时/凭据文件"。
+ *
+ * 背景：FILES_SOFT_DIR 可以把任意目录映射成只读虚拟文件夹，而自动生成的 .env
+ * 模板给的示例就是 "./"（项目根目录）。一旦这样映射，匿名访客按路径就能把
+ * .env（超管明文密码）和 data/.jwt-secret（签发会话的密钥）下载走 —— 等于全盘
+ * 接管。这里把这类路径统一挡掉。
+ *
+ * 判定按"相对 DATA_DIR 的第一段名字"，因此与 FILES_DIR 放在哪里无关：
+ *   - `data/files/**`（网盘内容本体）→ 放行；
+ *   - `data/{config,users,groups,todos}.json`、`data/.jwt-secret`、`data/{backups,
+ *     logs,metrics,tmp,trash,avatars}/**` → 拒绝；
+ *   - `FILES_DIR` 在 data/ 之外时不受影响。
+ * 这样即使有人把 FILES_DIR 设成项目根目录（那样 .env 与 data/ 都落在"网盘里"），
+ * 凭据与运行数据依然拿不到。
+ */
+export function isSensitiveAbs(abs) {
+  const resolved = path.resolve(abs)
+  if (resolved === path.resolve(ENV_FILE)) return true
+  const dataRoot = path.resolve(DATA_DIR)
+  // data/ 目录**本身**放行：FILES_DIR 有可能就设在 data/ 上（把文件直接放在
+  // 配置旁边），那样网盘根目录就是 data/，把根目录整个挡掉会让网盘全空。
+  // 需要挡的是它里面的具体条目（下一段的判断）。
+  if (resolved === dataRoot) return false
+  if (!resolved.startsWith(dataRoot + path.sep)) return false
+  const first = resolved.slice(dataRoot.length + 1).split(path.sep)[0]
+  return SENSITIVE_DATA_ENTRIES.has(first)
 }
 
 export function getSoftDirEntries() {

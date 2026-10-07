@@ -209,24 +209,30 @@ function getVersion() {
 /** React hook：订阅头像变化；返回当前 objectURL（可能为 null，此时显示占位） */
 export function useAvatar(owner: string | null | undefined): string | null {
   const version = useSyncExternalStore(subscribe, getVersion, getVersion)
-  const [url, setUrl] = useState<string | null>(() => {
-    if (!owner) return null
-    return objectUrls.get(owner)?.url ?? null
-  })
+  const key = owner ?? null
+  // URL 必须和它属于哪个 owner 一起存：只存一个字符串时，owner 从 A 换到 B 而
+  // B 没有头像，A 的 URL 会在异步查询返回之前一直挂在新用户名旁边（看起来像
+  // "B 用了 A 的头像"）。带上 owner 就能在 owner 变化时立刻失效。
+  const [state, setState] = useState<{ owner: string | null; url: string | null }>(() => ({
+    owner: key,
+    url: key ? objectUrls.get(key)?.url ?? null : null,
+  }))
   useEffect(() => {
     let alive = true
-    if (!owner) {
-      setUrl(null)
+    if (!key) {
+      setState({ owner: null, url: null })
       return
     }
-    const immediate = objectUrls.get(owner)?.url ?? null
-    if (immediate) setUrl(immediate)
-    getAvatarUrl(owner).then((u) => {
-      if (alive) setUrl(u)
+    // 同步重置为"新 owner 当前已知的 URL"（缓存命中就是它，未命中就是 null）
+    setState({ owner: key, url: objectUrls.get(key)?.url ?? null })
+    getAvatarUrl(key).then((u) => {
+      if (alive) setState({ owner: key, url: u })
     })
     return () => {
       alive = false
     }
-  }, [owner, version])
-  return url
+  }, [key, version])
+  // effect 还没跑到新 owner 时，直接用同步缓存兜底，绝不回退到上一个 owner 的 URL
+  if (state.owner !== key) return key ? objectUrls.get(key)?.url ?? null : null
+  return state.url
 }

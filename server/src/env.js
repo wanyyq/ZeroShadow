@@ -4,7 +4,8 @@ import crypto from "node:crypto"
 
 const isPkg = typeof process.pkg !== "undefined"
 const ROOT_DIR = isPkg ? path.dirname(process.execPath) : process.cwd()
-const ENV_FILE = path.join(ROOT_DIR, ".env")
+/** 服务自身的配置文件（含超管明文密码）——绝不允许经网盘接口读写 */
+export const ENV_FILE = path.join(ROOT_DIR, ".env")
 
 function randomPassword() {
   return crypto.randomBytes(12).toString("base64url")
@@ -42,7 +43,9 @@ function envTemplate(password) {
     "# FILES_DIR=D:\\ZeroShadowFiles",
     "",
     "# 外部映射目录（只读虚拟文件夹）JSON 格式：将服务器其他路径映射为网盘根目录只读文件夹",
-    '# FILES_SOFT_DIR={"软件文件夹":"./","工作目录":"D:/Program/xxx/xxx"}',
+    "# 注意：不要映射服务自身所在目录（尤其不要用 \"./\"）—— 那里有 .env 与 data/，",
+    "#       虽然这些路径已被硬性拦截，但映射整个项目目录本身没有任何好处。",
+    '# FILES_SOFT_DIR={"软件文件夹":"D:/MyFiles","工作目录":"D:/Program/xxx/xxx"}',
     "",
     "# ===== 链接下载工具（download-url）安全开关 =====",
     "# 默认禁止下载内网 / 回环 / 链路本地地址（防 SSRF）。确有需要再显式放开：",
@@ -62,7 +65,9 @@ if (!fs.existsSync(ENV_FILE)) {
 }
 
 try {
-  const raw = fs.readFileSync(ENV_FILE, "utf8")
+  // 剥掉 BOM：记事本/PowerShell 5.1 的 "UTF-8" 都会带 BOM，不处理的话首行的键
+  // 会变成 "\uFEFFPORT" —— 于是用户明明写了 PORT=xxxx 却被忽略、服务跑在默认端口上。
+  const raw = fs.readFileSync(ENV_FILE, "utf8").replace(/^\uFEFF/, "")
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith("#")) continue
@@ -187,7 +192,8 @@ for (const dir of [DATA_DIR, FILES_DIR, TMP_DIR, LOGS_DIR]) {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-const SECRET_FILE = path.join(DATA_DIR, ".jwt-secret")
+/** 会话签名密钥文件（泄露即可伪造任意登录态）——绝不允许经网盘接口读写 */
+export const SECRET_FILE = path.join(DATA_DIR, ".jwt-secret")
 
 function loadSecret() {
   try {

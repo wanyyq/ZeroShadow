@@ -284,8 +284,19 @@ export function encodeText(text, encoding) {
     if (bad.size >= 32) break
   }
   if (back.length !== text.length) {
-    // 长度都变了（通常是被折叠成单字节），整体标出来
-    for (const ch of text) if (!back.includes(ch)) bad.add(ch)
+    // 长度都变了（通常是被折叠成单字节），整体标出来。
+    //
+    // 这里必须用 Set 做 O(1) 查表：旧实现是 `back.includes(ch)`，即每个字符都
+    // 重扫一遍整个 back —— 在"长度不一致"这条分支上是 O(n²)。而这条分支恰恰会
+    // 被"含 emoji/生僻字 + 目标编码表示不了"这种很普通的输入触发：实测 19.2 万
+    // 字符耗时 2.6 秒，4MB 输入 90 秒都跑不完。保存接口的 body 上限是 16MB，
+    // 也就是说任何有 editFiles 权限的成员都能用一个请求把 Node 单线程堵死，
+    // 局域网内所有人同时断线。
+    const present = new Set(back)
+    for (const ch of text) {
+      if (!present.has(ch)) bad.add(ch)
+      if (bad.size >= 32) break
+    }
   }
   return { buffer, unmappable: [...bad].filter((c) => c !== "\n" && c !== "\r") }
 }

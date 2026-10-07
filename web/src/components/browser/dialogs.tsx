@@ -242,11 +242,20 @@ export function DeleteDialog({
     if (busy) return
     setBusy(true)
     try {
-      const r = await api.post<{ deleted: number; trashed: number; permanentlyDeleted?: string[] }>(
-        "/fs/delete",
-        { paths: names.map((n) => joinPath(path, n)) }
-      )
-      if (r.permanentlyDeleted && r.permanentlyDeleted.length) {
+      const r = await api.post<{
+        deleted: number
+        trashed: number
+        permanentlyDeleted?: string[]
+        failed?: { path: string; error: string }[]
+      }>("/fs/delete", { paths: names.map((n) => joinPath(path, n)) })
+      if (r.failed && r.failed.length) {
+        // 回收站可用、但这些条目没能入站：服务端已经**保留原文件**并跳过删除。
+        // 必须明确报错，否则用户会以为删掉了，而文件其实还在（旧实现是把它们
+        // 直接彻底删除，静默销毁数据）。
+        toast.error(`${r.failed.length} 项未能删除（原文件仍保留）`, {
+          description: r.failed.map((f) => `${f.path}：${f.error}`).join("\n"),
+        })
+      } else if (r.permanentlyDeleted && r.permanentlyDeleted.length) {
         // 回收站没兜住（目录不可用等）：必须明确告知，不能让用户以为还能还原
         toast.warning(`已删除 ${names.length} 项，其中 ${r.permanentlyDeleted.length} 项未进入回收站`, {
           description: `以下项目已被彻底删除，无法还原：${r.permanentlyDeleted.join("、")}`,

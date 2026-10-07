@@ -48,46 +48,61 @@ export function TrashSection() {
     }
   }
 
-  const doRestore = (id: string, rel: string) => {
-    void confirm({
-      title: `还原「${rel}」？`,
-      description: "内容会回到原来的位置。如果那个位置已经有了同名项目，还原会被拒绝，需要你先处理冲突。",
-      confirmText: "还原",
-      destructive: false,
-      onConfirm: async () => {
-        await restoreTrash(id)
-        toast.success("已还原")
-        load()
-      },
-    })
+  // confirm() 返回的是"用户点完确认之后的 promise"，所以要 await 它，
+  // busy 标记才有意义。旧实现 set→doRestore→set(null) 全在同一 tick，
+  // disabled 永远不生效（连点会弹出两个确认框）。
+  const runBusy = async (id: string, fn: () => Promise<void> | void) => {
+    setBusyId(id)
+    try {
+      await fn()
+    } finally {
+      setBusyId(null)
+    }
   }
+
+  const doRestore = (id: string, rel: string) =>
+    runBusy(id, () =>
+      confirm({
+        title: `还原「${rel}」？`,
+        description: "内容会回到原来的位置。如果那个位置已经有了同名项目，还原会被拒绝，需要你先处理冲突。",
+        confirmText: "还原",
+        destructive: false,
+        onConfirm: async () => {
+          await restoreTrash(id)
+          toast.success("已还原")
+          load()
+        },
+      }).then(() => undefined)
+    )
 
   /** 还原遇到同名冲突：让用户选择覆盖 */
-  const doRestoreOverwrite = (id: string, rel: string) => {
-    void confirm({
-      title: `用回收站里的版本覆盖「${rel}」？`,
-      description: "当前位置上已有的同名项目会被删除，且此操作不可撤销。",
-      confirmText: "覆盖还原",
-      onConfirm: async () => {
-        await restoreTrash(id, undefined, true)
-        toast.success("已覆盖还原")
-        load()
-      },
-    })
-  }
+  const doRestoreOverwrite = (id: string, rel: string) =>
+    runBusy(id, () =>
+      confirm({
+        title: `用回收站里的版本覆盖「${rel}」？`,
+        description: "当前位置上已有的同名项目会被删除，且此操作不可撤销。",
+        confirmText: "覆盖还原",
+        onConfirm: async () => {
+          await restoreTrash(id, undefined, true)
+          toast.success("已覆盖还原")
+          load()
+        },
+      }).then(() => undefined)
+    )
 
-  const doPurge = (id: string, rel: string) => {
-    void confirm({
-      title: `彻底删除「${rel}」？`,
-      description: "内容会被永久删除，无法再还原。",
-      confirmText: "彻底删除",
-      onConfirm: async () => {
-        await purgeTrash(id)
-        toast.success("已彻底删除")
-        load()
-      },
-    })
-  }
+  const doPurge = (id: string, rel: string) =>
+    runBusy(id, () =>
+      confirm({
+        title: `彻底删除「${rel}」？`,
+        description: "内容会被永久删除，无法再还原。",
+        confirmText: "彻底删除",
+        onConfirm: async () => {
+          await purgeTrash(id)
+          toast.success("已彻底删除")
+          load()
+        },
+      }).then(() => undefined)
+    )
 
   const doEmpty = () => {
     void confirm({
@@ -207,7 +222,7 @@ export function TrashSection() {
                           size="xs"
                           variant="outline"
                           disabled={busyId === it.id}
-                          onClick={() => { setBusyId(it.id); doRestore(it.id, it.rel); setBusyId(null) }}
+                          onClick={() => { void doRestore(it.id, it.rel) }}
                         >
                           还原
                         </Button>
@@ -217,7 +232,7 @@ export function TrashSection() {
                           className="ml-1"
                           title="同名冲突时用回收站里的版本覆盖"
                           disabled={busyId === it.id}
-                          onClick={() => doRestoreOverwrite(it.id, it.rel)}
+                          onClick={() => { void doRestoreOverwrite(it.id, it.rel) }}
                         >
                           覆盖还原
                         </Button>
@@ -226,7 +241,7 @@ export function TrashSection() {
                           variant="ghost"
                           className="ml-1 text-destructive"
                           disabled={busyId === it.id}
-                          onClick={() => doPurge(it.id, it.rel)}
+                          onClick={() => { void doPurge(it.id, it.rel) }}
                         >
                           彻底删除
                         </Button>

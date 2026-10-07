@@ -16,6 +16,7 @@ import bcrypt from "bcryptjs"
 import { verifyLogin, findById, resetPassword } from "../users.js"
 import { groupsForUser, listGroups } from "../groups.js"
 import { filesystemCaseInsensitive } from "../safety.js"
+import { rateLimit } from "../ratelimit.js"
 import { info, warn } from "../logger.js"
 
 const router = Router()
@@ -26,7 +27,11 @@ function httpError(status, message) {
   return err
 }
 
-router.post("/login", async (req, res) => {
+// 登录也要限流：账户锁定表虽然已经有了硬上限（见 auth.js 的 evictOldest），
+// 但没有限流时仍可被用于制造大量无效请求 / 反复触发 bcrypt 比对。
+// 上限沿用后台可调的 rateLimitPerMin（默认 120/分钟，按 IP 计），
+// 对"整个局域网共用一个出口 IP"的场景也足够宽松。
+router.post("/login", rateLimit, async (req, res) => {
   const username = String(req.body?.username || "").trim()
   const password = String(req.body?.password || "")
   if (!username || !password) return res.status(400).json({ error: "请输入用户名和密码" })

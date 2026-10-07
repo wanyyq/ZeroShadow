@@ -136,7 +136,10 @@ export async function removeUserFromTodos(userId) {
     let changed = false
     for (const todo of todos) {
       if (todo.scope === "member" && todo.memberId === userId) {
-        todo.scope = "all"
+        // 保持 scope: "member" 但清空 memberId：这样只有创建者/超管（以及相关组长）
+        // 还能看到它，创建者可以重新指派。
+        // 旧实现改成 scope: "all"，等于把一条**私有**待办的标题与备注（可能含个人
+        // 事务）突然公开给全体成员。
         todo.memberId = ""
         changed = true
       }
@@ -156,7 +159,7 @@ export async function removeGroupFromTodos(groupId) {
     let changed = false
     for (const todo of todos) {
       if (todo.scope === "group" && todo.groupId === groupId) {
-        todo.scope = "all"
+        // 同理：保留 scope: "group"、清空 groupId，而不是公开成 "all"
         todo.groupId = ""
         changed = true
       }

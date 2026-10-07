@@ -291,12 +291,19 @@ export function BrowserPage() {
     if (!clipboard.mode || !clipboard.items.length) return
     if (isCurrentSoft) return noPermSoftToast()
     if (!me.perms[clipboard.mode === "copy" ? "copy" : "move"]) return noPermToast()
+    // 重入标志必须在**最外层**就置位：旧实现只在冲突处理回调里判断/置位，而那个
+    // 回调要等 dlg 里用户点完"覆盖/合并/取消"才执行 —— 对话框开着的时候再按一次
+    // Ctrl+V 就能挤进第二次粘贴，最终发出重复的 copy/move 请求（服务端会用
+    // uniqueName 生成 "x (1)" 副本）。
+    if (pastingRef.current) return
+    pastingRef.current = true
+    const release = () => { pastingRef.current = false }
     const names = clipboard.items.map((i) => i.name)
     const dirNames = new Set(clipboard.items.filter((i) => i.type === "dir").map((i) => i.name))
     resolveConflicts(names, dirNames, async (resolved) => {
       // 用户取消了冲突处理：必须原样中止。旧实现把它当成「没有冲突」，
       // 于是点取消反而照常执行 —— 剪切模式下文件是真的会被移走的。
-      if (resolved === CONFLICT_CANCELLED) return
+      if (resolved === CONFLICT_CANCELLED) { release(); return }
       const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
       const overwrite = resolved.some((r) => r.action === "overwrite")
       const renameMap = new Map(resolved.filter((r) => r.action === "rename" && r.resolvedName).map((r) => [r.name, r.resolvedName!]))
@@ -316,7 +323,6 @@ export function BrowserPage() {
         const renamed = renameMap.get(item.name)
         if (renamed) targetNames[item.path] = renamed
       }
-      if (pastingRef.current) return
       const apiPath = `/fs/${clipboard.mode === "copy" ? "copy" : "move"}`
       const promises: Promise<unknown>[] = []
       if (sources.length) {
@@ -330,8 +336,7 @@ export function BrowserPage() {
       if (mergeSources.length) {
         promises.push(api.post(apiPath, { sources: mergeSources, dest: path, merge: true }))
       }
-      if (promises.length === 0) return
-      pastingRef.current = true
+      if (promises.length === 0) { release(); return }
       try {
         await Promise.all(promises)
         toast.success(clipboard.mode === "copy" ? "复制完成" : "移动完成")
@@ -339,7 +344,7 @@ export function BrowserPage() {
       } catch (err) {
         toast.error((err as Error).message)
       } finally {
-        pastingRef.current = false
+        release()
         // 成败都要刷新：失败前可能已经有部分条目完成，旧实现不刷新，
         // 用户会看到「报错但目录里多了一半文件」。
         refresh()
@@ -427,10 +432,16 @@ export function BrowserPage() {
     return files
   }
 
+  // 上传的重入保护：与粘贴同理，冲突对话框开着的时候再来一次拖拽/选择，
+  // 旧实现会真的发起第二轮上传（同名文件被写成 "x (1)"）。
+  const uploadingRef = React.useRef(false)
   const handleUpload = React.useCallback(
     (files: File[]) => {
       if (!files.length || !me.perms.upload) return
       if (sorted.length > 0 && sorted.every((en) => en.softReadOnly)) { noPermSoftToast(); return }
+      if (uploadingRef.current) return
+      uploadingRef.current = true
+      const release = () => { uploadingRef.current = false }
       const hasPaths = files.some((f) => f.name.includes("/"))
       if (hasPaths) {
         const rootFolders = new Set<string>()
@@ -440,9 +451,9 @@ export function BrowserPage() {
         }
         if (me.perms.uploadFolders) {
           resolveConflicts([...rootFolders], existingDirNames, (resolved) => {
-            if (resolved === CONFLICT_CANCELLED) return
+            if (resolved === CONFLICT_CANCELLED) { release(); return }
             const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
-            if (skipSet.size === rootFolders.size) return
+            if (skipSet.size === rootFolders.size) { release(); return }
             // 文件夹级的「覆盖 / 合并」都表示：同名文件用新版本替换，其余原样写入。
             // 旧实现把顶层文件夹名塞进 overwrite 列表，而服务端只拿它匹配文件 basename，
             // 于是两个选项都静默失效 —— 同名文件被存成了 "x (1).txt"。
@@ -465,17 +476,19 @@ export function BrowserPage() {
               // 命中的替换、未命中的本来就写不冲突
               if (replaceRoots.has(root)) overwriteNames.push(f.name)
             }
-            if (processed.length === 0) return
+            if (processed.length === 0) { release(); return }
             uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : undefined)
+            release()
           })
           return
         }
       }
       const names = files.map((f) => f.name)
       resolveConflicts(names, new Set(), (resolved) => {
-        if (resolved === CONFLICT_CANCELLED) return
+        if (resolved === CONFLICT_CANCELLED) { release(); return }
         if (!resolved.length) {
           uploads.start(path, files)
+          release()
           return
         }
         const skipSet = new Set(resolved.filter((r) => r.action === "skip").map((r) => r.name))
@@ -491,11 +504,17 @@ export function BrowserPage() {
             processed.push(file)
           }
         }
-        if (processed.length === 0) return
+        if (processed.length === 0) { release(); return }
         uploads.start(path, processed, overwriteNames.length ? { overwrite: overwriteNames } : undefined)
+        release()
       })
     },
-    [path, me.perms.upload, me.perms.uploadFolders, resolveConflicts, uploads]
+    // existingDirNames 必须进依赖：resolveConflicts 的 dirNames 是**参数**，
+    // 但这里的闭包捕获的是渲染时的那个集合；漏掉它会让"已存在同名文件夹"的
+    // 判断用到过期数据（把文件夹冲突当文件冲突，只能覆盖、不能合并）。
+    // （sorted 刻意不入依赖：React Compiler 无法证明它稳定，会直接放弃整个组件的
+    //   memo 优化并报错；只读映射的判断在 onDrop 等非记忆化路径上另有一层兜底。）
+    [path, me.perms.upload, me.perms.uploadFolders, resolveConflicts, uploads, existingDirNames]
   )
 
   const onDrop = (e: React.DragEvent) => {

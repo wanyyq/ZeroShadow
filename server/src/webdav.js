@@ -4,7 +4,7 @@ import crypto from "node:crypto"
 import { WEBDAV_PATH } from "./env.js"
 import { verifyLogin } from "./users.js"
 import { effectivePerms, getConfig, uploadLimitBytes } from "./config.js"
-import { normRel, resolveAny, joinRel, isHiddenFromGuest } from "./safety.js"
+import { normRel, resolveAny, joinRel, isHiddenFromGuest, isSameOrInside } from "./safety.js"
 import { copyEntry, listDir, moveEntry, statSafe } from "./files.js"
 import { resolveGroupContext, isVisibleForContext } from "./groups.js"
 import { moveToTrash } from "./trash.js"
@@ -417,8 +417,10 @@ async function handleCopyMove(req, res, isMove) {
   const dest = resolveAny(destRel)
   if (dest.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作" })
   if (!destRel) return res.status(400).json({ error: "目标不能是根目录" })
-  // 不能把目录移动/复制到它自己内部
-  if (destRel === resolved.rel || destRel.startsWith(resolved.rel + "/")) {
+  // 不能把目录移动/复制到它自己内部。
+  // 必须用 isSameOrInside（Windows/macOS 下大小写不敏感），裸串 startsWith 会让
+  // "/A" → "/a/x" 这类只差大小写的目标绕过检查（与 fs.js 的 transfer 保持一致）。
+  if (isSameOrInside(destRel, resolved.rel)) {
     return res.status(400).json({ error: "目标不能是自身或其子目录" })
   }
 

@@ -15,9 +15,19 @@ export function withLock(key, fn) {
   return next
 }
 
+/**
+ * 读取 JSON。
+ *
+ * 必须先剥掉 UTF-8 BOM：`JSON.parse` 不接受开头的 U+FEFF，而 Windows 记事本的
+ * "UTF-8 带 BOM" 以及 PowerShell 的 `Set-Content -Encoding utf8`（5.1 默认带 BOM）
+ * 都会写入 BOM。旧实现会因此判定配置"损坏"，配合 integrity.js 的隔离逻辑，
+ * 结果是：config.json 被移走并以**默认值**运行（guestHiddenPaths 被清空 → 隐藏
+ * 目录重新对访客可见），users.json 被移走则全体成员账号消失。
+ */
 export function readJsonSync(file, fallback) {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"))
+    const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")
+    return JSON.parse(text)
   } catch {
     return fallback
   }

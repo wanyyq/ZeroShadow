@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
-import { DATA_DIR } from "./env.js"
+import { DATA_DIR, restrictFileMode } from "./env.js"
 import { getConfig } from "./config.js"
 
 // ============================================================================
@@ -184,12 +184,23 @@ export function restoreBackup(name, id) {
     err.status = 404
     throw err
   }
-  // 校验 JSON 合法性，避免把损坏备份写回去
+  // 校验 JSON 合法性 + 顶层类型，避免把损坏/类型不符的备份写回去。
+  // 只 JSON.parse 是不够的：一个能解析但顶层是对象/null 的 users.json 会让成员
+  // 列表直接变成空，随后的启动自检又会把它隔离走。
   let parsed
   try {
-    parsed = JSON.parse(fs.readFileSync(src, "utf8"))
+    parsed = JSON.parse(fs.readFileSync(src, "utf8").replace(/^\uFEFF/, ""))
   } catch {
     const err = new Error("该备份已损坏，无法恢复")
+    err.status = 400
+    throw err
+  }
+  const expectsArray = name !== "config.json"
+  const shapeOk = expectsArray
+    ? Array.isArray(parsed)
+    : typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+  if (!shapeOk) {
+    const err = new Error(`该备份内容类型不正确（${name} 应为 ${expectsArray ? "数组" : "对象"}），已拒绝恢复`)
     err.status = 400
     throw err
   }
@@ -199,5 +210,7 @@ export function restoreBackup(name, id) {
   const tmp = `${dest}.restore-${Date.now()}`
   fs.writeFileSync(tmp, JSON.stringify(parsed, null, 2), "utf8")
   fs.renameSync(tmp, dest)
+  // 与 store.writeJsonAtomic 保持一致：users.json 里有口令哈希，POSIX 下收紧为 0600
+  restrictFileMode(dest)
   return dest
 }

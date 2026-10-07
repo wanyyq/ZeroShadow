@@ -117,7 +117,14 @@ const USER_MAX_FAILS = 10
 const USER_LOCK_MS = 5 * 60 * 1000
 const USER_LOCK_MAX_MS = 30 * 60 * 1000
 const STRIKE_WINDOW_MS = 60 * 60 * 1000
+/** 计数表硬上限：超过就按"最早出现"淘汰，保证内存有界 */
+const MAX_BUCKETS = 5000
 const attempts = new Map()
+
+/** 只读查询：不存在就返回 null，**不创建**条目（见 loginLocked 的说明） */
+function peek(key) {
+  return attempts.get(key) || null
+}
 
 function bucket(key) {
   const now = Date.now()
@@ -125,6 +132,7 @@ function bucket(key) {
   if (!b) {
     b = { count: 0, first: now, lockedUntil: 0, strikes: 0, lastStrikeAt: 0 }
     attempts.set(key, b)
+    if (attempts.size > MAX_BUCKETS) evictOldest(now)
     return b
   }
   // 只重置计数窗口，保留 lockedUntil 与 strikes（旧实现在窗口过期时整块重建，
@@ -136,13 +144,32 @@ function bucket(key) {
   return b
 }
 
+/**
+ * 淘汰过期条目；仍然超限时按 first 从早到晚淘汰。
+ *
+ * 旧实现只在 recordLoginFail 里做一次"删过期条目"，而那个函数在 IP 被锁之后
+ * 根本不会被调用（请求直接 429 返回），于是攻击者只要用**不同用户名**持续请求，
+ * 就能无限往 attempts 里塞条目 —— 一个不需要任何凭据的内存耗尽。这里把淘汰
+ * 做成"插入即保证有界"，与请求走哪条分支无关。
+ */
+function evictOldest(now) {
+  for (const [k, v] of attempts) {
+    if (now - v.first > WINDOW_MS && v.lockedUntil < now) attempts.delete(k)
+  }
+  if (attempts.size <= MAX_BUCKETS) return
+  const byAge = [...attempts.entries()].sort((a, b) => a[1].first - b[1].first)
+  const drop = attempts.size - Math.floor(MAX_BUCKETS * 0.9)
+  for (let i = 0; i < drop && i < byAge.length; i += 1) attempts.delete(byAge[i][0])
+}
+
 export function loginLocked(ip, username) {
   const now = Date.now()
-  const byIp = bucket(`ip:${ip}`)
-  const byUser = bucket(`user:${String(username).toLowerCase()}`)
-  if (byIp.lockedUntil > now || byUser.lockedUntil > now) {
-    return Math.ceil((Math.max(byIp.lockedUntil, byUser.lockedUntil) - now) / 60000)
-  }
+  // 注意：这里必须用只读的 peek。旧实现调用 bucket()，于是**每一个**登录请求
+  // （包括已被限流、立刻 429 的那些）都会为任意用户名创建一个新条目。
+  const byIp = peek(`ip:${ip}`)
+  const byUser = peek(`user:${String(username).toLowerCase()}`)
+  const until = Math.max(byIp?.lockedUntil || 0, byUser?.lockedUntil || 0)
+  if (until > now) return Math.ceil((until - now) / 60000)
   return 0
 }
 
@@ -164,11 +191,7 @@ export function recordLoginFail(ip, username) {
     byUser.first = now
     warn("login_locked", { msg: `账户 ${username} 已临时锁定 ${Math.round(lockMs / 60000)} 分钟`, ip })
   }
-  if (attempts.size > 5000) {
-    for (const [k, v] of attempts) {
-      if (now - v.first > WINDOW_MS && v.lockedUntil < now) attempts.delete(k)
-    }
-  }
+  evictOldest(now)
 }
 
 export function recordLoginSuccess(_ip, username) {

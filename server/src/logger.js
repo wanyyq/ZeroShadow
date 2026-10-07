@@ -69,7 +69,11 @@ export function log(level, event, details = {}) {
     /* logging must never crash the app */
   }
   if (NOLOG) return
-  const line = `[${entry.t}] ${level.toUpperCase()} ${event}${entry.user ? ` user=${entry.user}` : ""}${entry.ip ? ` ip=${entry.ip}` : ""}${entry.msg ? ` ${entry.msg}` : ""}`
+  // 控制台行里的 user/msg 来自请求（登录名甚至未经字符集校验），必须清掉换行，
+  // 否则可以伪造出一整行看起来像系统输出的日志。磁盘上的 JSON 行不受影响
+  // （JSON.stringify 会转义）。
+  const oneLine = (v) => String(v).replace(/[\r\n\u2028\u2029]+/g, " ")
+  const line = `[${entry.t}] ${level.toUpperCase()} ${event}${entry.user ? ` user=${oneLine(entry.user)}` : ""}${entry.ip ? ` ip=${entry.ip}` : ""}${entry.msg ? ` ${oneLine(entry.msg)}` : ""}`
   if (level === "error") console.error(line)
   else console.log(line)
 }
@@ -157,9 +161,18 @@ export async function clearLogs() {
 
 // ============================================================ 日志导出 =====
 
-/** CSV 字段转义：含分隔符 / 引号 / 换行时用双引号包裹，内部引号翻倍 */
+/**
+ * CSV 字段转义：含分隔符 / 引号 / 换行时用双引号包裹，内部引号翻倍；
+ * 以 `= + - @ 制表符 回车` 开头的值额外加一个前导单引号。
+ *
+ * 最后这条是防"公式注入"：Excel / LibreOffice / Google Sheets 会把以 = 开头的
+ * 单元格当公式求值（DDE 可导致命令执行），而加引号并不能阻止它求值。而日志里
+ * 有大量攻击者可控内容 —— 未登录的登录名（routes/auth.js 里仅校验长度）会直接
+ * 进入 user 列，成员也能用 `=...` 当文件名。
+ */
 function csvCell(value) {
-  const s = value === null || value === undefined ? "" : String(value)
+  let s = value === null || value === undefined ? "" : String(value)
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
   if (!/[",\r\n]/.test(s)) return s
   return `"${s.replace(/"/g, '""')}"`
 }

@@ -31,8 +31,13 @@ import { info, warn } from "./logger.js"
 export const TRASH_DIR = path.join(DATA_DIR, "trash")
 const META_FILE = "meta.json"
 const CONTENT_NAME = "content"
-/** 单条回收站记录的原路径长度上限（防御异常输入把 meta 撑爆） */
-const MAX_REL_LEN = 1024
+/**
+ * 单条回收站记录的原路径长度上限（防御异常输入把 meta 撑爆）。
+ * 1024 对深层目录偏小：超过它的条目以前会"入不了回收站 → 回落到彻底删除"，
+ * 也就是无声销毁。现在入不了回收站会明确报错（见 moveToTrash），
+ * 同时把上限放宽到 Windows/Linux 的常见路径上限 4096。
+ */
+const MAX_REL_LEN = 4096
 
 // 不要在模块加载时就因为建不出目录而抛异常：那会让**整个服务起不来**。
 // 真实部署里 data/ 可能只读、磁盘可能满、权限可能不对——回收站功能不可用时
@@ -79,16 +84,32 @@ function isInsideTrash(abs) {
 
 /**
  * 把一个路径移入回收站。
+ *
+ * 返回值语义（调用方必须区分，否则会无声销毁数据）：
+ *   - 元数据对象：已成功入站；
+ *   - `null`：**这一项不需要入站**（rel 为空、已在回收站里），调用方可以继续；
+ *   - 抛出异常：回收站可用、但**这一项入站失败**（路径过长、rename/mkdir 失败）。
+ *     调用方应当跳过该项并报错，绝不能回落到 fs.rm 彻底删除 —— 那与"删除 = 可
+ *     还原"的承诺不符（旧实现正是如此，深层路径会被永久删除）。
+ *
  * @param {{abs:string, rel:string, isSoft?:boolean}} target resolveAny 的结果
  * @param {{user?:string, role?:string, ip?:string}} actor 执行删除的人
- * @returns {Promise<object|null>} 元数据；失败返回 null（调用方应中止删除）
+ * @returns {Promise<object|null>} 元数据或 null
  */
 export async function moveToTrash(target, actor = {}) {
   const { abs, rel } = target
   if (!rel) return null
-  if (rel.length > MAX_REL_LEN) return null
   // 不把回收站自己的东西再收进回收站（防止路径被拼出递归）
   if (isInsideTrash(abs)) return null
+  const fail = (message) => {
+    const err = new Error(message)
+    err.status = 500
+    err.code = "TRASH_FAILED"
+    return err
+  }
+  if (rel.length > MAX_REL_LEN) {
+    throw fail(`路径过长（超过 ${MAX_REL_LEN} 字符），未能移入回收站，因此没有删除`)
+  }
   if (!trashAvailable()) return null
 
   const stat = await fs.promises.lstat(abs).catch(() => null)
@@ -109,7 +130,7 @@ export async function moveToTrash(target, actor = {}) {
     } else {
       await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
       warn("trash_failed", { msg: `${rel}: ${err.message}` })
-      return null
+      throw fail(`未能移入回收站（${err.code || err.message}），因此没有删除`)
     }
   }
 
@@ -190,9 +211,11 @@ export async function restoreTrash(id, dest, overwrite = false) {
     throw err
   }
   if (!dest || !dest.rel) {
+    // 必须 throw：调用方（admin.js）只看 result.conflict，return 一个 Error 对象
+    // 会被当成"成功"，于是返回 200 {ok:true} 但其实什么都没还原。
     const err = new Error("还原目标无效")
     err.status = 400
-    return err
+    throw err
   }
   if (dest.isSoft) {
     const err = new Error("外部映射目录仅支持只读操作")
