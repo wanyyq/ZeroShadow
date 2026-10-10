@@ -182,6 +182,44 @@ export interface EntryStat {
   partial?: boolean
 }
 
+/** /fs/details：需要读文件才能拿到的扩展元数据（签名 / 哈希 / EXIF / 作者 …） */
+export interface EntryDetails {
+  path: string
+  size: number
+  softReadOnly: boolean
+  /** [标签, 值]，顺序由服务端决定，前端只负责显示 */
+  magic: { label: string; mime: string | null; kind: string; signature: string } | null
+  hashes: { md5: string; sha1: string; sha256: string } | null
+  hashNote: string | null
+  contentVersion: string | null
+  image:
+    | {
+        width: number
+        height: number
+        bitDepth?: number
+        colorType?: string
+        interlaced?: boolean
+        megapixels?: number
+        aspect?: string
+      }
+    | null
+  exif: [string, string][] | null
+  doc: [string, string][] | null
+  media: [string, string][] | null
+  text: {
+    encoding?: string
+    encodingLabel?: string
+    encodingConfident?: boolean
+    bom?: boolean
+    eol?: string
+    eolLabel?: string
+    lines?: number
+    chars?: number
+    truncated?: boolean
+  } | null
+  timestamps: { mtime: number; created: number; atime: number; ctime: number }
+}
+
 export interface Member {
   id: string
   username: string

@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon"
 import { downloadUrl, triggerDownload } from "@/lib/api"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { previewType } from "@/lib/format"
+import { isMarkdown, renderMarkdown } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/state/auth"
 
@@ -26,7 +27,8 @@ function copyToClipboard(text: string, okMsg: string) {
   )
 }
 
-export default function PreviewPage() {  const [params] = useSearchParams()
+export default function PreviewPage() {
+  const [params] = useSearchParams()
   const navigate = useNavigate()
   const { me } = useAuth()
   const entryPath = params.get("path") || ""
@@ -40,6 +42,9 @@ export default function PreviewPage() {  const [params] = useSearchParams()
   const kind: string = previewKind ?? "text"
   const url = supported ? downloadUrl(entryPath, true) : ""
   const [text, setText] = React.useState<string | null>(null)
+  // Markdown 文件默认渲染，可切回源码；其余文本文件只有源码视图
+  const markdown = supported && kind === "text" && isMarkdown(name)
+  const [sourceView, setSourceView] = React.useState(false)
   const [scale, setScale] = React.useState(0)
   const [pos, setPos] = React.useState({ x: 0, y: 0 })
   const [fitScale, setFitScale] = React.useState(1)
@@ -49,6 +54,14 @@ export default function PreviewPage() {  const [params] = useSearchParams()
   const lastMouse = React.useRef({ x: 0, y: 0 })
 
   const displayScale = scale || fitScale
+
+  // 渲染结果只跟正文有关，切换视图/缩放时不必重算
+  const html = React.useMemo(() => (markdown && text ? renderMarkdown(text) : ""), [markdown, text])
+  // 渲染器把原始 HTML 当纯文本（安全前提），命中时给个提示，免得用户以为是渲染坏了
+  const rawHtml = React.useMemo(
+    () => markdown && !!text && /<(?:[a-z!/][^>]*)>/i.test(text),
+    [markdown, text]
+  )
 
   React.useEffect(() => {
     if (!me.perms.preview) {
@@ -70,7 +83,7 @@ export default function PreviewPage() {  const [params] = useSearchParams()
     return () => window.removeEventListener("keydown", handler)
   }, [url, kind, supported, navigate])
 
-  React.useEffect(() => { setScale(0); setPos({ x: 0, y: 0 }); setFitScale(1) }, [url])
+  React.useEffect(() => { setScale(0); setPos({ x: 0, y: 0 }); setFitScale(1); setSourceView(false) }, [url])
 
   const calcFit = React.useCallback(() => {
     const img = imgRef.current
@@ -167,6 +180,11 @@ export default function PreviewPage() {  const [params] = useSearchParams()
               <Button size="icon-xs" variant="ghost" onClick={resetZoom}><Icon name="rotate-cw" /></Button>
             </>
           )}
+          {markdown && (
+            <Button size="xs" variant="ghost" onClick={() => setSourceView((v) => !v)}>
+              <Icon name={sourceView ? "eye" : "code"} /> {sourceView ? "预览" : "源码"}
+            </Button>
+          )}
           <Button size="icon-xs" variant="ghost" onClick={() => navigate(-1)}><Icon name="x" /></Button>
         </div>
       </div>
@@ -223,7 +241,24 @@ export default function PreviewPage() {  const [params] = useSearchParams()
             <p className="max-w-md truncate text-xs text-muted-foreground">{name}</p>
           </div>
         )}
-        {supported && kind === "text" && (
+        {supported && kind === "text" && markdown && !sourceView && (
+          <div className="h-full overflow-auto bg-background">
+            {rawHtml && (
+              <div className="flex items-start gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+                <Icon name="info" className="mt-0.5 size-3.5 shrink-0" />
+                <span>文件里含原始 HTML 标签，出于安全考虑按纯文本显示；可切到「源码」查看原文。</span>
+              </div>
+            )}
+            {text === null ? (
+              <p className="p-6 text-sm text-muted-foreground">加载中…</p>
+            ) : (
+              // html 由 lib/markdown.ts 生成：源文本先整体转义再解析，输出里不含
+              // 任何来自文件的标签，因此这里的 dangerouslySetInnerHTML 没有 XSS 通道
+              <article className="md-body" dangerouslySetInnerHTML={{ __html: html }} />
+            )}
+          </div>
+        )}
+        {supported && kind === "text" && (!markdown || sourceView) && (
           <div className="h-full overflow-auto bg-muted/30">
             <pre className={cn("p-6 font-mono text-sm whitespace-pre-wrap", text ? "" : "opacity-50")}>
               {text ?? "加载中…"}

@@ -465,6 +465,50 @@ X-ZS-Group: <小组 id>
 - 目录会额外带 `files` / `dirs` / `partial`（`partial: true` 表示条目太多没统计完，上限约 20 万个）；
 - `path` 为空时返回根目录信息，`name` 为 `根目录`。
 
+### `GET /api/fs/details`
+
+按文件内容解析出的扩展元数据：文件签名（magic）、校验和、图片尺寸与 EXIF、文档作者、
+音视频时长与标签、文本编码等。基础字段请用 `GET /api/fs/stat`。
+
+- 权限：`details`（成员固定开启，访客关闭）　限流：是
+- 查询参数：`path`（**必须是文件**，目录返回 400）
+- 响应（字段随文件类型出现，没有的项为 `null`）：
+
+```json
+{
+  "path": "资料/封面.png",
+  "size": 336890,
+  "softReadOnly": false,
+  "timestamps": { "mtime": 1786266181647, "created": 1786266181215, "atime": 1791642176582, "ctime": 1790847216293 },
+  "magic": { "label": "PNG 图像", "mime": "image/png", "kind": "image", "signature": "89 50 4E 47 0D 0A 1A 0A 00 00 00 0D 49 48 44 52" },
+  "hashes": { "md5": "3a4574ce…", "sha1": "56a657e3…", "sha256": "b179a58f…" },
+  "hashNote": null,
+  "contentVersion": "1786266181647-336890-VqZX47JF5-E0CdBB5tu6pvClavg",
+  "image": { "width": 1502, "height": 926, "bitDepth": 8, "colorType": "真彩色 + Alpha", "interlaced": false, "megapixels": 1.39, "aspect": "1.622 : 1" },
+  "exif": null,
+  "doc": null,
+  "media": null,
+  "text": null
+}
+```
+
+| 字段 | 说明 |
+|:--|:--|
+| `magic` | `label` 是按**文件头签名**识别出的格式（与扩展名无关），`kind` 取 `image` / `video` / `audio` / `document` / `archive` / `font` / `code`… / `text` / `empty` / `unknown`，`signature` 是前 16 字节的十六进制 |
+| `hashes` | 流式算出的 MD5 / SHA-1 / SHA-256；**文件超过 64MB 时为 `null`**，原因写在 `hashNote` |
+| `contentVersion` | `<mtimeMs>-<size>-<sha1 base64url>`，与 `/api/fs/file` 的 `baseVersion`、WebDAV 的 `ETag` 同源 |
+| `image` | 像素尺寸（PNG / JPEG / GIF / BMP / WebP / ICO / PSD / TIFF），另带 `bitDepth` / `colorType` / `megapixels` / `aspect` |
+| `exif` | `[标签, 值]` 数组，按出现顺序排列（相机、曝光、时间、作者、GPS…） |
+| `doc` | PDF Info、OOXML `docProps`、PNG 文本块等文档属性，同样是 `[标签, 值]` 数组 |
+| `media` | 时长与标签：MP4 / MOV / M4A 的 `mvhd`、WAV 头、FLAC `STREAMINFO`、ID3v2 |
+| `text` | 仅文本类文件：`encoding` / `encodingLabel` / `encodingConfident` / `bom` / `eol` / `eolLabel` / `lines` / `chars`；文本超过 8MB 时只有 `{ "truncated": true }` |
+| `timestamps` | 修改 / 创建 / 访问 / 状态变更时间（毫秒） |
+| `softReadOnly` | 是否来自 `FILES_SOFT_DIR` 只读映射目录 |
+
+- **读取量有上限**：识别与解析只读文件头尾各 64KB，哈希是流式的且限 64MB，
+  文本统计限 8MB —— 点一次详情不会把几个 GB 的文件整个读一遍；
+- 任何一段解析失败都只让**那一段**为 `null`，不会返回 5xx。
+
 ### `GET /api/fs/search`
 
 按文件名递归搜索。

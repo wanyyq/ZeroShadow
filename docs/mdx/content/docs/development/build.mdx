@@ -56,7 +56,7 @@ pnpm setup          # 安装 server 与 web 的依赖
 pnpm dev:server     # 后端：node --watch server/index.js（保存自动重启），端口取根 .env 的 PORT
 pnpm dev:web        # 前端：Vite 开发服务器，默认 5173
 
-pnpm typecheck      # web: tsc --noEmit
+pnpm typecheck      # web: tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit
 pnpm lint           # web: eslint .
 pnpm -C web format  # web: prettier --write "**/*.{ts,tsx}"
 ```
@@ -91,6 +91,7 @@ cd server && pnpm bundle    # 后端打包成 dist/server-bundle.cjs（esbuild�
 | `web/dist/index.html` | 入口页，无内联脚本（因为应用外壳 CSP 是 `script-src 'self'`） |
 | `web/dist/assets/*.js` / `*.css` | 带内容哈希，缓存 1 年（`immutable`） |
 | `web/dist/resources/*` | 字体、lucide、gsap、tailwindcss，缓存 1 天 |
+| `web/dist/robustness/*` | [兼容模式](/docs/zeroshadow/development/architecture) 那一份独立静态页面：由 `web/public/`（Vite 的 `publicDir`）**原样复制**，不经 Vite 打包、不引任何 npm 依赖，入口是 `/robustness/index.html` |
 
 后端的缓存策略写在 `server/index.js` 的 `express.static` 里：
 `assets/**` → 一年 immutable，`resources/**` → 86400 秒，其余 → `no-cache`。

@@ -50,6 +50,7 @@ import {
 } from "../encoding.js"
 import { isVisibleForContext } from "../groups.js"
 import { compareVersion, versionOf } from "../version.js"
+import { inspectFile } from "../fileinfo.js"
 import { moveToTrash, trashAvailable } from "../trash.js"
 import { contentDisposition } from "../http.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
@@ -896,8 +897,29 @@ router.get("/stat", requirePerm("details"), rateLimit, async (req, res, next) =>
   }
 })
 
-router.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) => {
+/**
+ * 文件「详细信息」的扩展元数据：签名（magic）、校验和、EXIF、文档作者、
+ * 音视频时长、文本编码……
+ *
+ * 为什么不并进 /stat：
+ *   ① /stat 是"秒回"的基础字段（名称/大小/时间），而这个端点要真的读文件
+ *      （最多 64KB 头尾 + 流式哈希），两者拆开前端才能先渲染基础信息、再补详情；
+ *   ② 目录本来就没有这些信息，混在一起会让 /stat 多出一堆 null 字段。
+ */
+router.get("/details", requirePerm("details"), rateLimit, async (req, res, next) => {
   try {
+    const resolved = resolveAny(normRel(req.query.path))
+    assertContextVisible(req, resolved.rel)
+    const stat = await assertExists(resolved.abs)
+    if (!stat.isFile()) throw httpError(400, "只有文件才有这些详细信息")
+    const details = await inspectFile(resolved.abs, stat)
+    res.json({ path: resolved.rel, softReadOnly: !!resolved.isSoft, ...details })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) => {  try {
     const q = String(req.query.q || "").trim()
     if (!q || q.length > 100) throw httpError(400, "请输入搜索关键词")
     const resolved = resolveAny(normRel(req.query.path))

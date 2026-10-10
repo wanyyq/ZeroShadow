@@ -81,6 +81,8 @@ Not found in remote cache:
 | 构建前端（`pnpm build`） | ≥ 20.19（或 ≥ 22.12） |
 | 产物内嵌的运行时 | 由 pkg 目标决定，即 `node18-*` |
 
+本机该装哪个 Node、怎么构建前端，见 [开发与构建](/docs/zeroshadow/development/build)。
+
 ## 构建用法
 
 ```powershell
@@ -254,6 +256,40 @@ ZeroShadow-1.1.0-windows-x64.zip
 `.jwt-secret` 出了门**（`ZeroShadow-Release.zip`，在门禁机制建立之前产出）。
 
 正确做法：让 `build-release.ps1` / `Auto-building.bat` 从干净目录重新组装，不要手工 zip。
+</Callout>
+
+## 改版本号的完整清单
+
+版本号是**写死在代码与文档里**的，不从 `package.json` 读（浏览器里拿不到），
+所以每次发版要逐项同步。目前一共 8 处：
+
+| # | 位置 | 说明 |
+|:--|:--|:--|
+| 1 | 根 `package.json` 的 `version` | **发布版本的唯一来源**：`build-release.ps1` 的归档命名取自它 |
+| 2 | `server/index.js` 的 `/api/meta` | 接口返回的版本号 |
+| 3 | `web/src/version.ts` 的 `VERSION` | 前端唯一的版本号来源，关于页与侧边栏都从这里读 |
+| 4 | `server/package.json` 的 `version` | 与根保持一致，避免三个包各说各话 |
+| 5 | `web/package.json` 的 `version` | 同上 |
+| 6 | `README.md` 的「发布包内容」示例 | 形如 `ZeroShadow-<版本>-windows-x64.zip` |
+| 7 | `docs/使用手册.md` 的界面结构示意图 | 侧边栏品牌区显示 `v<版本号>` |
+| 8 | `docs/API参考.md` 里 `/api/meta` 的响应示例 | 与第 2 项一致 |
+
+另外几处**不是版本号但常一起改**：
+
+- `docs/README.md` 开头的「本文档对应仓库当前 `main` 分支（`package.json` 版本 `x.y.z`）」；
+- `CHANGELOG.md`（以及内容应保持一致的 `docs/changelog.md`）顶部追加新版本一节
+  （Keep a Changelog 风格）；
+- `package-release.ps1` 用法注释里的示例归档名（纯注释，改了更清楚，不改也不影响功能）。
+
+改完用这条命令核对，应当只剩更新日志里的历史版本号：
+
+```bash
+grep -rn "1\.1\.0" --include="*.json" --include="*.js" --include="*.ts" --include="*.md" . | grep -v node_modules
+```
+
+<Callout type="warn" title="别动 server/dist/server-bundle.cjs">
+它是 esbuild 的产物、由 `build-release.ps1` 重新生成，手工改没有意义。
+发布流程会先 `pnpm -C server bundle` 再拿产物去 pkg。
 </Callout>
 
 ## GitHub Actions 自动编译

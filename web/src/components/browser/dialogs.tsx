@@ -19,7 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Icon } from "@/components/icon"
 import { api, downloadUrl } from "@/lib/api"
 import { fileKind, formatBytes, formatDate, joinPath, previewType } from "@/lib/format"
-import type { Entry, EntryStat } from "@/lib/types"
+import type { Entry, EntryDetails, EntryStat } from "@/lib/types"
 import { toast } from "sonner"
 import { detectConflicts } from "@/lib/conflict"
 import { CONFLICT_CANCELLED, isCaseInsensitive } from "@/lib/conflict"
@@ -302,6 +302,61 @@ export function DeleteDialog({
   )
 }
 
+/** 复制一行文本并给反馈（沿用模块内其它地方的 clipboard 兜底写法） */
+function copyLine(text: string, label: string) {
+  const clipboard = navigator.clipboard
+  if (!clipboard?.writeText) {
+    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    return
+  }
+  void clipboard.writeText(text).then(
+    () => toast.success(`已复制${label}`),
+    () => toast.error("复制失败，请手动选择文本")
+  )
+}
+
+/** 详情里的一行：[标签, 值]，可带一个复制按钮 */
+function DetailRow({
+  label,
+  value,
+  copy,
+}: {
+  label: string
+  value: React.ReactNode
+  copy?: string
+}) {
+  return (
+    <div className="grid grid-cols-[7.5rem_1fr] items-start gap-2">
+      <span className="pt-0.5 text-muted-foreground">{label}</span>
+      <span className="flex min-w-0 items-start gap-1">
+        <span className="min-w-0 break-all">{value}</span>
+        {copy ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            className="shrink-0 text-muted-foreground"
+            title="复制"
+            onClick={() => copyLine(copy, label)}
+          >
+            <Icon name="copy" />
+          </Button>
+        ) : null}
+      </span>
+    </div>
+  )
+}
+
+/** 把 [标签, 值] 数组渲染成若干行（EXIF / 文档属性 / 媒体信息共用） */
+function DetailPairs({ pairs }: { pairs: [string, string][] }) {
+  return (
+    <>
+      {pairs.map(([label, value]) => (
+        <DetailRow key={label} label={label} value={value} copy={value} />
+      ))}
+    </>
+  )
+}
+
 export function DetailsDialog({
   open,
   onOpenChange,
@@ -312,17 +367,43 @@ export function DetailsDialog({
   entryPath: string | null
 }) {
   const [stat, setStat] = React.useState<EntryStat | null>(null)
+  const [details, setDetails] = React.useState<EntryDetails | null>(null)
   const [loading, setLoading] = React.useState(false)
+  const [detailError, setDetailError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!open || entryPath === null) return
+    let alive = true
     setLoading(true)
     setStat(null)
+    setDetails(null)
+    setDetailError(null)
     api
       .get<EntryStat>("/fs/stat", { path: entryPath })
-      .then(setStat)
-      .catch((err) => toast.error((err as Error).message))
-      .finally(() => setLoading(false))
+      .then((value) => {
+        if (!alive) return
+        setStat(value)
+        setLoading(false)
+        // 详情要真读文件（哈希、EXIF、文档属性），所以等基础字段先渲染出来再补；
+        // 目录没有这些信息，也就不必发这个请求（服务端会回 400）
+        if (value.type !== "file") return
+        return api
+          .get<EntryDetails>("/fs/details", { path: entryPath })
+          .then((d) => {
+            if (alive) setDetails(d)
+          })
+          .catch((err) => {
+            if (alive) setDetailError((err as Error).message)
+          })
+      })
+      .catch((err) => {
+        if (!alive) return
+        toast.error((err as Error).message)
+        setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
   }, [open, entryPath])
 
   const rows: [string, React.ReactNode][] = stat
@@ -339,6 +420,12 @@ export function DetailsDialog({
           : []),
         ["修改时间", formatDate(stat.mtime)],
         ["创建时间", formatDate(stat.created)],
+        ...(details
+          ? ([
+              ["访问时间", formatDate(details.timestamps.atime)],
+              ["状态变更时间", formatDate(details.timestamps.ctime)],
+            ] as [string, React.ReactNode][])
+          : []),
         [
           "访客可见性",
           stat.hiddenFromGuest ? (
@@ -349,12 +436,50 @@ export function DetailsDialog({
             "可见"
           ),
         ],
+        ...(details?.softReadOnly
+          ? ([
+              [
+                "存储位置",
+                <Badge variant="secondary" key="soft">
+                  <Icon name="folder-lock" className="size-3" /> 外部映射目录（只读）
+                </Badge>,
+              ],
+            ] as [string, React.ReactNode][])
+          : []),
       ]
     : []
 
+  const im = details?.image
+  const tx = details?.text
+  const summary = () =>
+    [
+      `名称：${stat?.name ?? ""}`,
+      `路径：/${stat?.path ?? ""}`,
+      `大小：${stat ? formatBytes(stat.size) : ""}`,
+      `修改时间：${stat ? formatDate(stat.mtime) : ""}`,
+      details?.magic ? `内容识别：${details.magic.label}${details.magic.mime ? ` (${details.magic.mime})` : ""}` : "",
+      details?.magic?.signature ? `签名：${details.magic.signature}` : "",
+      details?.hashes ? `MD5：${details.hashes.md5}` : "",
+      details?.hashes ? `SHA-1：${details.hashes.sha1}` : "",
+      details?.hashes ? `SHA-256：${details.hashes.sha256}` : "",
+      im ? `尺寸：${im.width} × ${im.height}` : "",
+      tx?.encodingLabel ? `文本编码：${tx.encodingLabel}${tx.bom ? "（带 BOM）" : ""}` : "",
+      tx?.lines !== undefined ? `行数：${tx.lines}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+  const section = (title: string, body: React.ReactNode) =>
+    body ? (
+      <div className="grid gap-2">
+        <div className="text-xs font-medium tracking-wide text-muted-foreground">{title}</div>
+        {body}
+      </div>
+    ) : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>详细信息</DialogTitle>
         </DialogHeader>
@@ -365,15 +490,131 @@ export function DetailsDialog({
             <Skeleton className="h-5 w-2/3" />
           </div>
         ) : stat ? (
-          <div className="grid gap-2.5 text-sm">
-            {rows.map(([label, value]) => (
-              <div key={label} className="grid grid-cols-[6rem_1fr] items-center gap-2">
-                <span className="text-muted-foreground">{label}</span>
-                <span className="break-all">{value}</span>
-              </div>
-            ))}
+          <div className="max-h-[65vh] overflow-y-auto pr-3">
+            {/* 用原生 overflow 容器而不是 ScrollArea：对话框高度是内容撑开的
+                （没有确定高度），而 ScrollArea 的 Viewport 是 size-full，
+                百分比高度在自动高度父元素上会退化成内容高度 —— 超出的部分会
+                被裁掉且没有滚动条 */}
+            <div className="grid gap-5 text-sm">
+              {section(
+                "基本信息",
+                rows.map(([label, value]) => (
+                  <DetailRow key={label} label={label} value={value} />
+                ))
+              )}
+
+              {/* 以下都是"读一遍文件才能拿到"的信息，只有文件才有（目录不显示这些分区） */}
+              {stat.type === "file" ? (
+                <>
+                  {/* 扩展名可能与真实内容不符（把 .zip 改成 .png 之类），
+                      这里显示的是按文件内容认出来的结果 */}
+                  {section(
+                    "内容识别",
+                    details?.magic ? (
+                      <>
+                        <DetailRow label="识别结果" value={details.magic.label} copy={details.magic.label} />
+                        {details.magic.mime ? (
+                          <DetailRow label="MIME 类型" value={details.magic.mime} copy={details.magic.mime} />
+                        ) : null}
+                        {details.magic.signature ? (
+                          <DetailRow
+                            label="文件签名"
+                            value={<code className="font-mono text-xs">{details.magic.signature}</code>}
+                            copy={details.magic.signature}
+                          />
+                        ) : null}
+                      </>
+                    ) : detailError ? (
+                      <div className="text-muted-foreground">读取失败：{detailError}</div>
+                    ) : (
+                      <div className="text-muted-foreground">正在读取文件内容…</div>
+                    )
+                  )}
+                </>
+              ) : null}
+
+              {section(
+                "校验和",
+                <>
+                  {details?.hashes ? (
+                    <>
+                      {(["md5", "sha1", "sha256"] as const).map((algo) => (
+                        <DetailRow
+                          key={algo}
+                          label={algo === "sha1" ? "SHA-1" : algo.toUpperCase()}
+                          value={<code className="font-mono text-xs">{details.hashes![algo]}</code>}
+                          copy={details.hashes![algo]}
+                        />
+                      ))}
+                      {details.contentVersion ? (
+                        <DetailRow
+                          label="内容版本"
+                          value={<code className="font-mono text-xs">{details.contentVersion}</code>}
+                          copy={details.contentVersion}
+                        />
+                      ) : null}
+                    </>
+                  ) : details?.hashNote ? (
+                    <div className="text-muted-foreground">{details.hashNote}</div>
+                  ) : detailError ? (
+                    <div className="text-muted-foreground">{detailError}</div>
+                  ) : (
+                    <div className="text-muted-foreground">正在计算…</div>
+                  )}
+                </>
+              )}
+
+              {section(
+                "图像",
+                im ? (
+                  <>
+                    <DetailRow label="尺寸" value={`${im.width} × ${im.height} 像素`} copy={`${im.width}x${im.height}`} />
+                    {im.megapixels !== undefined ? <DetailRow label="像素量" value={`${im.megapixels} MP`} /> : null}
+                    {im.aspect ? <DetailRow label="宽高比" value={im.aspect} /> : null}
+                    {im.bitDepth !== undefined ? <DetailRow label="位深" value={`${im.bitDepth} bit`} /> : null}
+                    {im.colorType ? <DetailRow label="色彩模式" value={im.colorType} /> : null}
+                    {im.interlaced ? <DetailRow label="交错扫描" value="是" /> : null}
+                    {details?.exif ? <DetailPairs pairs={details.exif} /> : null}
+                  </>
+                ) : details?.exif ? (
+                  <DetailPairs pairs={details.exif} />
+                ) : null
+              )}
+
+              {section("文档属性", details?.doc ? <DetailPairs pairs={details.doc} /> : null)}
+              {section("媒体信息", details?.media ? <DetailPairs pairs={details.media} /> : null)}
+
+              {section(
+                "文本信息",
+                tx?.truncated ? (
+                  <div className="text-muted-foreground">文件较大，未统计编码与行数</div>
+                ) : tx?.encodingLabel ? (
+                  <>
+                    <DetailRow
+                      label="编码"
+                      value={`${tx.encodingLabel}${tx.encodingConfident === false ? "（推测）" : ""}`}
+                      copy={tx.encodingLabel}
+                    />
+                    <DetailRow label="BOM" value={tx.bom ? "有" : "无"} />
+                    <DetailRow label="换行风格" value={tx.eolLabel || tx.eol || "-"} />
+                    <DetailRow label="行数" value={String(tx.lines ?? "-")} />
+                    <DetailRow label="字符数" value={String(tx.chars ?? "-")} />
+                  </>
+                ) : null
+              )}
+            </div>
           </div>
         ) : null}
+        <DialogFooter>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!stat}
+            onClick={() => copyLine(summary(), "全部信息")}
+          >
+            <Icon name="clipboard-copy" /> 复制全部信息
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

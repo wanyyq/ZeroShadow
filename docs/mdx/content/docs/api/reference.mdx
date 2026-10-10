@@ -176,7 +176,7 @@ X-Requested-With: XMLHttpRequest
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.1.0" }
+{ "name": "ZeroShadow", "version": "1.1.2" }
 ```
 
 <Callout type="info" title="version 是写死的，改版本号要动三处">
@@ -280,7 +280,8 @@ X-Requested-With: XMLHttpRequest
   },
   "uploadLimitMB": 512,
   "groupId": "default",
-  "group": null
+  "group": null,
+  "caseInsensitive": true
 }
 ```
 
@@ -288,6 +289,10 @@ X-Requested-With: XMLHttpRequest
 
 `perms` 是**已经算进小组收窄**的结果；带小组请求时 `groupId` 是小组 id、`group` 是
 `{ id, name, color, leaders }`（只含公开字段），回退到默认上下文时分别是 `"default"` 与 `null`。
+
+- `caseInsensitive` 表示**服务端所在文件系统是否不区分大小写**（`win32` / `darwin` 为 `true`）——
+  前端的同名冲突检测必须用它，不能用浏览器 UA 猜：两者可能不在同一台机器上
+  （Windows 浏览器 + Linux 服务端会分叉成"界面说冲突、服务端不冲突"）。
 
 ### GET /api/auth/groups
 
@@ -325,6 +330,7 @@ X-Requested-With: XMLHttpRequest
 | `POST` | `/api/fs/copy` | 复制（`memberPerms.copy`） | 批量复制 |
 | `POST` | `/api/fs/move` | 移动（`memberPerms.move`） | 批量移动 |
 | `GET` | `/api/fs/stat` | 查看详细信息（`memberPerms.details`） | 查看文件 / 目录详情 |
+| `GET` | `/api/fs/details` | 查看详细信息（`memberPerms.details`） | 按内容解析的扩展元数据（签名 / 哈希 / EXIF / 作者 / 时长） |
 | `GET` | `/api/fs/search` | 浏览目录（`memberPerms.browse` / `guestPerms.browse`） | 按文件名递归搜索 |
 | `POST` | `/api/fs/guest-visibility` | 管理访客可见性（`memberPerms.manageGuestVisibility`） | 设置路径对访客隐藏 / 可见 |
 | `POST` | `/api/fs/compress` | 压缩为 Zip（`memberPerms.compressZip` / `guestPerms.compressZip`） | 启动在线压缩任务 |
@@ -491,9 +497,25 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 
 - 权限：删除（`memberPerms.delete`）
 - 请求体：`{ "paths": ["a.txt", "目录/b"] }`，最多 **500** 项
-- 响应：`{ "deleted": 2 }`
+- 响应：
+
+```json
+{ "deleted": 0, "trashed": 2, "permanentlyDeleted": [] }
+```
+
+| 字段 | 含义 |
+|:--|:--|
+| `trashed` | 已**移入回收站**的数量（可由超管在 `/api/admin/trash` 还原） |
+| `deleted` | 被**彻底删除**的数量（回收站被关闭或不可用时才会大于 0） |
+| `permanentlyDeleted` | 没能进回收站、已彻底删除的路径列表 —— 前端据此明确告知用户"这些救不回来" |
+
 - 错误：`400 参数格式错误`、`400 不能删除根目录`
 - 副作用：清理与被删路径相关的访客隐藏记录。
+- 说明：`trashEnabled` 为 `false`、或回收站目录不可用（`GET /api/admin/trash` 的 `available` 为 `false`）时，
+  删除会直接生效、不进回收站，这时数量记在 `deleted` 里，路径同时进 `permanentlyDeleted`；
+  回收站可用、但某一项**入站失败**（路径过长等）时，这一项会**原样保留并跳过**，不会被悄悄彻底删除。
+  回收站数据放在 `data/trash/`，**不在网盘目录内**（否则会被列目录、搜索、打包）。
+  WebDAV 的 `DELETE` 行为与此一致。
 
 ### POST /api/fs/copy 与 POST /api/fs/move
 
@@ -554,6 +576,52 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 
 - 目录会额外带 `files` / `dirs` / `partial`（`partial: true` 表示条目太多没统计完，上限约 20 万个）；
 - `path` 为空时返回根目录信息，`name` 为 `根目录`。
+
+### GET /api/fs/details
+
+按文件内容解析出的扩展元数据：文件签名（magic）、校验和、图片尺寸与 EXIF、文档作者、
+音视频时长与标签、文本编码等。基础字段请用 `GET /api/fs/stat`。
+
+- 权限：查看详细信息（`memberPerms.details`，成员固定开启、访客关闭）
+- 限流：是
+- 查询参数：`path`（**必须是文件**，目录返回 400 `只有文件才有这些详细信息`）
+- 响应（字段随文件类型出现，没有的项为 `null`）：
+
+```json
+{
+  "path": "资料/封面.png",
+  "size": 336890,
+  "softReadOnly": false,
+  "timestamps": { "mtime": 1786266181647, "created": 1786266181215, "atime": 1791642176582, "ctime": 1790847216293 },
+  "magic": { "label": "PNG 图像", "mime": "image/png", "kind": "image", "signature": "89 50 4E 47 0D 0A 1A 0A 00 00 00 0D 49 48 44 52" },
+  "hashes": { "md5": "3a4574ce…", "sha1": "56a657e3…", "sha256": "b179a58f…" },
+  "hashNote": null,
+  "contentVersion": "1786266181647-336890-VqZX47JF5-E0CdBB5tu6pvClavg",
+  "image": { "width": 1502, "height": 926, "bitDepth": 8, "colorType": "真彩色 + Alpha", "interlaced": false, "megapixels": 1.39, "aspect": "1.622 : 1" },
+  "exif": null,
+  "doc": null,
+  "media": null,
+  "text": null
+}
+```
+
+| 字段 | 说明 |
+|:--|:--|
+| `magic` | `label` 是按**文件头签名**识别出的格式（与扩展名无关），`kind` 取 `image` / `video` / `audio` / `document` / `archive` / `font` / `program` / `database` / `text` / `empty` / `unknown`，`signature` 是前 16 字节的十六进制 |
+| `hashes` | 流式算出的 MD5 / SHA-1 / SHA-256；**文件超过 64MB 时为 `null`**，原因写在 `hashNote` |
+| `contentVersion` | `<mtimeMs>-<size>-<sha1 base64url>`，与 `/api/fs/file` 的 `baseVersion`、WebDAV 的 `ETag` 同源 |
+| `image` | 像素尺寸（PNG / JPEG / GIF / BMP / WebP / ICO / PSD / TIFF），另带 `bitDepth` / `colorType` / `megapixels` / `aspect` |
+| `exif` | `[标签, 值]` 数组，按出现顺序排列（相机厂商型号、拍摄时间、ISO、曝光、光圈、焦距、闪光灯、镜头、作者、版权、GPS…） |
+| `doc` | PDF Info、OOXML `docProps`（创建者 / 最后修改者 / 公司 / 页数字数）、PNG 文本块等文档属性，同样是 `[标签, 值]` 数组 |
+| `media` | 时长与标签：MP4 / MOV / M4A 的 `mvhd`、WAV 头、FLAC `STREAMINFO`、ID3v2 |
+| `text` | 仅文本类文件：`encoding` / `encodingLabel` / `encodingConfident` / `bom` / `eol` / `eolLabel` / `lines` / `chars`；文本超过 8MB 时只有 `{ "truncated": true }` |
+| `timestamps` | 修改 / 创建 / 访问 / 状态变更时间（毫秒） |
+| `softReadOnly` | 是否来自 `FILES_SOFT_DIR` 只读映射目录 |
+
+<Callout type="info" title="读取量有上限，失败也只影响单块">
+识别与解析只读文件头尾各 64KB，哈希是流式的且限 64MB，文本统计限 8MB —— 点一次详情
+不会把几个 GB 的文件整个读一遍。任何一段解析失败都只让**那一段**为 `null`，不会返回 5xx。
+</Callout>
 
 ### GET /api/fs/search
 
@@ -659,6 +727,7 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
   "name": "gbk.txt",
   "size": 42,
   "mtime": 1737000000000,
+  "baseVersion": "1737000000000-42-Xq7vQ1mZk9pYt3Rw8sLd2A",
   "encoding": "gb18030",
   "encodingConfident": true,
   "eol": "crlf",
@@ -670,6 +739,7 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 
 | 字段 | 说明 |
 |:--|:--|
+| `baseVersion` | **并发编辑保护的版本标识**；保存时原样回传给 [`POST /api/fs/save-file`](#post-apifssave-file)，服务端据此判断文件是否被别人改过 |
 | `encoding` | 实际用于解码的编码 id |
 | `encodingConfident` | `false` 表示编码是**猜的**，前端应提示用户「如果乱码请手动切换编码」 |
 | `eol` | 原始换行风格：`crlf` / `lf` / `cr`（内容里一律是 `\n`，见下） |
@@ -703,7 +773,7 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 - 请求体：
 
 ```json
-{ "path": "notes.md", "content": "……", "encoding": "utf8", "eol": "lf" }
+{ "path": "notes.md", "content": "……", "encoding": "utf8", "eol": "lf", "baseVersion": "1737000000000-42-Xq7vQ1mZk9pYt3Rw8sLd2A" }
 ```
 
 | 字段 | 默认 | 说明 |
@@ -712,8 +782,17 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 | `content` | `""` | 正文；换行按 `\n` 提交 |
 | `encoding` | `utf8` | 写回用的编码，取值必须是上面列出的编码 id |
 | `eol` | `lf` | 写回时的换行风格：`crlf` / `lf` / `cr`（非法值退回 `lf`） |
+| `baseVersion` | — | **并发编辑保护**：读取时 `GET /api/fs/file` 返回的 `baseVersion`，原样带回 |
 
 - 响应：`{ "ok": true, "bytes": 1234, "encoding": "utf8", "eol": "lf" }`
+- **并发编辑保护**：
+  - 带上 `baseVersion` 时，服务端会把它与磁盘上当前内容的版本比对；**不一致则拒绝写入**并返回 **409**，
+    响应体是 `{ "error": "这个文件在您打开之后已被其他人修改……", "code": "VERSION_CONFLICT", "currentVersion": "<服务端当前版本>" }`。
+    此时**磁盘内容一字未动**，前端据此弹出「重新加载 / 强制覆盖」；
+  - 不带 `baseVersion` 时仍可保存（向后兼容第三方脚本），但服务端会记一条
+    `save_file_without_version` 日志；
+  - 目标文件不存在（新建）时不算冲突；
+  - 想强制覆盖，**省略** `baseVersion` 即可。
 - 说明：
   - 编码为 `utf8bom` / `utf16le` / `utf16be` 时**会写入对应的 BOM**（UTF-16 没有 BOM 就无法区分字节序）；
   - **目标编码表示不了的字符会被拒绝，而不是静默写成 `?`**：返回 **400**，
@@ -794,11 +873,16 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 | `DELETE` | `/api/admin/groups/:id` | 仅超级管理员 | 删除小组（该组待办转为全体可见） |
 | `GET` | `/api/admin/logs` | 仅超级管理员 | 查询日志（可按天、级别、审计、关键词） |
 | `DELETE` | `/api/admin/logs` | 仅超级管理员 | 清空所有日志文件 |
+| `GET` | `/api/admin/logs/export` | 仅超级管理员 | 把日志导出为 jsonl / csv 文件（不截断） |
 | `GET` | `/api/admin/metrics` | 仅超级管理员 | 系统指标与请求指标 |
 | `GET` | `/api/admin/metrics/history` | 仅超级管理员 | 读取某一天的指标样本 |
 | `GET` | `/api/admin/backups` | 仅超级管理员 | 列出四个受管文件的备份 |
 | `POST` | `/api/admin/backups` | 仅超级管理员 | 立即创建一次快照 |
 | `POST` | `/api/admin/backups/restore` | 仅超级管理员 | 用某份快照回滚某个文件 |
+| `GET` | `/api/admin/trash` | 仅超级管理员 | 回收站列表与占用统计 |
+| `POST` | `/api/admin/trash/restore` | 仅超级管理员 | 还原一条回收站记录 |
+| `POST` | `/api/admin/trash/purge` | 仅超级管理员 | 彻底删除一条回收站记录 |
+| `POST` | `/api/admin/trash/empty` | 仅超级管理员 | 清空回收站 |
 | `GET` | `/api/admin/status` | 仅超级管理员 | 服务器状态 |
 | `GET` | `/api/admin/tunnel` | 仅超级管理员 | 读取隧道配置与状态 |
 | `POST` | `/api/admin/tunnel` | 仅超级管理员 | 更新隧道配置并立即生效 |
@@ -879,7 +963,8 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 
 - 请求体：`{ "action": "enable" | "disable" | "delete", "ids": ["uuid1", "uuid2"] }`
 - 响应：`{ "count": 2 }`
-- 说明：禁用会同时让该成员的旧会话失效（`tokenVersion + 1`）。
+- 说明：禁用会同时让该成员的旧会话失效（`tokenVersion + 1`）；
+  **删除**还会把该成员从所有小组移除、其创建或被指派的待办做相应清理、并删掉其头像。
 - 错误：`400 参数格式错误`
 
 ### POST /api/admin/members/:id/password
@@ -924,6 +1009,7 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 ```
 
 `leaderCaps` 顶层字段是**可用能力清单**（给界面渲染开关用），每个小组里的 `leaderCaps` 才是实际取值。
+`perms` 是**该小组的权限收窄表**，键与 `memberPerms` 完全相同（19 个），值只会在全局权限基础上继续关闭。
 
 ### POST /api/admin/groups
 
@@ -932,8 +1018,13 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 - 请求体：`{ "name": "设计组", "color": "#5b8def", "members": [], "leaders": [], "perms": {}, "whitelist": [], "blacklist": [], "leaderCaps": {} }`
   （字段都可选；`perms` 未给的键默认 `true`）
 - 响应：`{ "group": { …完整小组对象… } }`
-- 错误：`400 名称不能为空`、`400 名称仅支持中英文、数字、空格与 _ . -（1-40 位）`、
-  `400 小组名称已存在`（不区分大小写）、`400 小组数量已达上限 200`
+- 规则与错误：
+  - `name` 必填，最多 40 字符，允许中英文、数字、空格与 `_` `.` `-` → `400 名称不能为空` /
+    `400 名称仅支持中英文、数字、空格与 _ . -（1-40 位）`；
+  - 组名重名（不区分大小写）→ `400 小组名称已存在`；
+  - 小组数量上限 **200** → `400 小组数量已达上限 200`；
+  - `leaders` 里不在 `members` 中的 id 会被丢弃；成员上限 **500**、组长上限 **100**；
+  - 路径列表会被清洗（最多 200 条），`color` 只接受 `#rrggbb`。
 
 ### PATCH /api/admin/groups/:id
 
@@ -992,6 +1083,8 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
   这样既省掉聚合开销，也避开一个真实的坑：`stats.users` 以用户名为键，而用户名可能**只有大小写不同**
   （例如 `Wangyq` 与 `wangyq`），Windows PowerShell 的 `ConvertFrom-Json` 会把它们判成重复键并直接报错。
 - **最新在最前面**；日志按天切分，超过 `logRetentionDays` 的文件会被定时清理。
+- `stats` 是对**本次返回的这批日志**做的聚合：`byLevel` / `byDay` / `users` 是计数字典，
+  `topEvents` 取出现次数最多的前 20 个事件。
 - 审计事件行会多一个 `"audit": true` 字段（界面里事件名前有盾牌图标）。
 
 ### DELETE /api/admin/logs
@@ -1000,6 +1093,28 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 
 - 响应：`{ "ok": true }`
 - 副作用：会记一条 `logs_clear` 审计日志。
+
+### GET /api/admin/logs/export
+
+把日志**下载导出**。与 `GET /api/admin/logs` 的区别是**不截断**：
+不受界面那个 2000 条上限约束，返回筛选范围内的全部记录。
+
+- 查询参数：
+
+| 参数 | 默认 | 说明 |
+|:--|:--|:--|
+| `format` | `jsonl` | `jsonl`（每行一个 JSON，与磁盘格式一致）或 `csv`。其它值返回 **400** |
+| `days` | `5` | 读取最近几天的日志文件，1–90 |
+| `level` | — | `info` / `warn` / `error` |
+| `q` | — | 关键词，匹配事件名 / 详情 / 用户名 / IP / 角色 |
+| `audit` | — | `1` 或 `true` 时只导出审计事件 |
+
+- 响应头：`Content-Type: application/x-ndjson`（`jsonl`）或 `text/csv; charset=utf-8`（`csv`），
+  带 `Content-Disposition: attachment`，文件名为 `zeroshadow-logs-<scope>-<days>d-<时间戳>.<ext>`。
+- CSV 细节：**首部带 UTF-8 BOM**、**使用 CRLF 换行**，列顺序为
+  `时间,级别,事件,用户,角色,IP,审计,详情`（`审计` 列输出 `是`/`否`）——
+  这样 Excel 打开中文不乱码。
+- 导出动作本身也会记一条 `logs_export` 审计日志。
 
 ### GET /api/admin/metrics
 
@@ -1022,10 +1137,10 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
 }
 ```
 
-- `mem` 是内存里的环形采样，长度由 `metricsMemMinutes`（默认 15）决定；
+- `mem` 是内存里的环形采样，长度由 `metricsMemMinutes`（默认 15）决定；采样间隔固定 **60 秒**（`config.sampleMs`）；
 - `requests.lastMinute` 是最近一分钟的计数（`s2` / `s3` / `s4` / `s5` 是状态码区间，`slow` 是慢请求数）；
-- `requests.slow` 最多保留 50 条，且是**最新的在前**；
-- 关掉 `requestMetricsEnabled` 后不再累计请求指标（`requests` 里的计数会停在关闭前）。
+- `requests.slow` 最多保留 50 条，且是**最新的在前**；慢请求的判定阈值是 `slowRequestMs`（默认 1000 毫秒）；
+- 关掉 `requestMetricsEnabled` 后不再累计请求指标（`requests` 里的计数会停在关闭前，`slow` 列表也不会新增）。
 
 ### GET /api/admin/metrics/history
 
@@ -1060,6 +1175,75 @@ GET /api/admin/metrics/history?date=2026-01-01
   `config.json` / `users.json` / `groups.json` / `todos.json` 回滚后会**立即重载内存态**（无需重启）。
 - 错误：`400 不支持恢复该文件`（`name` 不在受管列表里）、`400 备份标识无效`（`id` 含路径分隔符或不以 `.json` 结尾）、
   `404 备份不存在`、`400 该备份已损坏，无法恢复`（快照本身不是合法 JSON）
+
+### GET /api/admin/trash
+
+回收站列表。**回收站只对超级管理员开放**：成员只要有 `delete` 权限照常能删
+（内容进回收站），但浏览与还原属于管理动作。
+
+- 响应：
+
+```json
+{
+  "items": [
+    { "id": "20261006-153012-a1b2c3", "rel": "资料/旧稿", "name": "旧稿", "type": "dir",
+      "size": -1, "deletedAt": "2026-10-06T15:30:12.000Z",
+      "deletedBy": "Wangyq", "deletedByRole": "superadmin", "deletedByIp": "192.168.1.5" }
+  ],
+  "stats": { "files": 3, "bytes": 10240, "newest": 1791300612000, "count": 1 },
+  "enabled": true,
+  "available": true,
+  "retentionDays": 30
+}
+```
+
+| 字段 | 说明 |
+|:--|:--|
+| `items[].rel` / `name` / `type` | 被删项目的原相对路径、名字与类型（`dir` / `file`） |
+| `items[].size` | 文件是字节数；**目录固定为 `-1`**（不做递归统计，避免大目录卡住界面） |
+| `items[].deletedBy` / `deletedByRole` / `deletedByIp` | 删除者、角色与来源 IP，取不到时为 `null` |
+| `stats` | 回收站占用：`files` / `bytes` 是递归统计的文件数与字节数，`newest` 是其中最新的 mtime，`count` 是条目数 |
+| `enabled` | 后台开关 `trashEnabled` |
+| `available` | 回收站目录是否真的可用 —— **为 `false` 时删除会直接生效、不进回收站** |
+| `retentionDays` | 超期清理天数，取自 `data/config.json` 的 `trashRetentionDays`（默认 30） |
+
+条目按 `deletedAt` **倒序**（最近删除的在前）。
+
+### POST /api/admin/trash/restore
+
+还原一条记录。
+
+- 请求体：
+
+```json
+{ "id": "<条目 id>", "dest": "可选：还原到其它位置", "overwrite": false }
+```
+
+- 成功：`{ "ok": true, "restored": "资料/旧稿" }`（`restored` 是实际还原到的路径）
+- 目标位置已有同名项目且 `overwrite` 不为真时返回 **409**：
+  `{ "error": "……位置已经有一个同名项目……", "code": "RESTORE_CONFLICT" }`
+- 错误：找不到条目返回 **404 回收站里找不到这个项目**；回收站内容丢失返回 **410**；
+  `dest` 落在只读映射目录里返回 **403**。
+- `dest` 省略时还原到原路径；目标的父目录若已被删掉会按需补建。
+
+### POST /api/admin/trash/purge
+
+彻底删除一条（不可恢复）。
+
+- 请求体：`{ "id": "……" }`
+- 响应：`{ "ok": true }`
+- 错误：找不到条目返回 **404**。
+
+### POST /api/admin/trash/empty
+
+清空回收站。
+
+- 请求体可为空。
+- 响应：`{ "ok": true, "removed": 8 }`（`removed` 是实际清掉的条目数）。
+
+<Callout type="info" title="超期清理由服务端自动进行">
+服务启动时 + 每 6 小时清理一次，天数取 `data/config.json` 的 `trashRetentionDays`。
+</Callout>
 
 ### GET /api/admin/status
 
@@ -1264,6 +1448,7 @@ GET /api/admin/metrics/history?date=2026-01-01
 - 需要：创建者 / 超管 / 相关组长（即 `canManage` 为真）
 - 响应：`{ "ok": true }`
 - 错误：`404 Todo 不存在`、`403 没有权限删除该 Todo`
+- 副作用：删除小组成员时，指派给他的待办会转为「全体」；删除小组时，该组的待办会转为「全体」。
 
 ---
 
@@ -1284,6 +1469,7 @@ GET /api/admin/metrics/history?date=2026-01-01
 
 - 认证：`superadmin` 或 `member`
 - 响应：`{ "avatars": [ { "owner": "u-…", "md5": "…", "size": 4096, "updatedAt": 1767225600000 } ], "enabled": true }`
+- `enabled` 就是配置里的 `avatarEnabled`；
 - 前端靠 `md5` 判断要不要重新下载（配合 IndexedDB 缓存），所以这个接口只回元数据。
 
 ### GET /api/avatars/:owner
@@ -1444,12 +1630,13 @@ while True:
 | `/api/meta` | 名称与版本 | 无 |
 | `/api/auth` | 登录、改密、登出、查身份、我可见的小组 | 部分 |
 | `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、链接下载 | 按权限点（含小组收窄） |
-| `/api/admin` | 配置、成员、小组、日志、指标、备份、状态、隧道 | **仅超级管理员** |
+| `/api/admin` | 配置、成员、小组、日志（含导出）、指标、备份、**回收站**、状态、隧道 | **仅超级管理员** |
 | `/api/groups` | 组长自助：本组成员与可见范围 | 登录成员（受 `leaderCaps` 约束） |
 | `/api/todos` | 团队待办 | 登录成员（受 `todoEnabled` 约束） |
 | `/api/avatars` | 头像读写 | 登录成员 |
 | `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
-| 其它任意路径 | 返回前端应用（SPA fallback） | — |
+| `/dav`（可配） | **WebDAV（实验性，默认关闭，需在 `.env` 里设 `WEBDAV=1`）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话**；挂载路径可用 `WEBDAV_PATH` 改 | 成员账号（Basic） |
+| 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 未启用时 `/dav*` 返回 404 并提示如何开启，不会被 SPA 接住 | — |
 
 <Cards>
   <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="权限点默认值与依赖关系" />

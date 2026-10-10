@@ -63,6 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
 
 运行时逐项打印结果，形如 `PASS csrf-blocked` / `FAIL xxx`；
 两个脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过。
+`smoke-test.ps1` 另有两个前置失败码：**连不上服务退 `1`**、**超管登录失败退 `2`**。
 
 ### 行为约定
 

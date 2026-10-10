@@ -46,6 +46,7 @@ icon: Boxes
       <File name="context.js" />
       <File name="env.js" />
       <File name="encoding.js" />
+      <File name="fileinfo.js" />
       <File name="files.js" />
       <File name="groups.js" />
       <File name="integrity.js" />
@@ -58,8 +59,11 @@ icon: Boxes
       <File name="status.js" />
       <File name="store.js" />
       <File name="todos.js" />
+      <File name="trash.js" />
       <File name="tunnel.js" />
       <File name="users.js" />
+      <File name="version.js" />
+      <File name="webdav.js" />
       <Folder name="routes">
         <File name="auth.js" />
         <File name="fs.js" />
@@ -131,6 +135,7 @@ icon: Boxes
 | `context.js` | 请求上下文：解析小组（`X-ZS-Group` 头 / `?group=` 兜底）并算出 `req.perms` |
 | `env.js` | `.env` 加载、密钥生成、目录准备、只读映射目录解析 |
 | `encoding.js` | 在线编辑器的编解码与编码探测（`iconv-lite`；导出 `EDITOR_MAX_BYTES` / `EDITOR_ENCODINGS` / `detectEncoding` 等纯函数） |
+| `fileinfo.js` | 「详细信息」的元数据提取：签名（magic）/ 哈希 / EXIF / 文档属性 / 音视频 / 文本编码 |
 | `files.js` | 目录列举、条目信息、递归统计、搜索、复制 / 移动 |
 | `groups.js` | 小组读写、可见范围判定、组长能力校验 |
 | `integrity.js` | 启动自检：损坏的 JSON 移入 `data/backups/corrupt/` 隔离、清理 tmp 残留 |
@@ -143,8 +148,11 @@ icon: Boxes
 | `status.js` | 服务器状态采集（含局域网地址） |
 | `store.js` | 原子写入 + 串行锁（覆盖写前触发 `backup.js` 快照） |
 | `todos.js` | 团队待办的读写、清洗与可见性辅助 |
+| `trash.js` | 回收站：`rename` 移入（跨设备退化为复制后删）、列出 / 还原 / 彻底删除、占用统计、按 `trashRetentionDays` 清理 |
 | `tunnel.js` | SSH 反向隧道生命周期 |
 | `users.js` | 成员增删改查、bcrypt 校验 |
+| `version.js` | 内容版本串 `<mtimeMs>-<size>-<内容哈希>`：编辑器乐观并发控制与 HTTP `ETag` 共用同一套指纹（`versionOf()` / `compareVersion()`） |
+| `webdav.js` | WebDAV 挂载（实验性）：Basic 认证、`PROPFIND` / `GET` / `PUT` 等方法到权限点的映射、内存锁表 |
 | `routes/auth.js` | `/api/auth/*` |
 | `routes/fs.js` | `/api/fs/*`（最大的一块；在线编辑的读取 / 保存端点与 `SAVE_FILE_MAX_BYTES` 也在这里） |
 | `routes/admin.js` | `/api/admin/*`（整个 router 都套了 `requireRole("superadmin")`） |
@@ -160,7 +168,7 @@ icon: Boxes
 | `version.ts` | 前端唯一的版本号来源（导出 `VERSION`，关于页与侧边栏共用） |
 | `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件，含 `ui/context-menu.tsx`） |
 | `state/` | 六个 Provider：auth / groups / client-settings / clipboard / uploads / operations |
-| `lib/` | api / types / format / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
+| `lib/` | api / types / format / markdown / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
 
 `components/ui/toggle-group.tsx` 是基于 `@base-ui/react` 的**分段控件**（2–4 个互斥选项），
 团队待办的筛选与编辑器、同名处理对话框都改用了它。
@@ -194,10 +202,12 @@ icon: Boxes
   → 统一错误处理（5xx 记日志，只回"服务器内部错误"）
 ```
 
-启动时会：做完整性自检（隔离损坏的 JSON）→ 重载配置 / 成员 / 小组 / 待办 → 扫描并清理不合规头像
-→ 执行每日快照 → 清空 `data/tmp/` → 建目录 → 启动指标采集与日志清理定时器
-→ 若隧道已启用则拉起隧道；
-退出信号（`SIGINT` / `SIGTERM`）会先停隧道与指标采集再关服务，兜底 3 秒强制退出。
+启动时会：自检并隔离损坏的数据文件（`integrity.js`，同时清空 `data/tmp/` 残留）
+→ 重载配置 / 成员 / 小组 / 待办 → 建目录 → 重建头像索引（顺手删掉尺寸或格式不合规的文件）→ 做一次每日快照；
+服务监听后启动指标采样（每分钟一次）与过期日志清理，并每 6 小时再清理一次日志 + 做每日快照
+（同一个维护定时器里还跑一遍回收站的 `sweepTrash`）；
+若隧道已启用则拉起隧道。
+退出信号（`SIGINT` / `SIGTERM`）会先停隧道与指标再关服务，兜底 3 秒强制退出。
 
 <Callout type="info" title="请求体上限：save-file 单独放宽到 16MB">
 `/api/fs/save-file`（在线编辑保存）挂了一个单独的 `express.json({ limit: SAVE_FILE_MAX_BYTES })`，
@@ -239,6 +249,8 @@ X-ZS-Group: <小组 id>  或  ?group=<小组 id>
 超管直接返回固定全开的权限表，不参与小组收窄；访客没有小组上下文，只受 `guestHiddenPaths` 影响。
 `requirePerm` 读的是 `req.perms`，所以小组切换对所有接口**立即生效**，不需要重新登录。
 可见范围则由 `isVisibleForContext` 统一判定（黑名单优先、白名单为空即不限制）。
+小组的可见性在**递归操作里也必须逐层应用**：打包 / 压缩走 `zipVisibility()`，
+否则会出现"列表里看不到、zip 里却能拿到"。
 
 失败时的状态码语义（前端据此区分"要登录"与"没权限"）：
 
@@ -299,6 +311,7 @@ X-ZS-Group: <小组 id>  或  ?group=<小组 id>
 | 小组 | `data/groups.json` | 同上；后台「小组」页写回，成员被删除时自动移除 |
 | 团队待办 | `data/todos.json` | 同上；删除小组时该组待办转为全体可见 |
 | 头像 | `data/avatars/<owner>.webp` | 上传即原子替换；启动时扫描，尺寸 / 格式不合规的文件会被删除 |
+| 回收站 | `data/trash/<时间戳>-<随机>/`（`meta.json` + `content`） | 删除时移入；启动时与每 6 小时的维护定时器按 `trashRetentionDays` 清理 |
 | 数据快照 | `data/backups/<文件名>/<时间戳>-<随机>.json` | 覆盖写前 + 每天一次；每个文件保留 `backupKeep` 份 |
 | 系统指标 | `data/metrics/zs-*.jsonl`（即 `data/metrics/zs-YYYY-MM-DD.jsonl`） | 每分钟一条；保留 `metricsRetentionDays` 天 |
 | 请求指标 | **内存** 环形桶 + 最近 50 条慢请求 | 窗口由 `metricsMemMinutes` 决定（默认 15 分钟），重启清零 |
@@ -309,7 +322,8 @@ X-ZS-Group: <小组 id>  或  ?group=<小组 id>
 | 日志 | `data/logs/zs-*.log` | 按天一个 JSONL 文件；超过 `logRetentionDays` 自动清理 |
 
 写入用 `store.js` 的 `withLock` + `writeJsonAtomic`（写临时文件再重命名），
-避免并发覆盖和半个文件。
+避免并发覆盖和半个文件；**覆盖写之前会自动把旧内容快照进 `data/backups/`**（`backup.js`），
+所以后台改错配置也能回滚。
 
 <Callout type="warn" title="config.json 一旦存在，就会永久覆盖代码里的默认值">
 `config.js` 启动时是 `deepMerge(structuredClone(DEFAULTS), readJsonSync(CONFIG_FILE, {}))`。
@@ -330,7 +344,8 @@ GET /api/fs/compress/status?job=<jobId>  → { state, percent, processed, total,
 
 - 任务对象里有 `createdBy`，默认只有创建者与超管能查询（`jobStatusOwnerOnly`）；
 - 状态机：`running` → `done` / `error`；任务被清理后查询返回 `state: "gone"`；
-- 失败时（含解压中途超限）会清理临时产物——解压还会**整个删掉半成品目录**。
+- 失败时（含解压中途超限）会清理临时产物——解压还会**整个删掉半成品目录**，
+  压缩会**删掉已经写出的半个 `.zip`**，并如实把状态置为 `error`（而不是 `done`）。
 
 ## 在线编辑的编码处理（`server/src/encoding.js`）
 
@@ -382,6 +397,92 @@ router.post("/my-op", requirePerm("editFiles"), rateLimit, async (req, res, next
 （`attachContext` 已经全局挂好，`req.perms` / `req.group` 随取随用）。
 新路由文件要在 `server/index.js` 里 `app.use("/api/xxx", xxxRoutes)` 挂上。
 前端在 `web/src/lib/api.ts` 里加一个薄封装即可。
+
+## 内容版本与并发编辑（`server/src/version.js`）
+
+版本串是 `<mtimeMs>-<size>-<内容哈希>`，同时用在三处：
+
+| 用处 | 位置 |
+|:--|:--|
+| 在线编辑器的乐观并发控制 | `GET /api/fs/file` 返回 `baseVersion`；`POST /api/fs/save-file` 校验它 |
+| HTTP `ETag` | `GET /api/fs/download` 与 WebDAV 的 `GET`，让客户端能用 `If-Match` / `If-None-Match` |
+| WebDAV `PUT` 的 `If-Match` 前置条件 | 不匹配返回 412 |
+
+**为什么不能只用 `mtime`**：Windows 的 mtime 粒度可达秒级（FAT 更粗），
+同一秒内的两次保存用 `mtime` 区分不开，会把真实冲突漏判。所以必须带上内容哈希。
+哈希用 sha1 是因为这里只做"内容变没变"的指纹，不是密码学用途，短且快。
+
+改动这一块时注意：`versionOf()` 必须保持一致 —— 编辑器认的版本和 WebDAV 客户端认的
+`ETag` 如果算法不同，就会出现"浏览器里保存提示冲突、但用 DAV 客户端却能写进去"这种怪事。
+
+## 回收站（`server/src/trash.js`）
+
+- 布局：`data/trash/<时间戳>-<随机>/meta.json` + `content`；
+- **必须放在 `data/` 下**：放进 `FILES_DIR` 会让它出现在网盘根目录，被列目录、被搜索、
+  被打包，甚至能按路径被访客下载；
+- 移入用 `rename`（同盘原子）；跨设备 `EXDEV` 时退化为"先复制成功、再删原件"；
+- 元数据用 `store.js` 的原子写；
+- **目录建不出来不能抛异常**：`trash.js` 顶部的 `ensureDir()` 会捕获失败并置标志，
+  写操作退回"直接删除"。早期版本在模块加载时直接 `mkdirSync`，`data/` 只读会让
+  **整个服务起不来**（连登录界面都打不开）；
+- 清理时机：服务启动时 + 每 6 小时的维护定时器（`sweepTrash`），天数取
+  `config.trashRetentionDays`。
+
+## 文件详细信息（`server/src/fileinfo.js`）
+
+「详细信息」对话框里除基础字段以外的内容全部来自 `GET /api/fs/details`，实现集中在这一个模块：
+
+| 能力 | 做法 |
+|:--|:--|
+| 签名识别 | 头 64KB 内按固定偏移比对的签名表，加几个需要上下文的特例：`ftyp` 品牌（MP4 / MOV / HEIC / AVIF / CR3）、RIFF 子类型（WAV / AVI / WebP）、用 ZIP 内部条目名区分 docx / xlsx / pptx / apk / jar / epub、偏移 257 的 `ustar`、MPEG-TS 的同步字节 |
+| 图片尺寸 | PNG 的 `IHDR`、JPEG 逐段扫 `SOF`、GIF / BMP / WebP（`VP8 ` / `VP8L` / `VP8X`）、PSD、ICO |
+| EXIF | 自带的 TIFF / IFD 解析器：IFD0、ExifIFD（`0x8769`）、GPS IFD（`0x8825`），按类型读取后格式化成中文（`1/125 秒`、`f/2.8`、GPS 十进制度） |
+| 文档属性 | PDF 的 Info 字典（**头尾各 64KB 都搜**，兼容 Info 在文件尾的写法）、OOXML 的 `docProps/core.xml` 与 `app.xml`（就地定位并解压一个 ZIP 条目，用内置 `zlib.inflateRawSync`） |
+| 媒体信息 | MP4 / MOV / M4A 沿顶层 box 走到 `moov` 再读 `mvhd`（**不能只搜开头**：未做 faststart 的文件 `moov` 在末尾且可能大于 64KB）、WAV 的 chunk、FLAC 的 `STREAMINFO`、ID3v2 帧 |
+| 文本信息 | 复用 `encoding.js` 的探测；**只有签名判定为文本时**才统计编码与行数，否则 MP3 的 ID3 区会被误认成 UTF-16 文本 |
+| 哈希 | `fs.createReadStream` + 三个 `crypto` Hash 流式计算；其中 sha1 的 base64url 与 `version.js` 的内容哈希同源，所以 `contentVersion` 和 `baseVersion` 是同一个串 |
+
+三条纪律：
+
+- **不整文件读进内存**：解析只读头尾各 64KB，哈希流式计算且限 64MB，文本统计限 8MB；
+- **分段容错**：每一段都包在自己的 `try/catch` 里，解析失败只让那一段为 `null`，
+  绝不能因为一个坏 EXIF 就返回 5xx；
+- **不新增配置项**：上限都是模块内常量（`HEAD_BYTES` / `HASH_MAX_BYTES` / `TEXT_SCAN_BYTES`），
+  不为一次详情点击引入需要文档化的新开关。
+
+## WebDAV（实验性，`server/src/webdav.js`）
+
+**默认关闭，只能在 `.env` 里用 `WEBDAV=1` 打开**（挂载点由 `WEBDAV_PATH` 决定，默认 `/dav`）。
+入口在 `server/index.js`，用 `createWebdavRouter()` 生成中间件：
+
+```js
+const webdav = createWebdavRouter()   // 未启用时返回 null
+if (webdav) app.use(env.webdavPath, webdav)
+```
+
+挂载时机的两个要点，改动时别踩：
+
+1. **必须在 `express.static` 与 SPA fallback 之前挂**。否则 `/dav/` 会被 fallback 吞掉、
+   返回前端首页 —— 用户把地址填进客户端后拿到的是网页，非常难排查；
+2. **未启用时要显式 404 掉挂载路径**（`index.js` 里那段 `if (!env.webdavEnabled)`）。
+   只靠"不挂载"是不够的：`app.get("*")` 会接住一切 GET，于是 `/dav` 仍然返回首页。
+   这也是为什么早期症状是"`GET /dav` 返回网页、`PROPFIND /dav` 却 404"这种自相矛盾的现象。
+
+三条**不能改**的安全约束（改了就是漏洞）：
+
+| 约束 | 原因 |
+|:--|:--|
+| 只认 Basic 认证，**不认 Cookie 会话** | 认 Cookie 就等于给了任意网页一个绕过 CSRF 的后门：它可以用用户浏览器里已有的登录态发 `PROPFIND` / `PUT`，而 DAV 请求不会带 `X-Requested-With`、也走不到 `csrfGuard` |
+| **不接受超管账号** | Basic 凭据每个请求都会重复发送，超管密码不该被这样反复暴露。只走 `verifyLogin()`（成员账号、bcrypt） |
+| 权限与路径复用 Web 端那套 | `effectivePerms(role, group)` + `normRel` / `resolveAny`；隐藏路径返回 **404**（不是 403，避免探测"这里有什么"） |
+
+方法与权限的对应：`OPTIONS`（免认证，公告能力）、`PROPFIND`→browse、`GET/HEAD`→downloadFile、
+`PUT`→fileWrite+upload、`MKCOL`→mkdir、`DELETE`→delete（走回收站）、
+`COPY/MOVE`→copy/move（`Destination` 头要按同样规则剥离前缀并重新做穿越校验）、
+`LOCK/UNLOCK`→内存锁表（**只是让客户端认为锁生效**，真正的并发保护靠 `version.js`）。
+
+改完请跑一遍 [测试脚本](/docs/zeroshadow/development/testing) 里的 WebDAV 断言
+（含"仅带 Cookie 必须 401"这条）。
 
 ## 前端
 
@@ -516,6 +617,82 @@ Sonner 自己的 `z-index: 999999999` 只有在 `#root` 内部才有效——而
 结果是打包体积里存在两份 lucide、两套渲染时机。不致命，但属于该收敛的技术债。
 </Callout>
 
+### 兼容模式（`robustness`）
+
+给"跑不动 React / Tailwind 的老机器"用的一份**独立静态页面**，
+源码在 `web/public/robustness/`，构建后由 `express.static(WEB_DIST)` 直接托管，
+访问路径 **`/robustness/index.html`**：
+
+```text
+web/public/robustness/
+├── index.html       页面骨架（<head> 里同步加载 theme-boot.js）
+├── index.css        样式（沿用正常页面的 oklch 配色，写法退回 IE11 能吃的那套）
+├── index.js         全部逻辑（ES5 + XMLHttpRequest + 回调）
+└── theme-boot.js    首帧应用深色，避免白闪
+```
+
+**它不是前端工程的一部分**：不经过 Vite 打包、不引用任何 npm 依赖，
+`public/` 会被原样复制到 `web/dist/robustness/`。
+
+改这个目录下的文件时必须遵守这几条，否则老浏览器会整页白屏：
+
+| 约束 | 原因 |
+|:--|:--|
+| 只用 **ES5**：不用 `let`/`const`/箭头函数/模板字符串/解构/`class`/`for...of` | 目标浏览器含 IE11 |
+| 不用 **Promise / fetch** | IE11 都没有；统一 XHR + `function (err, data)` 回调 |
+| 不用现代 DOM API：`classList` / `dataset` / `closest` / `Object.assign` / `includes` / `startsWith` | IE11 缺失 |
+| **不写内联 `<script>`** | 后端给 `web/dist` 下的 `.html` 挂了 `script-src 'self'` 的 CSP（见 `server/index.js` 的 `SHELL_CSP`），内联脚本会被拦掉 |
+| 不写内联事件属性（`onclick="..."`） | 同上，CSP 不允许；统一用 `node.onclick = fn` 赋值 |
+| 所有拼进 `innerHTML` 的字符串先过 `esc()` | 文件名与路径都是用户可控输入 |
+| 每个请求都带 `X-Requested-With: XMLHttpRequest` | 这是 `csrfGuard` 的第一道校验 |
+| 修改后跑 `node --check web/public/robustness/index.js` | 快速排掉语法错误 |
+
+**为什么不需要放松任何安全设置**：同源 XHR 设置自定义头不触发 CORS 预检，
+而 IE11 的**同源**请求不带 `Origin` 头，所以 `csrfGuard` 的第二道校验（比对
+`Origin` 与 `Host`）自然放行。因此这个页面零安全例外——不要为了它去改
+`csrfOriginCheck` 或加什么白名单。
+
+**与服务端的两处约定**（改接口时要注意，否则兼容页会静默出错）：
+
+1. `MAX_FILES_PER_REQUEST = 100`：服务端丢弃超出的文件且只回 `truncated: true`，
+   兼容页自己按 100 分批（`web/src/state/uploads.tsx` 里的同名常量也是这个值，
+   三处必须一致）。
+2. 文件夹上传靠 **filename 里带相对路径**还原目录结构。浏览器只把相对路径给到
+   `webkitRelativePath`，而服务端 busboy 读的是 `filename`，所以兼容页会先
+   `new File([file], relativePath, ...)` 把名字改写成相对路径再上传。
+
+**预览策略**：不自己解析任何文件格式，能交给浏览器原生组件的就交给它
+（`<img>` / `<video>` / `<audio>` / `<iframe>` 加载 PDF），并在元素上挂 `onerror`
+兜底成「浏览器不支持此格式」；文本类走 `GET /api/fs/file`（服务端识别编码）后
+以文本节点只读显示。**不要**在这里引入任何 JS 解析库。
+
+### Markdown 预览渲染（`lib/markdown.ts`）
+
+> 注意：这一节说的是**主前端**的 `.md` 预览。兼容模式对 `.md` 仍然是等宽字体只读展示，
+> 它不参与本节这套渲染（见上一节「预览策略」）。
+
+`.md` 预览的渲染器是**自己写的**，没有引入第三方 Markdown 库（`marked` / `markdown-it`
+会让前端产物多出 30~110KB）。它只有一条安全前提：
+
+<Callout type="warn" title="先整体转义，再解析 —— 顺序不能反">
+`inline()` 一进来就把 `&` `<` `>` `"` 转成实体，此后所有正则只处理已经转义过的文本，
+而生成出来的标签全是我们自己拼的。因此输出串里不可能出现来自文件的标签，
+可以安全地交给 `dangerouslySetInnerHTML` —— 不存在 XSS 通道。
+</Callout>
+
+- 行内代码、链接地址、图片地址先用 `NUL + 序号 + NUL` 的占位符"抠出来"，最后再还原
+  （占位符可能嵌套，所以还原要跑最多 4 轮）；
+- 危险协议（`javascript:` / `vbscript:` / `data:`）命中即降级为纯文本；
+- 样式集中在 `index.css` 的 `.md-body` 段：渲染器只产出语义标签、**不给任何 class**，
+  这样既省字节，也避开"运行时生成的 HTML 里写的工具类 Tailwind 扫不到、根本不会进产物"
+  这个坑。
+
+## 约定与注意事项
+
+**入口**：正常页面底部状态条右侧的「无法渲染？使用兼容模式」链接
+（`web/src/pages/browser-page.tsx` 末尾），用原生 `<a target="_blank">` 打开，
+不走 react-router。
+
 ## 约定与注意事项
 
 | 约定 | 说明 |
@@ -569,10 +746,13 @@ Sonner 自己的 `z-index: 999999999` 只有在 `#root` 内部才有效——而
 | 改日志 / 指标 / 备份的保留策略 | `logger.js` 的 `sweepLogs`、`metrics.js` 的 `cleanupOldMetrics`、`backup.js` 的 `rotate` + `settings/data-section.tsx` |
 | 改默认体积上限 | `server/src/config.js` 的 `DEFAULTS`（注意已存在的 `data/config.json` 会覆盖默认值） |
 | 加一种可预览格式 | `web/src/lib/format.ts` 的 `EXT_KIND` / `PREVIEWABLE` + `server/src/routes/fs.js` 的 `INLINE_TYPES` |
+| 改 Markdown 渲染 | `web/src/lib/markdown.ts`（解析规则、危险协议白名单）+ `index.css` 的 `.md-body`（排版样式）+ `web/src/pages/preview-page.tsx`（「源码 / 预览」开关）。**注意保持"先转义再解析"的顺序**，并确认兼容模式不受影响 |
+| 给「详细信息」加一类元数据 | `server/src/fileinfo.js`（新增一段解析，并确保只读有界的字节数、失败只让那段为空）+ `web/src/lib/types.ts` 的 `EntryDetails` + `browser/dialogs.tsx` 的分区渲染 |
 | 加一种可编辑格式 | `web/src/pages/browser-page.tsx` 里的 `EDITABLE` 数组 |
 | 调整隧道行为 | `server/src/tunnel.js`（`buildArgs` 拼 ssh 参数） |
 | 加一个内置隧道服务商 | `tunnel.js` 的 `buildArgs` + `routes/admin.js` 的 mode 白名单 + `settings/index.tsx` 的 select 选项 |
 | 改界面配色 / 圆角 | `web/src/index.css` 的 `@theme` 与 `:root` / `.dark` 变量 |
-| 改产品版本号 | 三处必须同步（版本号是写死的，不从 `package.json` 读）：根 `package.json`、`server/index.js` 的 `/api/meta`、`web/src/version.ts` 的 `VERSION`。前端只有这一份版本号，关于页与侧边栏都从它读 |
+| 改产品版本号 | 版本号是**写死的**，不从 `package.json` 读；一共 8 处要逐项同步，完整清单见 [打包与 CI](/docs/zeroshadow/development/release) |
+| 追加更新日志 | 在 `CHANGELOG.md` 顶部加一节（Keep a Changelog 风格），再同步 `docs/changelog.md`；两处内容应保持一致 |
 | 改在线编辑的编码 / 上限 | `server/src/encoding.js`（编码表、探测顺序、`EDITOR_MAX_BYTES`）+ `routes/fs.js` 的 `/file` 与 `/save-file` + `web/src/pages/editor-page.tsx`；改完跑 `node encoding-test.mjs` 与 `security-test.ps1` 第 18 组 |
 | 改默认头像的底色 / 缩写 | `web/src/lib/avatar-default.ts`（`DEFAULT_AVATAR_BG` 固定为 `#0078d7`，`avatarInitials` 取名字前两个字符） |
