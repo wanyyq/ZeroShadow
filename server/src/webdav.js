@@ -75,10 +75,12 @@ function enabledNow() {
 
 /* ============================================================ Basic 认证 == */
 
-function unauthorized(res, message = "需要 WebDAV 账号密码") {
+function unauthorized(res, message = "需要 WebDAV 账号密码", errorKey = "api.webdav.auth_required") {
   // Basic realm 用中文会触发部分客户端的编码问题，保持 ASCII
   res.setHeader("WWW-Authenticate", 'Basic realm="ZeroShadow WebDAV", charset="UTF-8"')
-  res.status(401).json({ error: message })
+  // errorKey/errorParams 与 HTTP 接口同一套命名键（见 http.js）：
+  // `error` 仍是中文原文，客户端不认这两个字段时行为不变。
+  res.status(401).json({ error: message, errorKey })
 }
 
 function parseBasic(header) {
@@ -106,7 +108,7 @@ async function basicAuth(req, res, next) {
   const result = await verifyLogin(creds.username, creds.password)
   if (!result.ok) {
     warn("webdav_auth_fail", { msg: creds.username, ip: req.ip })
-    return unauthorized(res, "用户名或密码错误")
+    return unauthorized(res, "用户名或密码错误", "api.webdav.invalid_credentials")
   }
   const user = result.user
   // 与 Web 端一致：小组上下文走 ?group= 或 X-ZS-Group（DAV 客户端一般不发头，
@@ -163,19 +165,23 @@ function visible(req, rel) {
 }
 
 function deny(res, perm) {
-  res.status(403).json({ error: `没有权限执行此操作（需要 ${perm}）` })
+  res.status(403).json({
+    error: `没有权限执行此操作（需要 ${perm}）`,
+    errorKey: "api.webdav.permission_denied",
+    errorParams: { perm },
+  })
 }
 
 /** 解析目标并做全部校验；不通过时已经写好响应，返回 null */
 function resolveOrReply(req, res) {
   const rel = relFromUrl(req)
   if (rel === null) {
-    res.status(400).json({ error: "非法路径" })
+    res.status(400).json({ error: "非法路径", errorKey: "api.webdav.path_invalid" })
     return null
   }
   if (!visible(req, rel)) {
     // 隐藏路径故意用 404：用 403 等于告诉对方"这里确实有东西"
-    res.status(404).json({ error: "文件或目录不存在" })
+    res.status(404).json({ error: "文件或目录不存在", errorKey: "api.webdav.not_found" })
     return null
   }
   const resolved = resolveAny(rel)
@@ -224,7 +230,9 @@ async function handlePropfind(req, res) {
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
   const stat = await statSafe(resolved.abs)
-  if (!stat || stat.isSymbolicLink()) return res.status(404).json({ error: "文件或目录不存在" })
+  if (!stat || stat.isSymbolicLink()) {
+    return res.status(404).json({ error: "文件或目录不存在", errorKey: "api.webdav.not_found" })
+  }
 
   const isDir = stat.isDirectory()
   const depth = String(req.headers.depth ?? "1")
@@ -269,7 +277,9 @@ async function handleGet(req, res, headOnly) {
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
   const stat = await statSafe(resolved.abs)
-  if (!stat || !stat.isFile()) return res.status(404).json({ error: "文件不存在" })
+  if (!stat || !stat.isFile()) {
+    return res.status(404).json({ error: "文件不存在", errorKey: "api.webdav.file_not_found" })
+  }
 
   // ETag = 内容版本（与在线编辑器的 baseVersion 同一套计算），
   // 客户端因此可以用 If-Match 做乐观锁，条件不满足时得到 412。
@@ -297,13 +307,15 @@ async function handlePut(req, res) {
   if (!req.dav.perms.fileWrite || !req.dav.perms.upload) return deny(res, "upload")
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
-  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作" })
-  if (!resolved.rel) return res.status(405).json({ error: "不能写入根目录" })
+  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
+  if (!resolved.rel) {
+    return res.status(405).json({ error: "不能写入根目录", errorKey: "api.webdav.root_write_denied" })
+  }
 
   const limit = uploadLimitBytes("member")
   const parentStat = await statSafe(path.dirname(resolved.abs))
   if (!parentStat || !parentStat.isDirectory()) {
-    return res.status(409).json({ error: "上级目录不存在" })
+    return res.status(409).json({ error: "上级目录不存在", errorKey: "api.webdav.parent_missing" })
   }
 
   const existing = await statSafe(resolved.abs)
@@ -312,7 +324,7 @@ async function handlePut(req, res) {
     const buf = await fs.promises.readFile(resolved.abs).catch(() => null)
     const current = buf ? `"${versionOf(buf, existing)}"` : null
     if (current && req.headers["if-match"] !== current) {
-      return res.status(412).json({ error: "文件已被其他人修改" })
+      return res.status(412).json({ error: "文件已被其他人修改", errorKey: "api.webdav.version_conflict" })
     }
   }
 
@@ -339,9 +351,14 @@ async function handlePut(req, res) {
   } catch (err) {
     await fs.promises.rm(tmp, { force: true }).catch(() => {})
     if (tooBig) {
-      return res.status(413).json({ error: `超出上传大小限制（${Math.round(limit / 1024 / 1024)}MB）` })
+      // 大小上限是变量，放进 errorParams 让译文里的 {limit} 能正确插值
+      return res.status(413).json({
+        error: `超出上传大小限制（${Math.round(limit / 1024 / 1024)}MB）`,
+        errorKey: "api.webdav.upload_too_large",
+        errorParams: { limit: `${Math.round(limit / 1024 / 1024)}MB` },
+      })
     }
-    return res.status(500).json({ error: "写入失败" })
+    return res.status(500).json({ error: "写入失败", errorKey: "api.webdav.write_failed" })
   }
 
   try {
@@ -352,7 +369,7 @@ async function handlePut(req, res) {
     })
   } catch {
     await fs.promises.rm(tmp, { force: true }).catch(() => {})
-    return res.status(500).json({ error: "保存失败" })
+    return res.status(500).json({ error: "保存失败", errorKey: "api.webdav.save_failed" })
   }
   info("webdav_put", { msg: `${resolved.rel} (${written} bytes)`, user: req.dav.username, ip: req.ip })
   res.status(existing ? 204 : 201).end()
@@ -362,9 +379,11 @@ async function handleMkcol(req, res) {
   if (!req.dav.perms.fileWrite || !req.dav.perms.mkdir) return deny(res, "mkdir")
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
-  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作" })
-  if (!resolved.rel) return res.status(405).json({ error: "根目录已存在" })
-  if (await statSafe(resolved.abs)) return res.status(405).json({ error: "已存在同名项目" })
+  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
+  if (!resolved.rel) return res.status(405).json({ error: "根目录已存在", errorKey: "api.webdav.root_exists" })
+  if (await statSafe(resolved.abs)) {
+    return res.status(405).json({ error: "已存在同名项目", errorKey: "api.webdav.already_exists" })
+  }
   await fs.promises.mkdir(resolved.abs, { recursive: true })
   info("webdav_mkcol", { msg: resolved.rel, user: req.dav.username, ip: req.ip })
   res.status(201).end()
@@ -374,10 +393,12 @@ async function handleDelete(req, res) {
   if (!req.dav.perms.fileWrite || !req.dav.perms.delete) return deny(res, "delete")
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
-  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作" })
-  if (!resolved.rel) return res.status(403).json({ error: "不能删除根目录" })
+  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
+  if (!resolved.rel) {
+    return res.status(403).json({ error: "不能删除根目录", errorKey: "api.webdav.root_delete_denied" })
+  }
   const stat = await statSafe(resolved.abs)
-  if (!stat) return res.status(404).json({ error: "文件或目录不存在" })
+  if (!stat) return res.status(404).json({ error: "文件或目录不存在", errorKey: "api.webdav.not_found" })
 
   // 与 Web 端保持一致：删除进回收站（可用时）
   const trashed = await moveToTrash(resolved, { user: req.dav.username, role: "member", ip: req.ip })
@@ -393,9 +414,11 @@ async function handleCopyMove(req, res, isMove) {
   if (!req.dav.perms.fileWrite || !req.dav.perms[perm]) return deny(res, perm)
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
-  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作" })
+  if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
   const destination = req.headers.destination
-  if (!destination) return res.status(400).json({ error: "缺少 Destination 头" })
+  if (!destination) {
+    return res.status(400).json({ error: "缺少 Destination 头", errorKey: "api.webdav.destination_required" })
+  }
 
   // Destination 是完整 URL，取出其中的路径部分再套用前缀剥离
   let destPath = destination
@@ -411,23 +434,27 @@ async function handleCopyMove(req, res, isMove) {
   try {
     destRel = normRel(decodeURIComponent(destPath).replace(/^\/+/, ""))
   } catch {
-    return res.status(400).json({ error: "目标路径非法" })
+    return res.status(400).json({ error: "目标路径非法", errorKey: "api.webdav.destination_invalid" })
   }
-  if (!visible(req, destRel)) return res.status(404).json({ error: "目标不存在" })
+  if (!visible(req, destRel)) {
+    return res.status(404).json({ error: "目标不存在", errorKey: "api.webdav.destination_missing" })
+  }
   const dest = resolveAny(destRel)
-  if (dest.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作" })
-  if (!destRel) return res.status(400).json({ error: "目标不能是根目录" })
+  if (dest.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
+  if (!destRel) {
+    return res.status(400).json({ error: "目标不能是根目录", errorKey: "api.webdav.destination_root_denied" })
+  }
   // 不能把目录移动/复制到它自己内部。
   // 必须用 isSameOrInside（Windows/macOS 下大小写不敏感），裸串 startsWith 会让
   // "/A" → "/a/x" 这类只差大小写的目标绕过检查（与 fs.js 的 transfer 保持一致）。
   if (isSameOrInside(destRel, resolved.rel)) {
-    return res.status(400).json({ error: "目标不能是自身或其子目录" })
+    return res.status(400).json({ error: "目标不能是自身或其子目录", errorKey: "api.webdav.destination_self_denied" })
   }
 
   const overwrite = String(req.headers.overwrite || "").toUpperCase() === "T"
   const destExisting = await statSafe(dest.abs)
   if (destExisting) {
-    if (!overwrite) return res.status(412).json({ error: "目标已存在" })
+    if (!overwrite) return res.status(412).json({ error: "目标已存在", errorKey: "api.webdav.destination_exists" })
     await fs.promises.rm(dest.abs, { recursive: true, force: true })
   }
   await fs.promises.mkdir(path.dirname(dest.abs), { recursive: true })
@@ -487,7 +514,9 @@ export function createWebdavRouter() {
       return res.status(200).end()
     }
     try {
-      if (!enabledNow()) return res.status(404).json({ error: "WebDAV 未启用" })
+      if (!enabledNow()) {
+        return res.status(404).json({ error: "WebDAV 未启用", errorKey: "api.webdav.disabled" })
+      }
       await basicAuth(req, res, (err) => { if (err) next(err) })
       if (!req.dav) return // basicAuth 已经响应了 401
       const method = req.method.toUpperCase()
@@ -507,13 +536,28 @@ export function createWebdavRouter() {
         case "UNLOCK": return handleUnlock(req, res)
         default:
           res.setHeader("Allow", DAV_METHODS)
-          return res.status(405).json({ error: `不支持的方法 ${method}` })
+          return res.status(405).json({
+            error: `不支持的方法 ${method}`,
+            errorKey: "api.webdav.method_not_allowed",
+            errorParams: { method },
+          })
       }
     } catch (err) {
       // DAV 客户端读不懂我们的 JSON 错误，但仍然给一个明确状态码
       const status = err.status || 500
       if (status >= 500) warn("webdav_error", { msg: `${req.method} ${req.path}: ${err.message}`, ip: req.ip })
-      if (!res.headersSent) res.status(status).json({ error: status >= 500 ? "服务器内部错误" : err.message })
+      if (!res.headersSent) {
+        const body = { error: status >= 500 ? "服务器内部错误" : err.message }
+        // 5xx 的文案已被统一替换，只能配通用键；4xx 若上游错误本身就带了命名键
+        // （如 safety.js 的 api.fs.*），原样透传——`error` 依旧是中文原文。
+        if (status >= 500) {
+          body.errorKey = "api.common.server_error"
+        } else if (err.errorKey) {
+          body.errorKey = String(err.errorKey)
+          if (err.errorParams && typeof err.errorParams === "object") body.errorParams = err.errorParams
+        }
+        res.status(status).json(body)
+      }
     }
   }
   return mw

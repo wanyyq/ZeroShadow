@@ -1,0 +1,11 @@
+{
+  "ui.i18n.language": "界面语言",
+  "ui.i18n.language_hint": "切换后立即生效，只影响本机浏览器；站点默认语言是「{name}」",
+  "ui.i18n.custom_tag": "来自 data/lang",
+  "ui.i18n.follow_default": "跟随站点默认",
+  "ui.i18n.export_template": "导出翻译模板",
+  "ui.i18n.export_template_hint": "导出全部文案键（值就是中文原文）。把值翻成目标语言、加一个 _meta.name，放进服务端 data/lang/ 即可新增语言",
+  "ui.i18n.exported": "翻译模板已导出",
+  "ui.i18n.loading": "正在载入语言文件…",
+  "ui.i18n.template_name_placeholder": "（改成这个语言自己的名字）"
+}

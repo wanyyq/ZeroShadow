@@ -10,6 +10,7 @@ import type {
   UploadResult,
   FileTextResponse,
 } from "@/lib/types"
+import { translate } from "@/lib/i18n"
 
 export class ApiError extends Error {
   status: number
@@ -40,7 +41,7 @@ export function isVersionConflict(err: unknown): err is VersionConflictError {
  * 某些扩展改写、或某处 reject 了字符串时，`.message` 是 undefined，界面会显示
  * 空白。这里统一兜底成一句中文，避免"点了确定，什么都没发生也没提示"。
  */
-export function getErrorMessage(err: unknown, fallback = "操作失败，请重试"): string {
+export function getErrorMessage(err: unknown, fallback = translate("ui.common.operation_failed")): string {
   if (err instanceof Error && err.message) return err.message
   if (typeof err === "string" && err) return err
   if (err && typeof err === "object" && "message" in err) {
@@ -96,7 +97,7 @@ async function request<T>(
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     })
   } catch {
-    throw new ApiError(0, "网络连接失败，请检查服务是否在线")
+    throw new ApiError(0, translate("ui.common.network_error"))
   }
   let data: unknown = null
   try {
@@ -110,17 +111,25 @@ async function request<T>(
     }
     const detail = (data && typeof data === "object" ? data : {}) as {
       error?: string
+      errorKey?: string
+      errorParams?: Record<string, string | number>
       code?: string
       currentVersion?: string | null
     }
+    /**
+     * 服务端返回的提示优先按 `errorKey` 本地化（见 server/src/http.js 的 httpError）：
+     * `error` 始终是中文原文，既做兜底也让 curl / 第三方脚本保持旧行为。
+     * 这里用 translate() 而不是 useT()：本模块不是组件，语言状态在 i18n 单例里。
+     */
+    const message = detail.errorKey
+      ? translate(detail.errorKey, detail.errorParams)
+      : detail.error
+        ? String(detail.error)
+        : translate("ui.common.request_failed", { status: res.status })
     // 并发编辑冲突要带上服务端当前版本，前端才能提示"重新加载"
     if (res.status === 409 && detail.code === "VERSION_CONFLICT") {
-      throw new VersionConflictError(
-        detail.error || "文件已被其他人修改",
-        detail.currentVersion ?? null
-      )
+      throw new VersionConflictError(message, detail.currentVersion ?? null)
     }
-    const message = detail.error ? String(detail.error) : `请求失败 (${res.status})`
     throw new ApiError(res.status, message)
   }
   return data as T
@@ -207,7 +216,7 @@ export async function triggerDownload(url: string): Promise<void> {
     if (res.status === 401 || res.status === 403) {
       onPermissionDenied?.()
     }
-    let message = `下载失败 (${res.status})`
+    let message = translate("ui.api.download_failed", { status: res.status })
     try {
       const data = await res.json()
       if (data && typeof data === "object" && "error" in data) {
@@ -284,10 +293,15 @@ export function uploadFiles(
       // 413 的响应体是 { results, limitMB }，没有 error 字段。原样只报「上传失败 (413)」
       // 会把「超出大小限制 (512MB)」这个真正有用的原因丢掉。
       const detail = data?.results?.find((r) => !r.ok && r.error)?.error
-      reject(new ApiError(xhr.status, data?.error || detail || `上传失败 (${xhr.status})`))
+      reject(
+        new ApiError(
+          xhr.status,
+          data?.error || detail || translate("ui.api.upload_failed", { status: xhr.status })
+        )
+      )
     }
-    xhr.onerror = () => reject(new ApiError(0, "网络错误，上传中断"))
-    xhr.onabort = () => reject(new ApiError(0, "已取消上传"))
+    xhr.onerror = () => reject(new ApiError(0, translate("ui.api.upload_network_error")))
+    xhr.onabort = () => reject(new ApiError(0, translate("ui.api.upload_cancelled")))
     xhr.send(form)
   })
   return { promise, abort: () => xhr.abort() }
@@ -343,7 +357,7 @@ export async function fetchAvatarBlob(owner: string): Promise<Blob> {
     credentials: "same-origin",
     headers: contextHeaders(),
   })
-  if (!res.ok) throw new ApiError(res.status, `头像获取失败 (${res.status})`)
+  if (!res.ok) throw new ApiError(res.status, translate("ui.api.avatar_fetch_failed", { status: res.status }))
   return res.blob()
 }
 
@@ -366,7 +380,7 @@ export async function uploadAvatar(owner: string, blob: Blob): Promise<AvatarMet
     const message =
       data && typeof data === "object" && "error" in data
         ? String((data as { error: string }).error)
-        : `头像上传失败 (${res.status})`
+        : translate("ui.api.avatar_upload_failed", { status: res.status })
     throw new ApiError(res.status, message)
   }
   return data as AvatarMeta

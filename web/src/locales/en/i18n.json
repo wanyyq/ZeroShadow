@@ -1,0 +1,11 @@
+{
+  "ui.i18n.language": "Interface language",
+  "ui.i18n.language_hint": "Applies immediately and only to this browser. The site default is “{name}”.",
+  "ui.i18n.custom_tag": "from data/lang",
+  "ui.i18n.follow_default": "Use site default",
+  "ui.i18n.export_template": "Export translation template",
+  "ui.i18n.export_template_hint": "Download every message key (values are the Chinese source text). Translate the values, add a _meta.name, and drop the file into the server's data/lang/ to add a language.",
+  "ui.i18n.exported": "Translation template downloaded",
+  "ui.i18n.loading": "Loading language file…",
+  "ui.i18n.template_name_placeholder": "(replace with this language's own name)"
+}

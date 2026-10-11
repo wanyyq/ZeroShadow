@@ -2,6 +2,7 @@ import path from "node:path"
 import fs from "node:fs"
 import { DATA_DIR, ENV_FILE, FILES_DIR, SOFT_DIRS } from "./env.js"
 import { getConfig } from "./config.js"
+import { httpError } from "./http.js"
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin"
 
@@ -26,10 +27,9 @@ export function normRel(input = "") {
   return parts.join("/")
 }
 
+// 错误提示带 errorKey（命名键）供前端本地化，中文原文照旧回传（见 http.js）
 function badPath() {
-  const err = new Error("非法路径")
-  err.status = 400
-  return err
+  return httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
 }
 
 export function resolveSafe(input = "") {
@@ -68,9 +68,7 @@ export function resolveAny(rel) {
 }
 
 function notFound() {
-  const err = new Error("文件或目录不存在")
-  err.status = 404
-  return err
+  return httpError(404, "文件或目录不存在", { errorKey: "api.fs.not_found" })
 }
 
 /**
@@ -164,6 +162,25 @@ export function validateName(name) {
   if (INVALID_NAME_CHARS.test(trimmed)) return '名称不能包含 \\ / : * ? " < > | 等字符'
   if (/[. ]$/.test(trimmed)) return "名称不能以空格或点结尾"
   return null
+}
+
+/**
+ * `validateName` 的返回值（中文提示）→ 命名键。
+ *
+ * validateName 只回字符串（大量调用方按"有值即非法"判断），所以键只能按串反查。
+ * 这里的键**必须与上面 return 的字面量逐字一致**，改文案时两张表要一起改。
+ */
+const NAME_ERROR_KEYS = {
+  "名称无效": "api.fs.name_invalid",
+  "名称不能为空": "api.fs.name_empty",
+  "名称过长": "api.fs.name_too_long",
+  "名称不能包含 \\ / : * ? \" < > | 等字符": "api.fs.name_invalid_chars",
+  "名称不能以空格或点结尾": "api.fs.name_trailing_spaces",
+}
+
+/** 取 validateName 提示对应的命名键；未知提示返回 undefined（前端回落到中文原文） */
+export function nameErrorKey(message) {
+  return NAME_ERROR_KEYS[message]
 }
 
 export function sanitizeFileName(name) {

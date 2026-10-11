@@ -1,0 +1,16 @@
+{
+  "api.common.not_found": "No such API endpoint",
+  "api.common.server_error": "Internal server error",
+  "api.auth.login_required": "Please sign in first",
+  "api.auth.forbidden": "You do not have permission to perform this action",
+  "api.auth.csrf_failed": "Request validation failed",
+  "api.i18n.unknown_lang": "No such language file",
+  "api.admin.default_lang_invalid": "defaultLang must be a language code that is currently available",
+  "api.fs.version_conflict": "This file was changed by someone else after you opened it. To avoid overwriting their changes, this save was not performed. Reopen it (or refresh the page) to see the latest content, then decide how to merge.",
+  "ui.api.upload_failed": "Upload failed ({status})",
+  "ui.api.upload_network_error": "Network error, the upload was interrupted",
+  "ui.api.upload_cancelled": "Upload cancelled",
+  "ui.api.download_failed": "Download failed ({status})",
+  "ui.api.avatar_fetch_failed": "Could not load the avatar ({status})",
+  "ui.api.avatar_upload_failed": "Could not upload the avatar ({status})"
+}

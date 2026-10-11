@@ -36,6 +36,9 @@ const DEFAULTS = {
   metricsMemMinutes: 15,
   requestMetricsEnabled: true,
   slowRequestMs: 1000,
+  // ===== 界面语言 =====
+  /** 站点默认界面语言；用户在自己浏览器里选过的语言会覆盖它 */
+  defaultLang: "zh",
   // ===== 未分组/默认上下文的可见范围 =====
   defaultVisibility: {
     whitelist: [],

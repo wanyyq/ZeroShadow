@@ -7,6 +7,7 @@ import { downloadUrl, triggerDownload } from "@/lib/api"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { previewType } from "@/lib/format"
 import { isMarkdown, renderMarkdown } from "@/lib/markdown"
+import { translate, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/state/auth"
 
@@ -18,12 +19,12 @@ import { useAuth } from "@/state/auth"
 function copyToClipboard(text: string, okMsg: string) {
   const clipboard = navigator.clipboard
   if (!clipboard?.writeText) {
-    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    toast.error(translate("ui.common.copy_unsupported"))
     return
   }
   void clipboard.writeText(text).then(
     () => toast.success(okMsg),
-    () => toast.error("复制失败，请手动选择文本")
+    () => toast.error(translate("ui.common.copy_failed"))
   )
 }
 
@@ -31,6 +32,7 @@ export default function PreviewPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const { me } = useAuth()
+  const t = useT()
   const entryPath = params.get("path") || ""
   const name = entryPath.split("/").pop() || ""
   // 只认 format.ts 的 previewType：未知扩展名（docx / zip / exe …）返回 null，
@@ -65,23 +67,23 @@ export default function PreviewPage() {
 
   React.useEffect(() => {
     if (!me.perms.preview) {
-      toast.warning("此功能您没权限")
+      toast.warning(t("ui.common.no_permission"))
       navigate(-1)
     }
-  }, [me.perms.preview, navigate])
+  }, [me.perms.preview, navigate, t])
 
   React.useEffect(() => {
     if (supported && kind === "text" && url) {
       // 不要在这里做 HTML 转义：内容是交给 JSX 文本节点渲染的，React 本身就会转义，
       // 手动再转一次会让引号、尖括号在屏幕上显示成 &quot; / &lt; 字面量。
       fetch(url, { credentials: "same-origin" })
-        .then(async (r) => { if (r.ok) setText(await r.text()); else setText("加载失败") })
-        .catch(() => setText("加载失败"))
+        .then(async (r) => { if (r.ok) setText(await r.text()); else setText(t("ui.dialogs.load_failed")) })
+        .catch(() => setText(t("ui.dialogs.load_failed")))
     }
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") navigate(-1) }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [url, kind, supported, navigate])
+  }, [url, kind, supported, navigate, t])
 
   React.useEffect(() => { setScale(0); setPos({ x: 0, y: 0 }); setFitScale(1); setSourceView(false) }, [url])
 
@@ -182,7 +184,7 @@ export default function PreviewPage() {
           )}
           {markdown && (
             <Button size="xs" variant="ghost" onClick={() => setSourceView((v) => !v)}>
-              <Icon name={sourceView ? "eye" : "code"} /> {sourceView ? "预览" : "源码"}
+              <Icon name={sourceView ? "eye" : "code"} /> {sourceView ? t("ui.common.preview") : t("ui.preview.source_code")}
             </Button>
           )}
           <Button size="icon-xs" variant="ghost" onClick={() => navigate(-1)}><Icon name="x" /></Button>
@@ -237,7 +239,7 @@ export default function PreviewPage() {
         {!supported && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
             <Icon name="circle-slash" className="size-10 text-muted-foreground" />
-            <p className="text-sm font-medium">暂不支持预览此格式</p>
+            <p className="text-sm font-medium">{t("ui.preview.unsupported_format")}</p>
             <p className="max-w-md truncate text-xs text-muted-foreground">{name}</p>
           </div>
         )}
@@ -246,11 +248,11 @@ export default function PreviewPage() {
             {rawHtml && (
               <div className="flex items-start gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
                 <Icon name="info" className="mt-0.5 size-3.5 shrink-0" />
-                <span>文件里含原始 HTML 标签，出于安全考虑按纯文本显示；可切到「源码」查看原文。</span>
+                <span>{t("ui.preview.raw_html_notice")}</span>
               </div>
             )}
             {text === null ? (
-              <p className="p-6 text-sm text-muted-foreground">加载中…</p>
+              <p className="p-6 text-sm text-muted-foreground">{t("ui.common.loading")}</p>
             ) : (
               // html 由 lib/markdown.ts 生成：源文本先整体转义再解析，输出里不含
               // 任何来自文件的标签，因此这里的 dangerouslySetInnerHTML 没有 XSS 通道
@@ -261,7 +263,7 @@ export default function PreviewPage() {
         {supported && kind === "text" && (!markdown || sourceView) && (
           <div className="h-full overflow-auto bg-muted/30">
             <pre className={cn("p-6 font-mono text-sm whitespace-pre-wrap", text ? "" : "opacity-50")}>
-              {text ?? "加载中…"}
+              {text ?? t("ui.common.loading")}
             </pre>
           </div>
         )}
@@ -270,21 +272,21 @@ export default function PreviewPage() {
       </ContextMenuTrigger>
       {/* 查看页的右键菜单：下载、新标签打开、复制链接、返回 */}
       <ContextMenuContent className="w-52">
-        <ContextMenuItem disabled={!me.perms.downloadFile} onClick={() => { if (!me.perms.downloadFile) return toast.warning("此功能您没权限"); triggerDownload(url).catch(() => toast.error("下载失败")) }}>
-          <Icon name="download" /> 下载原文件
+        <ContextMenuItem disabled={!me.perms.downloadFile} onClick={() => { if (!me.perms.downloadFile) return toast.warning(t("ui.common.no_permission")); triggerDownload(url).catch(() => toast.error(t("ui.operations.download_failed"))) }}>
+          <Icon name="download" /> {t("ui.preview.download_original")}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => window.open(url, "_blank", "noopener")}>
-          <Icon name="external-link" /> 在新标签页打开
+          <Icon name="external-link" /> {t("ui.common.open_new_tab")}
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => copyToClipboard(new URL(url, window.location.origin).href, "已复制链接")}>
-          <Icon name="clipboard-copy" /> 复制链接
+        <ContextMenuItem onClick={() => copyToClipboard(new URL(url, window.location.origin).href, t("ui.preview.link_copied"))}>
+          <Icon name="clipboard-copy" /> {t("ui.common.copy_link")}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => copyToClipboard(entryPath, "已复制相对路径")}>
-          <Icon name="clipboard-list" /> 复制相对路径
+        <ContextMenuItem onClick={() => copyToClipboard(entryPath, t("ui.browser.copied_relative_path"))}>
+          <Icon name="clipboard-list" /> {t("ui.browser.copy_relative_path")}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => navigate(-1)}>
-          <Icon name="arrow-left" /> 返回
+          <Icon name="arrow-left" /> {t("ui.common.back")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

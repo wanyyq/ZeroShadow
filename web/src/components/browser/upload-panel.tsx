@@ -2,10 +2,12 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Icon } from "@/components/icon"
 import { formatBytes } from "@/lib/format"
+import { useT } from "@/lib/i18n"
 import { useUploads } from "@/state/uploads"
 import { cn } from "@/lib/utils"
 
 export function UploadPanel() {
+  const t = useT()
   const { jobs, cancel, dismiss, clearFinished } = useUploads()
   if (!jobs.length) return null
   const active = jobs.filter((j) => j.status === "uploading").length
@@ -14,9 +16,9 @@ export function UploadPanel() {
     <div className="edge-highlight fixed right-4 bottom-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-sm font-medium">
-          {active > 0 ? `正在上传 ${active} 项` : "上传完成"}
+          {active > 0 ? t("ui.upload.uploading_n", { n: active }) : t("ui.upload.done")}
         </span>
-        <Button variant="ghost" size="icon-xs" aria-label="清除已完成" onClick={clearFinished}>
+        <Button variant="ghost" size="icon-xs" aria-label={t("ui.progress.clear_finished")} onClick={clearFinished}>
           <Icon name="x" />
         </Button>
       </div>

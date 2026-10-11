@@ -50,6 +50,7 @@ icon: Boxes
       <File name="files.js" />
       <File name="groups.js" />
       <File name="integrity.js" />
+      <File name="i18n.js" />
       <File name="jobs.js" />
       <File name="logger.js" />
       <File name="metrics.js" />
@@ -118,6 +119,7 @@ icon: Boxes
   <File name="security-test.ps1" />
   <File name="smoke-test.ps1" />
   <File name="encoding-test.mjs" />
+  <File name="i18n-check.mjs" />
   <File name="package.json" />
   <File name=".env.example" />
 </Files>
@@ -139,6 +141,7 @@ icon: Boxes
 | `files.js` | 目录列举、条目信息、递归统计、搜索、复制 / 移动 |
 | `groups.js` | 小组读写、可见范围判定、组长能力校验 |
 | `integrity.js` | 启动自检：损坏的 JSON 移入 `data/backups/corrupt/` 隔离、清理 tmp 残留 |
+| `i18n.js` | 界面语言目录：扫描 `data/lang/*.json`、白名单校验（键名格式 / 原型污染 / 体积与条数上限）、按 mtime 失效缓存 |
 | `jobs.js` | 长任务（压缩 / 解压 / 链接下载）的进度与清理 |
 | `logger.js` | JSONL 日志、查询与聚合统计、按 `logRetentionDays` 清理 |
 | `metrics.js` | 每分钟系统指标采样 + 请求指标（QPS / 状态码 / 慢请求）与落盘轮转 |
@@ -159,6 +162,7 @@ icon: Boxes
 | `routes/avatars.js` | `/api/avatars/*`（头像读写） |
 | `routes/groups.js` | `/api/groups/*`（组长自助，受超管勾选的 `leaderCaps` 约束） |
 | `routes/todos.js` | `/api/todos/*`（团队待办） |
+| `routes/i18n.js` | `/api/i18n/*`（语言清单与译文，**免登录**：登录页也要显示语言选择器） |
 
 **前端 `web/src/`**
 
@@ -167,8 +171,9 @@ icon: Boxes
 | `pages/` | 页面：浏览 / 登录 / 设置 / 团队 / 预览 / 编辑 / HTML / 工具 / 软件开源信息；`editor-page.tsx` 是在线编辑器，设置页的「日志与指标」「小组」「数据与保留」拆在 `pages/settings/` 下 |
 | `version.ts` | 前端唯一的版本号来源（导出 `VERSION`，关于页与侧边栏共用） |
 | `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件，含 `ui/context-menu.tsx`） |
+| `locales/` | 译文：`locales/zh/<区域>.json` 与 `locales/en/<区域>.json`，由 `locales/index.ts` 在构建期用 `import.meta.glob` 合并 |
 | `state/` | 六个 Provider：auth / groups / client-settings / clipboard / uploads / operations |
-| `lib/` | api / types / format / markdown / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
+| `lib/` | api / types / format / i18n / markdown / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
 
 `components/ui/toggle-group.tsx` 是基于 `@base-ui/react` 的**分段控件**（2–4 个互斥选项），
 团队待办的筛选与编辑器、同名处理对话框都改用了它。
@@ -687,6 +692,84 @@ web/public/robustness/
   这样既省字节，也避开"运行时生成的 HTML 里写的工具类 Tailwind 扫不到、根本不会进产物"
   这个坑。
 
+### 多语言（i18n）
+
+**一句话**：源码里不再写中文，写 `t("命名键")`；译文放在 `web/src/locales/<语言>/<区域>.json`。
+
+| 位置 | 作用 |
+|:--|:--|
+| `web/src/lib/i18n.tsx` | 运行时：`t()` / `translate()` / `useT()`、语言状态与切换、插值、回落链 |
+| `web/src/locales/zh/<区域>.json` | **中文（源语言）**，必须覆盖每一个用到的键 |
+| `web/src/locales/en/<区域>.json` | 英文 |
+| `web/src/locales/index.ts` | 用 `import.meta.glob` 在**构建期**把各区域文件合并成 `BUILTIN`（运行期零请求） |
+| `web/src/components/language-select.tsx` | 语言选择器 + 「导出翻译模板」（值就是中文原文） |
+| `server/src/i18n.js` | 扫描 / 校验 `data/lang/*.json`，按 mtime 失效缓存 |
+| `server/src/routes/i18n.js` | `GET /api/i18n`（清单 + 站点默认）、`GET /api/i18n/:code`（译文） |
+| `web/public/robustness/index.js` 顶部 | 兼容模式页自带的 ES5 版 `T()` 与字典加载（它不参与构建，自己按 `/resources/locales/*.json` 取静态字典） |
+| `vite.config.ts` 的 `localeAssets()` | 构建时把合并后的字典额外输出成 `dist/resources/locales/<语言>.json`，专供兼容模式页 |
+| `i18n-check.mjs` | 键完整性校验 + 剩余硬编码中文统计 |
+
+键的形状：`<命名空间>.<区域>.<名字>`，**至少三段**（第三段用于排除 `meta.json` 这类文件名误报），
+命名空间取 `ui`（界面）/ `api`（服务端提示）/ `meta`（文件元数据字段名）/ `compat`（兼容模式）。
+
+写代码时的三条纪律：
+
+1. 组件里 `const t = useT()`（语言一变就重渲染）；非组件模块用 `translate()`；
+2. **不要在模块顶层把 `translate()` 的结果存成常量** —— 那会把首次加载时的语言锁死
+   （`lib/format.ts` 的 `EXT_KIND` 存的是**键**，在 `fileKind()` 里才翻译，就是这个原因）；
+3. 插值统一用 `{name}` 占位符：`t("ui.browser.deleted_count", { n })`。
+
+<Callout type="warn" title="中文是唯一的兜底">
+任何键在当前语言里缺失都会依次回落到 `zh`、最后回落到键名本身（界面上会显示成
+`ui.xxx.yyy`）。所以 `zh` 必须完整 —— `i18n-check.mjs` 里"缺 zh"是**错误**、"缺 en"是警告。
+</Callout>
+
+#### 服务端的文案怎么本地化
+
+服务端**不持有字典**，只在错误里多带两个字段（见 `server/src/http.js` 的 `httpError`）：
+
+```js
+throw httpError(400, `文件过大（${size}），在线编辑上限 ${limit}`, {
+  errorKey: "api.fs.file_too_large_for_editor",
+  errorParams: { size, limit },
+})
+```
+
+- `error` 仍是拼好的**中文原文**（`curl` 与第三方脚本的既有行为一字不变）；
+- 前端在 `lib/api.ts` 里优先用 `errorKey` + `errorParams` 渲染，缺键就回落到 `error`；
+- 新增服务端错误时：**中文照写，另外给一个键**；
+- **日志不要本地化**：`info()` / `warn()` 的 event 与 msg 是运维数据，保持中文；
+- 文件元数据的字段名走同一套：`server/src/fileinfo.js` 每条返回
+  `{ key: "meta.exif.make", label: "相机厂商", value }`，前端 `t(key)` 查不到就用 `label` 兜底。
+
+#### 校验
+
+```bash
+node i18n-check.mjs            # 退出码 = 错误数
+node i18n-check.mjs --list-cn  # 列出还没接入 i18n 的中文
+node i18n-check.mjs --strict   # 把"剩余硬编码中文"也算作失败
+```
+
+它检查：用到的键在 zh / en 里是否都存在、en 里有而 zh 里没有的键、en 值里是否残留中文、
+两个语言都没用到的死键、同一键在两份区域文件里冲突、`data/lang/` 里的非法键，
+以及还剩多少处硬编码中文。扫描范围包括 `web/src`、`web/public/robustness` 与
+`server/src` + `server/index.js`（服务端的 `errorKey` / `meta.*` 字面量同样算"用到的键"）。
+
+<Callout type="info" title="「剩余硬编码中文」怎么读">
+服务端文件里的中文**大多是设计使然**，不是漏改：`error` 字段必须保留中文原文
+（保证 curl 与第三方脚本的既有行为）、元数据的 `label` / `value` 是缺译文时的兜底、
+`info()` / `warn()` 日志与启动横幅不做本地化。所以这个数字应该**看趋势**：
+前端（`web/src`、`web/public/robustness`）应当为 0，服务端则逐个确认
+"新加的中文有没有同时给 `errorKey`"。
+</Callout>
+
+#### 要内置一门新语言
+
+在 `web/src/locales/` 下新建语言目录（如 `ja/`）放入各区域文件，并在 `locales/index.ts` 的
+`BUILTIN_META` 里登记代码与自称；`BUILTIN` 会自动把它合并进来。只想**临时加一门**
+（不改代码）：往服务端 `data/lang/<代码>.json` 丢文件即可，格式与限制见
+[配置参考](/docs/zeroshadow/admin/configuration)。
+
 ## 约定与注意事项
 
 **入口**：正常页面底部状态条右侧的「无法渲染？使用兼容模式」链接
@@ -748,6 +831,9 @@ web/public/robustness/
 | 加一种可预览格式 | `web/src/lib/format.ts` 的 `EXT_KIND` / `PREVIEWABLE` + `server/src/routes/fs.js` 的 `INLINE_TYPES` |
 | 改 Markdown 渲染 | `web/src/lib/markdown.ts`（解析规则、危险协议白名单）+ `index.css` 的 `.md-body`（排版样式）+ `web/src/pages/preview-page.tsx`（「源码 / 预览」开关）。**注意保持"先转义再解析"的顺序**，并确认兼容模式不受影响 |
 | 给「详细信息」加一类元数据 | `server/src/fileinfo.js`（新增一段解析，并确保只读有界的字节数、失败只让那段为空）+ `web/src/lib/types.ts` 的 `EntryDetails` + `browser/dialogs.tsx` 的分区渲染 |
+| 加 / 改一句界面文案 | 先找 `web/src/locales/zh/*.json` 里有没有可复用的键；没有就在对应区域文件里加 `ui.<区域>.<名字>`，同时补 `en/` 的译文，源码里用 `t("…")`。改完跑 `node i18n-check.mjs` |
+| 给服务端错误加新提示 | `throw httpError(status, "中文原文", { errorKey: "api.<区域>.<名字>", errorParams: {...} })`，键写进 `web/src/locales/{zh,en}/api*.json`；**不要**动日志里的中文 |
+| 新增一门内置语言 | `web/src/locales/<代码>/` 放区域文件 + `locales/index.ts` 的 `BUILTIN_META` 登记；只想临时加就走 `data/lang/` |
 | 加一种可编辑格式 | `web/src/pages/browser-page.tsx` 里的 `EDITABLE` 数组 |
 | 调整隧道行为 | `server/src/tunnel.js`（`buildArgs` 拼 ssh 参数） |
 | 加一个内置隧道服务商 | `tunnel.js` 的 `buildArgs` + `routes/admin.js` 的 mode 白名单 + `settings/index.tsx` 的 select 选项 |

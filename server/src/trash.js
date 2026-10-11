@@ -4,6 +4,7 @@ import crypto from "node:crypto"
 import { DATA_DIR } from "./env.js"
 import { readJsonSync, writeJsonAtomic } from "./store.js"
 import { getConfig } from "./config.js"
+import { httpError } from "./http.js"
 import { info, warn } from "./logger.js"
 
 // ============================================================================
@@ -199,28 +200,20 @@ function trashContentPath(id) {
 export async function restoreTrash(id, dest, overwrite = false) {
   const meta = getTrash(id)
   if (!meta) {
-    const err = new Error("回收站里找不到这个项目")
-    err.status = 404
-    throw err
+    throw httpError(404, "回收站里找不到这个项目", { errorKey: "api.fs.trash_not_found" })
   }
   const contentPath = trashContentPath(id)
   const srcStat = await fs.promises.lstat(contentPath).catch(() => null)
   if (!srcStat) {
-    const err = new Error("回收站内容已丢失，无法还原")
-    err.status = 410
-    throw err
+    throw httpError(410, "回收站内容已丢失，无法还原", { errorKey: "api.fs.trash_content_missing" })
   }
   if (!dest || !dest.rel) {
     // 必须 throw：调用方（admin.js）只看 result.conflict，return 一个 Error 对象
     // 会被当成"成功"，于是返回 200 {ok:true} 但其实什么都没还原。
-    const err = new Error("还原目标无效")
-    err.status = 400
-    throw err
+    throw httpError(400, "还原目标无效", { errorKey: "api.fs.trash_invalid_target" })
   }
   if (dest.isSoft) {
-    const err = new Error("外部映射目录仅支持只读操作")
-    err.status = 403
-    throw err
+    throw httpError(403, "外部映射目录仅支持只读操作", { errorKey: "api.fs.soft_read_only" })
   }
 
   const existing = await fs.promises.lstat(dest.abs).catch(() => null)

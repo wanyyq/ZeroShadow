@@ -1,0 +1,48 @@
+{
+  "ui.preview.source_code": "源码",
+  "ui.preview.unsupported_format": "暂不支持预览此格式",
+  "ui.preview.raw_html_notice": "文件里含原始 HTML 标签，出于安全考虑按纯文本显示；可切到「源码」查看原文。",
+  "ui.preview.download_original": "下载原文件",
+  "ui.preview.link_copied": "已复制链接",
+
+  "ui.shortcut.type_dir": "目录",
+  "ui.shortcut.type_soft_dir": "外部映射目录",
+  "ui.shortcut.type_soft_file": "外部映射文件",
+  "ui.shortcut.default_name": "{name} 快捷方式",
+  "ui.shortcut.name_target_required": "名称和目标不能为空",
+  "ui.shortcut.saved_old_not_deleted": "快捷方式已保存，但旧的同名文件未能删除",
+  "ui.shortcut.updated": "快捷方式已更新",
+  "ui.shortcut.created": "快捷方式已创建",
+  "ui.shortcut.name_label": "显示名称",
+  "ui.shortcut.name_placeholder": "快捷方式显示名",
+  "ui.shortcut.target_path_label": "目标路径",
+  "ui.shortcut.target_placeholder": "相对路径或外部映射路径",
+  "ui.shortcut.target_type_label": "目标类型",
+  "ui.shortcut.icon_label": "图标",
+  "ui.shortcut.create": "创建",
+
+  "ui.dest_picker.copy_here": "复制到此处",
+  "ui.dest_picker.move_here": "移动到此处",
+
+  "ui.picker.parent": "返回上级",
+  "ui.picker.no_subfolders": "没有子文件夹",
+
+  "ui.path_picker.title": "选择目录",
+  "ui.path_picker.pick": "选择此目录",
+
+  "ui.conflict.title": "同名文件处理",
+  "ui.conflict.description": "目标位置已存在 {count} 个同名项目，请选择处理方式：",
+  "ui.conflict.rename_to": "重命名为 {name}",
+  "ui.conflict.skip": "跳过",
+  "ui.conflict.overwrite": "覆盖",
+  "ui.conflict.merge": "合并",
+  "ui.conflict.apply_to_all": "对接下来所有同名项目执行此操作",
+
+  "ui.ops.processing_n": "正在处理 {n} 项",
+  "ui.ops.done": "处理完成",
+
+  "ui.upload.uploading_n": "正在上传 {n} 项",
+  "ui.upload.done": "上传完成",
+
+  "ui.progress.clear_finished": "清除已完成"
+}

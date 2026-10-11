@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { isHiddenFromGuest, joinRel } from "./safety.js"
+import { httpError } from "./http.js"
 
 export async function entryInfo(dirAbs, dirent) {
   const abs = path.join(dirAbs, dirent.name)
@@ -72,18 +73,14 @@ export async function statSafe(abs) {
 export async function assertDir(abs) {
   const stat = await statSafe(abs)
   if (!stat || !stat.isDirectory()) {
-    const err = new Error("目录不存在")
-    err.status = 404
-    throw err
+    throw httpError(404, "目录不存在", { errorKey: "api.fs.dir_not_found" })
   }
 }
 
 export async function assertExists(abs) {
   const stat = await statSafe(abs)
   if (!stat || stat.isSymbolicLink()) {
-    const err = new Error("文件或目录不存在")
-    err.status = 404
-    throw err
+    throw httpError(404, "文件或目录不存在", { errorKey: "api.fs.not_found" })
   }
   return stat
 }

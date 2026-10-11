@@ -14,21 +14,28 @@ import { useGroups } from "@/state/groups"
 import { useClientSettings } from "@/state/client-settings"
 import { VERSION } from "@/version"
 import { cn } from "@/lib/utils"
+import { translate, useT } from "@/lib/i18n"
 import { api, uploadAvatar } from "@/lib/api"
 import { ownerForMe, primeAvatar } from "@/lib/avatar-cache"
 import { fileToAvatarWebp } from "@/lib/avatar-image"
 import { toast } from "sonner"
 import type { Me } from "@/lib/types"
 
-const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", member: "团队成员", guest: "访客" }
+/** 角色显示名。角色值本身（superadmin / member / guest）是判断用的，不能翻译。 */
+function roleLabel(role: string) {
+  if (role === "superadmin") return translate("ui.shell.role.superadmin")
+  if (role === "member") return translate("ui.shell.role.member")
+  if (role === "guest") return translate("ui.shell.role.guest")
+  return role
+}
 
 function navItems(loggedIn: boolean) {
-  const items = [{ path: "/", icon: "files", label: "文件" }]
-  if (loggedIn) items.push({ path: "/team", icon: "clipboard-list", label: "团队" })
+  const items = [{ path: "/", icon: "files", label: translate("ui.shell.nav.files") }]
+  if (loggedIn) items.push({ path: "/team", icon: "clipboard-list", label: translate("ui.shell.nav.team") })
   items.push(
-    { path: "/tools", icon: "wrench", label: "工具" },
-    { path: "/settings", icon: "settings", label: "设置" },
-    { path: "/about", icon: "info", label: "软件开源信息" }
+    { path: "/tools", icon: "wrench", label: translate("ui.shell.nav.tools") },
+    { path: "/settings", icon: "settings", label: translate("ui.shell.nav.settings") },
+    { path: "/about", icon: "info", label: translate("ui.shell.nav.about") }
   )
   return items
 }
@@ -43,12 +50,12 @@ function navItems(loggedIn: boolean) {
 function copyLink(text: string, okMsg: string) {
   const clipboard = navigator.clipboard
   if (!clipboard?.writeText) {
-    toast.error("当前环境不支持自动复制，请手动复制")
+    toast.error(translate("ui.shell.copy_unsupported"))
     return
   }
   void clipboard.writeText(text).then(
     () => toast.success(okMsg),
-    () => toast.error("复制失败，请手动复制")
+    () => toast.error(translate("ui.shell.copy_failed"))
   )
 }
 
@@ -117,10 +124,10 @@ function SidebarRow({
 function navContextItems(path: string, label: string) {
   return [
     <ContextMenuItem key="newtab" onClick={() => window.open(path, "_blank", "noopener")}>
-      <Icon name="external-link" /> 在新标签页打开
+      <Icon name="external-link" /> {translate("ui.common.open_new_tab")}
     </ContextMenuItem>,
-    <ContextMenuItem key="copy" onClick={() => copyLink(new URL(path, window.location.origin).href, `已复制「${label}」的链接`)}>
-      <Icon name="clipboard-copy" /> 复制链接
+    <ContextMenuItem key="copy" onClick={() => copyLink(new URL(path, window.location.origin).href, translate("ui.shell.copied_link_named", { label }))}>
+      <Icon name="clipboard-copy" /> {translate("ui.common.copy_link")}
     </ContextMenuItem>,
   ]
 }
@@ -149,6 +156,7 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
   open: boolean; onOpenChange: (o: boolean) => void; me: Me;
   logout: () => Promise<void>; navigate: (p: string) => void; themeIcon: string; cycleTheme: () => void;
 }) {
+  const t = useT()
   const [showPwd, setShowPwd] = React.useState(false)
   const [oldPwd, setOldPwd] = React.useState("")
   const [newPwd, setNewPwd] = React.useState("")
@@ -164,7 +172,7 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
       const blob = await fileToAvatarWebp(file)
       const meta = await uploadAvatar("me", blob)
       await primeAvatar(meta.owner, meta.md5, blob)
-      toast.success("头像已更新")
+      toast.success(t("ui.shell.avatar_updated"))
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -178,7 +186,7 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
     setBusy(true)
     try {
       const res = await api.post<{ ok: boolean; message: string }>("/auth/change-password", { oldPassword: oldPwd, newPassword: newPwd })
-      toast.success(res.message || "密码已修改")
+      toast.success(res.message || t("ui.shell.password_changed"))
       setShowPwd(false); onOpenChange(false)
       await logout(); navigate("/")
     } catch (e) { toast.error((e as Error).message) }
@@ -190,37 +198,37 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
       <DialogContent showCloseButton={false}>
         {showPwd ? (
           <>
-            <DialogHeader><DialogTitle>修改密码</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>{t("ui.shell.change_password")}</DialogTitle></DialogHeader>
             <div className="grid gap-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="old-pwd">旧密码</Label>
+                <Label htmlFor="old-pwd">{t("ui.shell.old_password")}</Label>
                 <Input id="old-pwd" type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} autoFocus />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="new-pwd">新密码（至少 6 位）</Label>
+                <Label htmlFor="new-pwd">{t("ui.shell.new_password_label")}</Label>
                 <Input id="new-pwd" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
               </div>
               {me.role === "member" && (
-                <p className="text-xs text-muted-foreground">若忘记密码，请联系超级管理员重置</p>
+                <p className="text-xs text-muted-foreground">{t("ui.shell.forgot_password_hint")}</p>
               )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowPwd(false)}>取消</Button>
+              <Button variant="outline" onClick={() => setShowPwd(false)}>{t("ui.common.cancel")}</Button>
               <Button onClick={changePwd} disabled={busy || !oldPwd || newPwd.length < 6}>
-                {busy && <Icon name="loader-2" className="animate-spin" />} 确定
+                {busy && <Icon name="loader-2" className="animate-spin" />} {t("ui.common.ok")}
               </Button>
             </DialogFooter>
           </>
         ) : (
           <>
-            <DialogHeader><DialogTitle>账户</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>{t("ui.shell.account")}</DialogTitle></DialogHeader>
             <div className="flex items-center gap-4">
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={uploading}
                 className="group relative shrink-0 rounded-full outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
-                title="点击更换头像"
+                title={t("ui.shell.change_avatar")}
               >
                 <Avatar owner={owner} name={me.username} size={56} />
                 <span className={cn(
@@ -239,17 +247,17 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
               />
               <div className="min-w-0">
                 <p className="text-base font-semibold">{me.username}</p>
-                <p className="text-sm text-muted-foreground">{ROLE_LABEL[me.role]}</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">头像自动裁剪为 128×128</p>
+                <p className="text-sm text-muted-foreground">{roleLabel(me.role)}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{t("ui.shell.avatar_crop_hint")}</p>
               </div>
             </div>
             <div className="mt-4 grid gap-1">
               {me.role === "member" && me.perms.changePassword && (
                 <button
-                  onClick={() => { if (me.role === "superadmin") { toast.info("超级管理员密码请编辑 .env 文件中的 SUPER_ADMIN_PASSWORD，改后重启"); return }; setShowPwd(true); setOldPwd(""); setNewPwd("") }}
+                  onClick={() => { if (me.role === "superadmin") { toast.info(t("ui.shell.superadmin_pwd_env_hint")); return }; setShowPwd(true); setOldPwd(""); setNewPwd("") }}
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <Icon name="key" className="size-[18px]" /> 修改密码
+                  <Icon name="key" className="size-[18px]" /> {t("ui.shell.change_password")}
                 </button>
               )}
               {me.role === "member" && !me.perms.changePassword && (
@@ -257,23 +265,23 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
                   disabled
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground/40"
                 >
-                  <Icon name="key" className="size-[18px]" /> 修改密码（无权限）
+                  <Icon name="key" className="size-[18px]" /> {t("ui.shell.change_password_no_perm")}
                 </button>
               )}
               {me.role === "superadmin" && (
                 <button
-                  onClick={() => toast.info("超级管理员密码请编辑 .env 中的 SUPER_ADMIN_PASSWORD，改后重启服务", { duration: 6000 })}
+                  onClick={() => toast.info(t("ui.shell.superadmin_pwd_env_restart_hint"), { duration: 6000 })}
                   className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <Icon name="key" className="size-[18px]" /> 修改密码（编辑 .env）
+                  <Icon name="key" className="size-[18px]" /> {t("ui.shell.change_password_env")}
                 </button>
               )}
               <button onClick={cycleTheme} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <Icon name={themeIcon} className="size-[18px]" />
-                {themeIcon === "sun" ? "浅色模式" : themeIcon === "moon" ? "深色模式" : "跟随系统"}
+                {themeIcon === "sun" ? t("ui.shell.theme_light_mode") : themeIcon === "moon" ? t("ui.shell.theme_dark_mode") : t("ui.common.platform_theme_system")}
               </button>
               <button onClick={async () => { await logout(); navigate("/"); onOpenChange(false) }} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10">
-                <Icon name="log-out" className="size-[18px]" /> 退出登录
+                <Icon name="log-out" className="size-[18px]" /> {t("ui.shell.logout")}
               </button>
             </div>
           </>
@@ -284,6 +292,7 @@ function UserCard({ open, onOpenChange, me, logout, navigate, themeIcon, cycleTh
 }
 
 function GroupSwitcher() {
+  const t = useT()
   const { groups, currentId, setCurrent, refresh: refreshGroups } = useGroups()
   const { me, refresh } = useAuth()
   const navigate = useNavigate()
@@ -293,7 +302,7 @@ function GroupSwitcher() {
     void refresh()
     navigate("/")
   }
-  const label = currentId === "default" ? "默认" : groups.find((g) => g.id === currentId)?.name || "默认"
+  const label = currentId === "default" ? t("ui.shell.group_default") : groups.find((g) => g.id === currentId)?.name || t("ui.shell.group_default")
   return (
     <Select
       value={currentId}
@@ -301,12 +310,12 @@ function GroupSwitcher() {
       // 打开时重拉一次列表：否则在「设置 → 小组」里刚建/删的小组，要刷新整页才会出现在这里
       onOpenChange={(open) => { if (open) void refreshGroups() }}
     >
-      <SelectTrigger className="h-8 w-28 text-xs sm:w-32" size="sm" title="切换小组身份">
+      <SelectTrigger className="h-8 w-28 text-xs sm:w-32" size="sm" title={t("ui.shell.switch_group_title")}>
         <Icon name="layers" className="size-3.5 shrink-0" />
-        <SelectValue render={(_p, s) => <>{s.value === "default" ? "默认" : groups.find((g) => g.id === s.value)?.name || "默认"}</>}>{label}</SelectValue>
+        <SelectValue render={(_p, s) => <>{s.value === "default" ? t("ui.shell.group_default") : groups.find((g) => g.id === s.value)?.name || t("ui.shell.group_default")}</>}>{label}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="default">默认</SelectItem>
+        <SelectItem value="default">{t("ui.shell.group_default")}</SelectItem>
         {groups.map((g) => (
           <SelectItem key={g.id} value={g.id}>
             <span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: g.color }} />
@@ -319,6 +328,7 @@ function GroupSwitcher() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const t = useT()
   const navigate = useNavigate()
   const location = useLocation()
   const { me, logout, refresh } = useAuth()
@@ -373,33 +383,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <ContextMenuContent className="w-52">
       {me.role !== "guest" && (
         <ContextMenuItem onClick={() => { navigate("/team"); setMobileOpen(false) }}>
-          <Icon name="list-checks" /> 团队待办
+          <Icon name="list-checks" /> {t("ui.team.page_title")}
         </ContextMenuItem>
       )}
       <ContextMenuItem onClick={() => { navigate("/settings"); setMobileOpen(false) }}>
-        <Icon name="settings" /> 打开设置
+        <Icon name="settings" /> {t("ui.shell.open_settings")}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuSub>
         <ContextMenuSubTrigger>
-          <Icon name={themeIcon} /> 主题
+          <Icon name={themeIcon} /> {t("ui.shell.theme")}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
-          <ContextMenuItem onClick={() => setTheme("light")}><Icon name="sun" /> 浅色</ContextMenuItem>
-          <ContextMenuItem onClick={() => setTheme("dark")}><Icon name="moon" /> 深色</ContextMenuItem>
-          <ContextMenuItem onClick={() => setTheme("system")}><Icon name="monitor" /> 跟随系统</ContextMenuItem>
+          <ContextMenuItem onClick={() => setTheme("light")}><Icon name="sun" /> {t("ui.common.platform_theme_light")}</ContextMenuItem>
+          <ContextMenuItem onClick={() => setTheme("dark")}><Icon name="moon" /> {t("ui.common.platform_theme_dark")}</ContextMenuItem>
+          <ContextMenuItem onClick={() => setTheme("system")}><Icon name="monitor" /> {t("ui.common.platform_theme_system")}</ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
       <ContextMenuItem onClick={toggleCollapsed}>
         <Icon name={collapsed ? "panel-left-open" : "panel-left-close"} />
-        {collapsed ? "展开侧边栏" : "收起侧边栏"}
+        {collapsed ? t("ui.shell.sidebar_expand") : t("ui.shell.sidebar_collapse")}
       </ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => copyLink(window.location.href, "已复制当前页面链接")}>
-        <Icon name="clipboard-copy" /> 复制当前页面链接
+      <ContextMenuItem onClick={() => copyLink(window.location.href, t("ui.shell.copied_page_link"))}>
+        <Icon name="clipboard-copy" /> {t("ui.shell.copy_page_link")}
       </ContextMenuItem>
       <ContextMenuItem onClick={() => window.location.reload()}>
-        <Icon name="refresh-cw" /> 重新载入页面
+        <Icon name="refresh-cw" /> {t("ui.shell.reload_page")}
       </ContextMenuItem>
     </ContextMenuContent>
   )
@@ -446,7 +456,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="shrink-0 border-t border-border/40 px-2 py-2">
             <SidebarRow
               icon={collapsed ? "panel-left-open" : "panel-left-close"}
-              label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+              label={collapsed ? t("ui.shell.sidebar_expand") : t("ui.shell.sidebar_collapse")}
               collapsed={collapsed}
               onClick={toggleCollapsed}
             />
@@ -464,7 +474,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {/* 手机端搜索 */}
             <div className="relative flex-1 sm:hidden">
               <Icon name="search" className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={searchText} placeholder="搜索…" className="h-8 pl-8 text-sm bg-muted/50 border-transparent"
+              <Input value={searchText} placeholder={t("ui.shell.search_placeholder")} className="h-8 pl-8 text-sm bg-muted/50 border-transparent"
                 onChange={(e) => setSearchText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submitSearch()}
               />
@@ -475,8 +485,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="ml-auto flex items-center gap-1">
               <button
                 onClick={cycleTheme}
-                title={theme === "light" ? "当前：浅色（点击切换）" : theme === "dark" ? "当前：深色（点击切换）" : "当前：跟随系统（点击切换）"}
-                aria-label="切换主题"
+                title={theme === "light" ? t("ui.shell.theme_tip_light") : theme === "dark" ? t("ui.shell.theme_tip_dark") : t("ui.shell.theme_tip_system")}
+                aria-label={t("ui.shell.switch_theme")}
                 className="hidden rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex"
               >
                 <Icon name={themeIcon} className="size-[18px]" />
@@ -484,7 +494,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <GroupSwitcher />
               {me.role === "guest" ? (
                 <Button size="sm" variant="ghost" onClick={() => navigate("/login")}>
-                  <Icon name="log-in" className="size-3.5" /> 登录
+                  <Icon name="log-in" className="size-3.5" /> {t("ui.shell.login")}
                 </Button>
               ) : (
                 <ContextMenu>
@@ -493,7 +503,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   >
                     <button
                       onClick={() => setUserCardOpen(true)}
-                      title={`${me.username}（${ROLE_LABEL[me.role] || me.role}）`}
+                      title={t("ui.shell.user_title", { username: String(me.username), role: roleLabel(me.role) })}
                       className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-muted"
                     >
                       <Avatar owner={ownerForMe(me)} name={me.username} size={24} />
@@ -502,17 +512,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </ContextMenuTrigger>
                   <ContextMenuContent className="w-52">
                     <ContextMenuItem onClick={() => setUserCardOpen(true)}>
-                      <Icon name="user-round" /> 账户面板
+                      <Icon name="user-round" /> {t("ui.shell.account_panel")}
                     </ContextMenuItem>
-                    <ContextMenuItem onClick={() => copyLink(me.username || "", "已复制用户名")}>
-                      <Icon name="clipboard-copy" /> 复制用户名
+                    <ContextMenuItem onClick={() => copyLink(me.username || "", t("ui.shell.copied_username"))}>
+                      <Icon name="clipboard-copy" /> {t("ui.shell.copy_username")}
                     </ContextMenuItem>
-                    <ContextMenuItem onClick={() => { void refresh(); toast.success("已刷新账户信息") }}>
-                      <Icon name="refresh-cw" /> 刷新账户信息
+                    <ContextMenuItem onClick={() => { void refresh(); toast.success(t("ui.shell.account_refreshed")) }}>
+                      <Icon name="refresh-cw" /> {t("ui.shell.refresh_account")}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem variant="destructive" onClick={async () => { await logout(); navigate("/") }}>
-                      <Icon name="log-out" /> 退出登录
+                      <Icon name="log-out" /> {t("ui.shell.logout")}
                     </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>

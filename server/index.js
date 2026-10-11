@@ -24,6 +24,8 @@ import adminRoutes from "./src/routes/admin.js"
 import avatarRoutes from "./src/routes/avatars.js"
 import todoRoutes from "./src/routes/todos.js"
 import groupRoutes from "./src/routes/groups.js"
+import i18nRoutes from "./src/routes/i18n.js"
+import { customLangCodes, ensureLangDir } from "./src/i18n.js"
 
 // 启动自检：隔离损坏的 JSON、清理 tmp 残留，然后重载内存态
 const integrity = runIntegrityCheck()
@@ -32,6 +34,8 @@ reloadUsers()
 reloadGroups()
 reloadTodos()
 const avatarInit = initAvatars()
+// 界面语言目录（data/lang）：首次运行时建目录并写入格式说明
+ensureLangDir()
 runDailySnapshot()
 
 const app = express()
@@ -97,9 +101,11 @@ app.use("/api/admin", adminRoutes)
 app.use("/api/avatars", avatarRoutes)
 app.use("/api/todos", todoRoutes)
 app.use("/api/groups", groupRoutes)
+// 界面语言清单与语言文件：必须免登录（登录页自己也要显示语言选择器）
+app.use("/api/i18n", i18nRoutes)
 
 app.use("/api", (_req, res) => {
-  res.status(404).json({ error: "接口不存在" })
+  res.status(404).json({ error: "接口不存在", errorKey: "api.common.not_found" })
 })
 
 // ===== WebDAV（实验性，默认关闭；只能在 .env 里用 WEBDAV=1 打开）=====
@@ -205,12 +211,20 @@ app.use((err, req, res, _next) => {
   }
   if (res.headersSent) return res.destroy()
   const body = { error: status >= 500 ? "服务器内部错误" : err.message }
+  if (status >= 500) body.errorKey = "api.common.server_error"
   // 少数错误需要带上结构化信息让前端能做后续动作，例如并发编辑冲突要告诉
   // 客户端"服务器上的当前版本是哪个"（前端据此提供"重新加载"）。
   // 这里刻意只在 err.code 存在时透传，避免把任意错误对象的字段泄漏出去。
   if (err.code) {
     body.code = String(err.code)
     if (err.currentVersion !== undefined) body.currentVersion = err.currentVersion
+  }
+  // errorKey / errorParams 是给前端做本地化用的（见 src/http.js 的 httpError）：
+  // 有了它们，界面能把 "文件过大（…）" 这类提示按当前语言渲染，
+  // 同时 error 字段仍然是中文原文，老客户端与脚本不受影响。
+  if (err.errorKey) {
+    body.errorKey = String(err.errorKey)
+    if (err.errorParams && typeof err.errorParams === "object") body.errorParams = err.errorParams
   }
   res.status(status).json(body)
 })
@@ -250,6 +264,10 @@ const server = app.listen(env.port, env.host, () => {
     }
     if (SOFT_DIR_NAMES.length) {
       console.log(`  外部映射:   ${SOFT_DIR_NAMES.join(", ")}（只读）`)
+    }
+    const customLangs = customLangCodes()
+    if (customLangs.length) {
+      console.log(`  界面语言:   zh, en, ${customLangs.join(", ")}（data/lang）`)
     }
     // 放宽了 SSRF 防护时显式提醒，避免"以为还拦着内网"
     const relaxed = []

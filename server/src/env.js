@@ -186,6 +186,12 @@ export const SOFT_DIR_NAMES = Object.keys(softDirs)
 
 export const TMP_DIR = path.join(DATA_DIR, "tmp")
 export const LOGS_DIR = path.join(DATA_DIR, "logs")
+/**
+ * 自定义界面语言目录（`data/lang/<code>.json`）。
+ * 与回收站同理，刻意放在 `data/` 而不是 `FILES_DIR` 里：放进网盘根目录就会
+ * 被列目录、被搜索、被打包，甚至能按路径被访客下载。
+ */
+export const LANG_DIR = path.join(DATA_DIR, "lang")
 export const WEB_DIST = path.join(ROOT_DIR, "web", "dist")
 
 for (const dir of [DATA_DIR, FILES_DIR, TMP_DIR, LOGS_DIR]) {

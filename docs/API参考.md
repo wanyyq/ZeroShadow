@@ -58,6 +58,24 @@ X-Requested-With: XMLHttpRequest
 { "error": "人类可读的中文说明" }
 ```
 
+`error` 是**中文原文**，始终存在，第三方脚本与 `curl` 读到的东西不会因为界面语言而变。
+网页端要显示本地化文案时，用另外两个**可选**字段：
+
+```json
+{
+  "error": "文件过大（12.3MB），在线编辑上限 8MB",
+  "errorKey": "api.fs.file_too_large_for_editor",
+  "errorParams": { "size": "12.3MB", "limit": "8MB" }
+}
+```
+
+- `errorKey`：命名键，前端按当前界面语言查 `web/src/locales/<语言>/*.json`；
+  查不到就回落到 `error`（所以缺翻译不会出现空白或键名）。
+- `errorParams`：插值参数，对应译文里的 `{size}` `{limit}` 这样的占位符。
+
+不是每个错误都带 `errorKey`（内部错误、第三方脚本才会遇到的错误通常没有），
+**只看 `error` 就够用**；想拿到与界面一致的语言时才需要 `errorKey`。
+
 | 状态码 | 含义 |
 |:-------- |:--------------------------------------------------------------------- |
 | 400 | 参数或路径非法（含路径穿越、体积超限、URL 不合法） |
@@ -132,6 +150,57 @@ X-ZS-Group: <小组 id>
 > `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：
 > 改版本号时必须同时改三处——根 `package.json`、`server/index.js` 里的 `/api/meta`、
 > 以及前端唯一的版本号来源 `web/src/version.ts`（导出 `VERSION`，供「软件开源信息」页与侧边栏共用）。
+
+### `GET /api/i18n`
+
+界面语言的可用清单与站点默认语言。**无需登录**（登录页本身也要显示语言选择器）。
+
+- 认证：无
+- 响应：
+
+```json
+{
+  "langs": [
+    { "code": "zh", "name": "简体中文", "builtin": true },
+    { "code": "en", "name": "English", "builtin": true },
+    { "code": "ja", "name": "日本語", "builtin": false, "keys": 812 }
+  ],
+  "default": "zh"
+}
+```
+
+| 字段 | 说明 |
+|:--|:--|
+| `langs` | 内置语言（`builtin: true`，随前端产物发布）在前，`data/lang/` 里的自定义语言在后（按文件名排序）；`name` 取自语言文件的 `_meta.name`，`keys` 是该文件里有效的译文条数 |
+| `default` | 站点默认语言（`data/config.json` 的 `defaultLang`）。若它指向的语言文件已被删除，这里会回落成 `zh` |
+
+- 目录内容随时可能变（往 `data/lang/` 丢一个文件即可），所以响应带 `Cache-Control: no-cache`，**不需要重启服务**。
+
+### `GET /api/i18n/:code`
+
+取某个语言的译文。同样无需登录。
+
+- 认证：无
+- 响应（自定义语言）：
+
+```json
+{
+  "code": "ja",
+  "base": "en",
+  "builtin": false,
+  "translations": { "ui.common.ok": "OK", "ui.common.cancel": "キャンセル" }
+}
+```
+
+- 内置语言返回 `"builtin": true` 且 `translations: null`（它们的字典已经打包在前端产物里，不需要再传一遍）；
+- `base` 是"没翻译到的键回落到哪种语言"，默认 `zh`，可由语言文件的 `_meta.base` 指定；
+- 语言文件不存在、代码不合规（只允许 `^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`），或文件不是合法 JSON → `404`：
+
+```json
+{ "error": "没有这个语言文件", "errorKey": "api.i18n.unknown_lang" }
+```
+
+文件格式与全部可用的键见 [配置参考 · 界面语言](配置参考.md#界面语言datalang)。
 
 ---
 
@@ -498,10 +567,10 @@ X-ZS-Group: <小组 id>
 | `hashes` | 流式算出的 MD5 / SHA-1 / SHA-256；**文件超过 64MB 时为 `null`**，原因写在 `hashNote` |
 | `contentVersion` | `<mtimeMs>-<size>-<sha1 base64url>`，与 `/api/fs/file` 的 `baseVersion`、WebDAV 的 `ETag` 同源 |
 | `image` | 像素尺寸（PNG / JPEG / GIF / BMP / WebP / ICO / PSD / TIFF），另带 `bitDepth` / `colorType` / `megapixels` / `aspect` |
-| `exif` | `[标签, 值]` 数组，按出现顺序排列（相机、曝光、时间、作者、GPS…） |
-| `doc` | PDF Info、OOXML `docProps`、PNG 文本块等文档属性，同样是 `[标签, 值]` 数组 |
-| `media` | 时长与标签：MP4 / MOV / M4A 的 `mvhd`、WAV 头、FLAC `STREAMINFO`、ID3v2 |
-| `text` | 仅文本类文件：`encoding` / `encodingLabel` / `encodingConfident` / `bom` / `eol` / `eolLabel` / `lines` / `chars`；文本超过 8MB 时只有 `{ "truncated": true }` |
+| `exif` | 数组，按出现顺序排列（相机、曝光、时间、作者、GPS…）。每项形如 `{ "key": "meta.exif.make", "label": "相机厂商", "value": "Apple" }`：`key` 是**命名键**（前端按当前界面语言翻译），`label` 是中文原文（查不到译文时兜底，因此任何时候都不会显示成键名），`value` 是数值，可选 `unitKey` 是单位键（前端拼成 `值 单位`，如 `1/125` + `meta.unit.second`） |
+| `doc` | PDF Info、OOXML `docProps`（创建者 / 最后修改者 / 公司 / 页数字数）、PNG 文本块等文档属性，形状同上 |
+| `media` | 时长与标签：MP4 / MOV / M4A 的 `mvhd`、WAV 头、FLAC `STREAMINFO`、ID3v2，形状同上 |
+| `text` | 仅文本类文件：`encoding` / `encodingLabel` / `encodingConfident` / `bom` / `eol` / `eolKey` / `eolLabel` / `lines` / `chars`；文本超过 8MB 时只有 `{ "truncated": true }` |
 | `timestamps` | 修改 / 创建 / 访问 / 状态变更时间（毫秒） |
 | `softReadOnly` | 是否来自 `FILES_SOFT_DIR` 只读映射目录 |
 

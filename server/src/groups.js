@@ -4,6 +4,7 @@ import { DATA_DIR } from "./env.js"
 import { readJsonTyped, withLock, writeJsonAtomic } from "./store.js"
 import { getConfig, MEMBER_PERM_KEYS } from "./config.js"
 import { isSameOrInside } from "./safety.js"
+import { httpError } from "./http.js"
 
 // ============================================================================
 //  groups.js - 小组（含权限收窄与可见范围）
@@ -131,10 +132,16 @@ function persist() {
 }
 
 function validateName(name) {
-  if (typeof name !== "string") return "名称无效"
+  if (typeof name !== "string") {
+    return httpError(400, "名称无效", { errorKey: "api.groups.name_invalid" })
+  }
   const trimmed = name.trim()
-  if (!trimmed) return "名称不能为空"
-  if (!NAME_RE.test(trimmed)) return "名称仅支持中英文、数字、空格与 _ . -（1-40 位）"
+  if (!trimmed) return httpError(400, "名称不能为空", { errorKey: "api.groups.name_empty" })
+  if (!NAME_RE.test(trimmed)) {
+    return httpError(400, "名称仅支持中英文、数字、空格与 _ . -（1-40 位）", {
+      errorKey: "api.groups.name_charset",
+    })
+  }
   return null
 }
 
@@ -142,20 +149,15 @@ export async function createGroup({ name, color, perms, whitelist, blacklist, le
   return withLock("groups", async () => {
     const trimmed = String(name || "").trim()
     const err = validateName(trimmed)
-    if (err) {
-      const e = new Error(err)
-      e.status = 400
-      throw e
-    }
+    if (err) throw err
     if (groups.some((g) => g.name.toLowerCase() === trimmed.toLowerCase())) {
-      const e = new Error("小组名称已存在")
-      e.status = 400
-      throw e
+      throw httpError(400, "小组名称已存在", { errorKey: "api.groups.name_taken" })
     }
     if (groups.length >= MAX_GROUPS) {
-      const e = new Error(`小组数量已达上限 ${MAX_GROUPS}`)
-      e.status = 400
-      throw e
+      throw httpError(400, `小组数量已达上限 ${MAX_GROUPS}`, {
+        errorKey: "api.groups.limit_reached",
+        errorParams: { max: MAX_GROUPS },
+      })
     }
     const now = new Date().toISOString()
     const group = sanitizeGroup({
@@ -182,22 +184,14 @@ export async function updateGroup(id, patch = {}) {
   return withLock("groups", async () => {
     const group = getGroup(id)
     if (!group) {
-      const e = new Error("小组不存在")
-      e.status = 404
-      throw e
+      throw httpError(404, "小组不存在", { errorKey: "api.groups.not_found" })
     }
     if (patch.name !== undefined) {
       const trimmed = String(patch.name).trim()
       const err = validateName(trimmed)
-      if (err) {
-        const e = new Error(err)
-        e.status = 400
-        throw e
-      }
+      if (err) throw err
       if (groups.some((g) => g.id !== id && g.name.toLowerCase() === trimmed.toLowerCase())) {
-        const e = new Error("小组名称已存在")
-        e.status = 400
-        throw e
+        throw httpError(400, "小组名称已存在", { errorKey: "api.groups.name_taken" })
       }
       group.name = trimmed
     }
@@ -225,9 +219,7 @@ export async function addMembers(groupId, userIds, action = "add") {
   return withLock("groups", async () => {
     const group = getGroup(groupId)
     if (!group) {
-      const e = new Error("小组不存在")
-      e.status = 404
-      throw e
+      throw httpError(404, "小组不存在", { errorKey: "api.groups.not_found" })
     }
     const ids = Array.isArray(userIds) ? userIds.map(String) : []
     if (action === "remove") {

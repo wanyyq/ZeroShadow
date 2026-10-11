@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Icon } from "@/components/icon"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 export function parseDate(value?: string | null): Date | null {
@@ -29,7 +30,8 @@ interface DatePickerProps {
   id?: string
 }
 
-export function DatePicker({ value, onChange, placeholder = "选择日期", className, id }: DatePickerProps) {
+export function DatePicker({ value, onChange, placeholder, className, id }: DatePickerProps) {
+  const t = useT()
   const [open, setOpen] = React.useState(false)
   const selected = parseDate(value)
   return (
@@ -48,12 +50,14 @@ export function DatePicker({ value, onChange, placeholder = "选择日期", clas
         }
       >
         <Icon name="calendar" className="size-4" />
-        <span className="flex-1 truncate text-left">{selected ? formatDateValue(selected) : placeholder}</span>
+        <span className="flex-1 truncate text-left">
+          {selected ? formatDateValue(selected) : placeholder ?? t("ui.date_picker.select_date")}
+        </span>
         {selected && (
           <span
             role="button"
             tabIndex={0}
-            aria-label="清除日期"
+            aria-label={t("ui.date_picker.clear_date")}
             className="rounded-sm text-muted-foreground transition-colors hover:text-foreground"
             onClick={(e) => { e.stopPropagation(); onChange(null) }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onChange(null) } }}

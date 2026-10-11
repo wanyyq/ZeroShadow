@@ -33,7 +33,7 @@
     themeKey: "zs-robustness-theme",
     /** localStorage 键：最近使用的账号（只为少打一次字） */
     userKey: "zs-robustness-user",
-    srvErr: "服务器内部错误"
+    srvErrKey: "api.common.server_error"
   };
 
   /** 可按行内方式预览（交给 <img>/<video>/<audio>/<iframe> 原生渲染）的扩展名 */
@@ -70,6 +70,91 @@
     zip: "archive", rar: "archive", "7z": "archive", tar: "archive", gz: "archive",
     exe: "app", msi: "app", apk: "app", iso: "app"
   };
+
+  /* ======================================================== 界面语言 == */
+
+  /* 与主界面共用同一套**命名键**字典，键形如 compat.login.title：
+   *   - 内置语言（zh / en）的完整字典由构建产物静态提供：
+   *       /resources/locales/<code>.json（vite.config.ts 里的 zs-locale-assets 插件生成）
+   *   - data/lang 里的扩展语言：先取它声明的 base 语言字典，再叠上
+   *       /api/i18n/<code> 返回的译文
+   * 本机选择与主界面共用 localStorage 的 zs-lang，因此两边语言始终一致；
+   * 未选择过时用服务端 config.defaultLang（/api/i18n 里的 default）。
+   *
+   * 为什么先取字典再渲染：命名键在缺字典时会显示成 "compat.xxx.yyy"，
+   * 那比"晚半秒出现界面"难看得多。取字典最多 2 个请求，和取身份的请求同量级。 */
+  var I18N = { lang: "zh", dict: {}, base: {}, langs: [] };
+
+  function interpolate(text, vars) {
+    if (!vars) return text;
+    return String(text).replace(/\{(\w+)\}/g, function (whole, key) {
+      return has(vars, key) ? String(vars[key]) : whole;
+    });
+  }
+
+  /** 取一条文案：当前语言 → base 语言 → 键名本身（缺字典时不至于空白） */
+  function T(key, vars) {
+    var text = I18N.dict[key];
+    if (text === undefined) text = I18N.base[key];
+    if (text === undefined) text = key;
+    return interpolate(text, vars);
+  }
+
+  /** 取静态 JSON（字典走 /resources/…，不经 /api，所以不能用 API.get） */
+  function getJson(url, cb) {
+    var xhr;
+    try { xhr = new XMLHttpRequest(); } catch (e) { cb(null); return; }
+    xhr.open("GET", url, true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      var data = null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { data = JSON.parse(xhr.responseText); } catch (e2) { data = null; }
+      }
+      cb(data);
+    };
+    try { xhr.send(null); } catch (e3) { cb(null); }
+  }
+
+  function mergeDict(base, extra) {
+    var out = {};
+    var k;
+    for (k in base) if (has(base, k)) out[k] = base[k];
+    for (k in extra) if (has(extra, k)) out[k] = extra[k];
+    return out;
+  }
+
+  function loadLanguage(cb) {
+    API.get("/i18n", null, function (err, listing) {
+      var langs = (listing && listing.langs) || [];
+      var stored = null;
+      try { stored = localStorage.getItem("zs-lang"); } catch (e) { stored = null; }
+      var code = null;
+      for (var i = 0; i < langs.length; i++) if (langs[i].code === stored) code = langs[i].code;
+      // 本机没选过（或选的语言已被移除）就用站点默认；接口不可用时退回中文
+      if (!code) code = (listing && listing.default) || "zh";
+      I18N.langs = langs;
+      applyLanguage(code, cb);
+    });
+  }
+
+  function applyLanguage(code, cb) {
+    I18N.lang = code;
+    API.get("/i18n/" + encodeURIComponent(code), null, function (err, meta) {
+      var base = (meta && meta.base) || "zh";
+      getJson("/resources/locales/" + encodeURIComponent(base) + ".json", function (baseDict) {
+        I18N.base = baseDict || {};
+        if (meta && !meta.builtin && meta.translations) {
+          // 扩展语言：base 字典兜底 + 它的译文覆盖
+          I18N.dict = mergeDict(I18N.base, meta.translations);
+        } else {
+          // 内置语言：base 就是它自己，取到的就是完整字典
+          I18N.dict = I18N.base;
+        }
+        if (isFn(cb)) cb();
+      });
+    });
+  }
 
   /* ============================================================== 工具 == */
 
@@ -211,12 +296,17 @@
   }
 
   function errMessage(status, data) {
+    // 服务端给了命名键就按当前语言渲染（与主界面 lib/api.ts 的做法一致）；
+    // data.error 是中文原文，缺键时兜底，第三方脚本读到的也仍是它
+    if (data && typeof data === "object" && data.errorKey) {
+      return T(String(data.errorKey), data.errorParams);
+    }
     if (data && typeof data === "object" && data.error) return String(data.error);
-    if (data && data.__raw) return "请求失败 (" + status + ")";
-    if (status === 0) return "网络连接失败，请检查服务是否在线";
-    if (status === 413) return "请求体过大";
-    if (status >= 500) return CFG.srvErr;
-    return "请求失败 (" + status + ")";
+    if (data && data.__raw) return T("compat.error.request_failed", { status: status });
+    if (status === 0) return T("ui.common.network_error");
+    if (status === 413) return T("compat.error.payload_too_large");
+    if (status >= 500) return T(CFG.srvErrKey);
+    return T("compat.error.request_failed", { status: status });
   }
 
   /* ============================================================ 本地存储 == */
@@ -255,7 +345,7 @@
     try {
       xhr = new XMLHttpRequest();
     } catch (e) {
-      cb(new Error("当前浏览器不支持 XMLHttpRequest，无法使用兼容模式"));
+      cb(new Error(T("compat.error.no_xhr")));
       return;
     }
 
@@ -263,11 +353,11 @@
     var body = null;
     if (opts.body !== undefined && opts.body !== null) {
       try { body = JSON.stringify(opts.body); }
-      catch (e2) { cb(new Error("请求内容无法序列化")); return; }
+      catch (e2) { cb(new Error(T("compat.error.serialize_failed"))); return; }
     }
 
     try { xhr.open(method, url, true); }
-    catch (e3) { cb(new Error("请求地址无效")); return; }
+    catch (e3) { cb(new Error(T("compat.error.invalid_url"))); return; }
 
     xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
     if (body !== null) xhr.setRequestHeader("Content-Type", "application/json");
@@ -276,7 +366,7 @@
       if (xhr.readyState !== 4) return;
       var status = xhr.status;
       var data = parseResponse(xhr);
-      if (status === 0) { cb(new Error("网络连接失败，请检查服务是否在线")); return; }
+      if (status === 0) { cb(new Error(T("ui.common.network_error"))); return; }
       if (status >= 200 && status < 300) { cb(null, data); return; }
       var err = new Error(errMessage(status, data));
       err.status = status;
@@ -284,7 +374,11 @@
     };
 
     try { xhr.send(body); }
-    catch (e4) { cb(new Error("请求发送失败：" + (e4 && e4.message ? e4.message : "未知原因"))); }
+    catch (e4) {
+      cb(new Error(T("compat.error.send_failed", {
+        reason: (e4 && e4.message) ? e4.message : T("compat.error.unknown_reason")
+      })));
+    }
   }
 
   var API = {
@@ -322,11 +416,11 @@
    */
   function upload(path, files, overwriteNames, onProgress, callback) {
     var cb = isFn(callback) ? callback : noop;
-    if (!window.FormData) { cb(new Error("当前浏览器不支持 FormData，无法上传")); return; }
+    if (!window.FormData) { cb(new Error(T("compat.error.no_formdata"))); return; }
 
     var xhr;
     try { xhr = new XMLHttpRequest(); }
-    catch (e) { cb(new Error("当前浏览器不支持 XMLHttpRequest")); return; }
+    catch (e) { cb(new Error(T("compat.error.xhr_unavailable"))); return; }
 
     var form = new FormData();
     // 字段名必须是 files（服务端 busboy 只认这个）
@@ -339,7 +433,7 @@
     var url = "/api/fs/upload" + encodeQuery(query);
 
     try { xhr.open("POST", url, true); }
-    catch (e2) { cb(new Error("上传地址无效")); return; }
+    catch (e2) { cb(new Error(T("compat.error.upload_url_invalid"))); return; }
 
     xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
 
@@ -355,7 +449,7 @@
       if (xhr.readyState !== 4) return;
       var status = xhr.status;
       var data = parseResponse(xhr);
-      if (status === 0) { cb(new Error("网络中断，上传失败")); return; }
+      if (status === 0) { cb(new Error(T("compat.error.upload_network_lost"))); return; }
       if (status >= 200 && status < 300) { cb(null, data); return; }
       // 413 的响应体形如 { results: [...], limitMB }，没有 error 字段，
       // 真正有用的原因（"超出大小限制 (512MB)"）藏在 results[].error 里。
@@ -374,7 +468,11 @@
     };
 
     try { xhr.send(form); }
-    catch (e3) { cb(new Error("上传发送失败：" + (e3 && e3.message ? e3.message : "未知原因"))); }
+    catch (e3) {
+      cb(new Error(T("compat.error.upload_send_failed", {
+        reason: (e3 && e3.message) ? e3.message : T("compat.error.unknown_reason")
+      })));
+    }
   }
 
   /* =============================================================== 状态 == */
@@ -408,9 +506,9 @@
   }
 
   function roleLabel(role) {
-    if (role === "superadmin") return "超级管理员";
-    if (role === "member") return "团队成员";
-    return "访客";
+    if (role === "superadmin") return T("compat.role.superadmin");
+    if (role === "member") return T("compat.role.member");
+    return T("compat.role.guest");
   }
 
   function selectedEntries() {
@@ -507,7 +605,7 @@
     if (!root) return;
     clear(root);
     if (!state.ready) {
-      root.appendChild(el("div", { cls: "loading", text: "正在加载…" }));
+      root.appendChild(el("div", { cls: "loading", text: T("compat.state.loading") }));
       return;
     }
     if (state.me.role === "guest") {
@@ -538,7 +636,7 @@
 
     var errBox = el("div", { cls: "err", text: state.authError || "" });
     var btn = el("button", {
-      cls: "btn btn-primary", type: "button", text: "登录",
+      cls: "btn btn-primary", type: "button", text: T("compat.login.submit"),
       style: "width:100%;padding:8px 0;"
     });
 
@@ -546,17 +644,17 @@
       var username = trim(nameInput.value);
       var password = String(pwdInput.value || "");
       if (!username || !password) {
-        state.authError = "请输入用户名和密码";
+        state.authError = T("compat.login.missing_credentials");
         errBox.innerHTML = esc(state.authError);
         return;
       }
       state.authError = "";
       errBox.innerHTML = "";
-      setBusy(btn, true, "登录中…");
+      setBusy(btn, true, T("compat.login.submitting"));
       API.post("/auth/login", { username: username, password: password }, null, function (err) {
-        setBusy(btn, false, "登录");
+        setBusy(btn, false, T("compat.login.submit"));
         if (err) {
-          state.authError = err.message || "登录失败";
+          state.authError = err.message || T("compat.login.failed");
           errBox.innerHTML = esc(state.authError);
           return;
         }
@@ -578,20 +676,20 @@
     pwdInput.onkeydown = enterKey;
 
     card.appendChild(el("h1", { cls: "login-title", text: "ZeroShadow" }));
-    card.appendChild(el("p", { cls: "login-sub", text: "兼容模式 · 适配旧浏览器" }));
+    card.appendChild(el("p", { cls: "login-sub", text: T("compat.login.subtitle") }));
     card.appendChild(el("div", { cls: "form-row" }, [
-      el("label", { cls: "form-label", "for": "lg-user", text: "用户名" }),
+      el("label", { cls: "form-label", "for": "lg-user", text: T("compat.login.username") }),
       nameInput
     ]));
     card.appendChild(el("div", { cls: "form-row" }, [
-      el("label", { cls: "form-label", "for": "lg-pwd", text: "密码" }),
+      el("label", { cls: "form-label", "for": "lg-pwd", text: T("compat.login.password") }),
       pwdInput
     ]));
     card.appendChild(errBox);
     card.appendChild(el("div", { cls: "form-row" }, [btn]));
 
     var foot = el("div", { cls: "login-foot" }, [
-      el("a", { href: "/", cls: "linkbtn", text: "返回正常页面" })
+      el("a", { href: "/", cls: "linkbtn", text: T("compat.status.back_normal") })
     ]);
 
     return el("div", { cls: "login-page" }, [card, foot]);
@@ -603,10 +701,10 @@
     if (busy) {
       btn.setAttribute("data-label", btn.innerHTML);
       btn.disabled = true;
-      btn.innerHTML = esc(label || "处理中…");
+      btn.innerHTML = esc(label || T("ui.common.processing"));
     } else {
       btn.disabled = false;
-      btn.innerHTML = esc(label || btn.getAttribute("data-label") || "确定");
+      btn.innerHTML = esc(label || btn.getAttribute("data-label") || T("ui.common.ok"));
     }
   }
 
@@ -625,21 +723,21 @@
     var brand = el("div", { cls: "brand" });
     brand.appendChild(el("span", { cls: "brand-mark", text: "ZS" }));
     brand.appendChild(el("span", { cls: "brand-name", text: "ZeroShadow" }));
-    brand.appendChild(el("span", { cls: "brand-ver", text: "兼容模式" }));
+    brand.appendChild(el("span", { cls: "brand-ver", text: T("compat.brand.mode") }));
     side.appendChild(brand);
 
     var list = el("ul", { cls: "nav-list" });
-    list.appendChild(el("li", null, [el("a", { cls: "nav-item is-active", href: "javascript:void(0)", text: "文件" })]));
+    list.appendChild(el("li", null, [el("a", { cls: "nav-item is-active", href: "javascript:void(0)", text: T("compat.nav.files") })]));
     side.appendChild(list);
 
     side.appendChild(el("div", { cls: "nav-sep" }));
     side.appendChild(el("div", {
       cls: "side-note",
-      text: "此页面不依赖现代框架，仅提供登录与基本文件操作。管理、小组、待办、在线编辑请回正常页面。"
+      text: T("compat.side.note")
     }));
     side.appendChild(el("div", { cls: "nav-sep" }));
     side.appendChild(el("div", { cls: "side-note" }, [
-      el("a", { href: "/", cls: "linkbtn", text: "返回正常页面" })
+      el("a", { href: "/", cls: "linkbtn", text: T("compat.status.back_normal") })
     ]));
 
     return side;
@@ -653,12 +751,15 @@
     var right = el("div", { cls: "topbar-right" });
     right.appendChild(el("span", {
       cls: "who",
-      text: (state.me.username || "访客") + "（" + roleLabel(state.me.role) + "）"
+      text: T("compat.status.who", {
+        user: state.me.username || T("compat.role.guest"),
+        role: roleLabel(state.me.role)
+      })
     }));
     right.appendChild(themeButton());
-    right.appendChild(el("button", { cls: "btn btn-sm", type: "button", text: "退出", onclick: doLogout }));
+    right.appendChild(el("button", { cls: "btn btn-sm", type: "button", text: T("compat.topbar.logout"), onclick: doLogout }));
     topbar.appendChild(right);
-    topbar.appendChild(el("span", { cls: "topbar-title", text: "文件" }));
+    topbar.appendChild(el("span", { cls: "topbar-title", text: T("compat.nav.files") }));
     cell.appendChild(topbar);
 
     /* 加载条 */
@@ -679,11 +780,13 @@
 
   function themeButton() {
     var t = currentTheme();
-    var label = t === "dark" ? "深色" : t === "light" ? "浅色" : "跟随系统";
+    var label = t === "dark" ? T("ui.common.platform_theme_dark")
+      : t === "light" ? T("ui.common.platform_theme_light")
+      : T("ui.common.platform_theme_system");
     return el("button", {
       cls: "btn btn-sm", type: "button",
-      text: "主题：" + label,
-      title: "在 浅色 / 深色 / 跟随系统 之间切换",
+      text: T("compat.topbar.theme", { theme: label }),
+      title: T("compat.topbar.theme_tip"),
       onclick: cycleTheme
     });
   }
@@ -729,19 +832,19 @@
     var canUpload = perm("upload") && !inSoft;
     var canMkdir = perm("mkdir") && !inSoft;
 
-    bar.appendChild(buttonWithPerm("上传文件", canUpload, function () {
+    bar.appendChild(buttonWithPerm(T("compat.toolbar.upload_file"), canUpload, function () {
       if (!canUpload) { deny(inSoft); return; }
       fileInput.click();
     }));
 
     if (supportsFolderPick() && perm("uploadFolders")) {
-      bar.appendChild(buttonWithPerm("上传文件夹", canUpload, function () {
+      bar.appendChild(buttonWithPerm(T("compat.toolbar.upload_folder"), canUpload, function () {
         if (!canUpload) { deny(inSoft); return; }
         folderInput.click();
       }));
     }
 
-    bar.appendChild(buttonWithPerm("新建文件夹", canMkdir, function () {
+    bar.appendChild(buttonWithPerm(T("compat.toolbar.new_folder"), canMkdir, function () {
       if (!canMkdir) { deny(inSoft); return; }
       newFolderDialog();
     }));
@@ -752,13 +855,13 @@
     if (state.clipboard && state.clipboard.items.length) {
       var n = state.clipboard.items.length;
       var modeOk = state.clipboard.mode === "copy" ? perm("copy") : perm("move");
-      bar.appendChild(buttonWithPerm("粘贴 " + n + " 项", modeOk, function () {
-        if (inSoft) { toast("外部映射目录仅支持只读操作", "error"); return; }
-        if (!modeOk) { toast("没有权限执行此操作", "error"); return; }
+      bar.appendChild(buttonWithPerm(T("compat.toolbar.paste_items", { count: n }), modeOk, function () {
+        if (inSoft) { toast(T("compat.error.readonly_mapping"), "error"); return; }
+        if (!modeOk) { toast(T("api.auth.forbidden"), "error"); return; }
         doPaste(state.path);
       }));
       bar.appendChild(el("button", {
-        cls: "btn btn-sm", type: "button", text: "清空剪贴板",
+        cls: "btn btn-sm", type: "button", text: T("compat.toolbar.clear_clipboard"),
         onclick: function () { state.clipboard = null; render(); }
       }));
       bar.appendChild(el("span", { cls: "sep-v" }));
@@ -766,45 +869,45 @@
 
     var count = selectedCount();
     if (count > 0) {
-      bar.appendChild(el("span", { cls: "hint", style: "margin-right:6px;", text: "已选 " + count + " 项：" }));
+      bar.appendChild(el("span", { cls: "hint", style: "margin-right:6px;", text: T("compat.toolbar.selected_count", { count: count }) }));
       bar.appendChild(el("button", {
-        cls: "btn btn-sm", type: "button", text: "下载",
+        cls: "btn btn-sm", type: "button", text: T("ui.common.download"),
         onclick: function () { doDownload(selectedEntries()); }
       }));
       if (count === 1 && perm("rename")) {
         bar.appendChild(el("button", {
-          cls: "btn btn-sm", type: "button", text: "重命名",
+          cls: "btn btn-sm", type: "button", text: T("ui.common.rename"),
           onclick: function () { doRename(selectedEntries()[0]); }
         }));
       }
       if (perm("copy")) {
         bar.appendChild(el("button", {
-          cls: "btn btn-sm", type: "button", text: "复制",
+          cls: "btn btn-sm", type: "button", text: T("ui.common.copy"),
           onclick: function () { doClipboard("copy"); }
         }));
         bar.appendChild(el("button", {
-          cls: "btn btn-sm", type: "button", text: "复制到…",
+          cls: "btn btn-sm", type: "button", text: T("compat.toolbar.copy_to"),
           onclick: function () { pickDestination("copy"); }
         }));
       }
       if (perm("move")) {
         bar.appendChild(el("button", {
-          cls: "btn btn-sm", type: "button", text: "剪切",
+          cls: "btn btn-sm", type: "button", text: T("compat.toolbar.cut"),
           onclick: function () { doClipboard("cut"); }
         }));
         bar.appendChild(el("button", {
-          cls: "btn btn-sm", type: "button", text: "移动到…",
+          cls: "btn btn-sm", type: "button", text: T("compat.toolbar.move_to"),
           onclick: function () { pickDestination("move"); }
         }));
       }
       if (perm("delete")) {
         bar.appendChild(el("button", {
-          cls: "btn btn-sm btn-danger", type: "button", text: "删除",
+          cls: "btn btn-sm btn-danger", type: "button", text: T("ui.common.delete"),
           onclick: function () { doDelete(selectedEntries()); }
         }));
       }
       bar.appendChild(el("button", {
-        cls: "btn btn-sm", type: "button", text: "取消选择",
+        cls: "btn btn-sm", type: "button", text: T("ui.common.deselect"),
         onclick: function () { clearSelection(); render(); }
       }));
     }
@@ -814,7 +917,7 @@
 
     var searchInput = el("input", {
       cls: "field field-search", type: "text",
-      placeholder: "搜索文件名…", value: state.query || ""
+      placeholder: T("compat.toolbar.search_placeholder"), value: state.query || ""
     });
     var runSearch = function () { doSearch(trim(searchInput.value)); };
     searchInput.onkeydown = function (e) {
@@ -823,16 +926,16 @@
       return true;
     };
 
-    rightSide.appendChild(el("button", { cls: "btn btn-sm", type: "button", text: "搜索", onclick: runSearch }));
+    rightSide.appendChild(el("button", { cls: "btn btn-sm", type: "button", text: T("ui.common.search"), onclick: runSearch }));
     rightSide.appendChild(searchInput);
     if (state.query) {
       rightSide.appendChild(el("button", {
-        cls: "btn btn-sm", type: "button", text: "清除",
+        cls: "btn btn-sm", type: "button", text: T("ui.common.clear"),
         onclick: function () { state.query = ""; reload(); }
       }));
     }
     rightSide.appendChild(el("button", {
-      cls: "btn btn-sm", type: "button", text: "刷新",
+      cls: "btn btn-sm", type: "button", text: T("ui.common.refresh"),
       onclick: function () { reload(); }
     }));
     bar.appendChild(rightSide);
@@ -842,7 +945,7 @@
 
   /** 统一的无权限提示：区分"只读映射目录"与"真的没权限" */
   function deny(inSoft) {
-    toast(inSoft ? "外部映射目录仅支持只读操作" : "没有权限执行此操作", "error");
+    toast(inSoft ? T("compat.error.readonly_mapping") : T("api.auth.forbidden"), "error");
   }
 
   function buttonWithPerm(label, allowed, onclick) {
@@ -855,11 +958,11 @@
     var bar = el("div", { cls: "pathbar" });
 
     if (state.query) {
-      bar.appendChild(el("span", { text: "搜索“" + state.query + "”的结果（点「清除」返回目录浏览）" }));
+      bar.appendChild(el("span", { text: T("compat.crumbs.search_result", { query: state.query }) }));
       return bar;
     }
 
-    var home = el("a", { cls: "crumb", href: "javascript:void(0)", text: "根目录" });
+    var home = el("a", { cls: "crumb", href: "javascript:void(0)", text: T("compat.crumbs.root") });
     home.onclick = function () { goto(""); return false; };
     bar.appendChild(home);
 
@@ -886,14 +989,16 @@
   /** 这个浏览器缺哪些能力：只在真的缺时才提示，不制造噪音 */
   function compatWarnings() {
     var missing = [];
-    if (typeof XMLHttpRequest === "undefined") missing.push("所有网络操作（不支持 XMLHttpRequest）");
-    if (!window.FormData) missing.push("上传（不支持 FormData）");
-    if (!window.JSON) missing.push("数据解析（不支持 JSON）");
+    if (typeof XMLHttpRequest === "undefined") missing.push(T("compat.warn.no_xhr"));
+    if (!window.FormData) missing.push(T("compat.warn.no_formdata"));
+    if (!window.JSON) missing.push(T("compat.warn.no_json"));
     if (document.querySelector === undefined) { /* 只影响内部小工具，不提示 */ }
     if (!missing.length) return null;
     var box = el("div", { cls: "warnbox" });
-    box.appendChild(el("strong", { text: "此浏览器缺少以下能力：" }));
-    box.appendChild(el("span", { text: missing.join("、") + "。建议换用较新版本的 Chrome / Edge / Firefox。" }));
+    box.appendChild(el("strong", { text: T("compat.warn.missing_title") }));
+    box.appendChild(el("span", {
+      text: T("compat.warn.missing_hint", { list: missing.join(T("compat.list.separator")) })
+    }));
     return box;
   }
 
@@ -902,7 +1007,7 @@
     var card = el("div", { cls: "listcard", id: "dropcard" });
 
     if (state.loading && !state.entries.length) {
-      card.appendChild(el("div", { cls: "empty", text: "正在加载…" }));
+      card.appendChild(el("div", { cls: "empty", text: T("compat.state.loading") }));
       wrap.appendChild(card);
       return wrap;
     }
@@ -910,12 +1015,14 @@
     if (!state.entries.length) {
       var empty = el("div", { cls: "empty" });
       if (state.query) {
-        empty.appendChild(el("div", { cls: "empty-title", text: "未找到" }));
-        empty.appendChild(el("div", { text: "换个关键词试试" }));
+        empty.appendChild(el("div", { cls: "empty-title", text: T("compat.empty.not_found") }));
+        empty.appendChild(el("div", { text: T("compat.empty.search_hint") }));
       } else {
-        empty.appendChild(el("div", { cls: "empty-title", text: "此文件夹为空" }));
+        empty.appendChild(el("div", { cls: "empty-title", text: T("compat.empty.folder") }));
         empty.appendChild(el("div", {
-          text: perm("upload") || perm("mkdir") ? "上传文件或新建文件夹开始使用" : "暂无可见内容"
+          text: perm("upload") || perm("mkdir")
+            ? T("compat.empty.start_hint")
+            : T("compat.empty.no_visible")
         }));
       }
       card.appendChild(empty);
@@ -927,9 +1034,9 @@
     var thead = el("thead");
     var htr = el("tr");
     htr.appendChild(el("th", { cls: "col-check" }));
-    htr.appendChild(el("th", { text: "名称" }));
-    htr.appendChild(el("th", { cls: "col-size", text: "大小" }));
-    htr.appendChild(el("th", { cls: "col-mtime", text: "修改时间" }));
+    htr.appendChild(el("th", { text: T("ui.common.name") }));
+    htr.appendChild(el("th", { cls: "col-size", text: T("ui.common.size") }));
+    htr.appendChild(el("th", { cls: "col-mtime", text: T("compat.list.mtime") }));
     htr.appendChild(el("th", { cls: "col-act" }));
     thead.appendChild(htr);
     table.appendChild(thead);
@@ -971,26 +1078,26 @@
     a.onclick = function () { openEntry(entry); return false; };
     nameCell.appendChild(a);
 
-    if (isSoft(entry)) nameCell.appendChild(el("span", { cls: "tag-ro", text: "只读" }));
+    if (isSoft(entry)) nameCell.appendChild(el("span", { cls: "tag-ro", text: T("compat.tag.readonly") }));
     if (state.me.role !== "guest" && entry.hiddenFromGuest) {
-      nameCell.appendChild(el("span", { cls: "tag-hide", text: "对访客隐藏" }));
+      nameCell.appendChild(el("span", { cls: "tag-hide", text: T("compat.tag.hidden_from_guest") }));
     }
     tr.appendChild(nameCell);
 
     /* 大小 / 时间 */
-    tr.appendChild(el("td", { cls: "col-size", text: isDir(entry) ? "文件夹" : formatBytes(entry.size) }));
+    tr.appendChild(el("td", { cls: "col-size", text: isDir(entry) ? T("ui.common.folder") : formatBytes(entry.size) }));
     tr.appendChild(el("td", { cls: "col-mtime", text: formatDate(entry.mtime) }));
 
     /* 行内快捷操作 */
     var actCell = el("td", { cls: "col-act" });
     if (isDir(entry)) {
-      actCell.appendChild(rowAction("打包", "打包下载此文件夹", function () {
-        if (!perm("downloadFolder")) { toast("没有权限下载文件夹", "error"); return; }
+      actCell.appendChild(rowAction(T("compat.action.zip"), T("compat.action.zip_title"), function () {
+        if (!perm("downloadFolder")) { toast(T("compat.error.no_perm_download_folder"), "error"); return; }
         doDownload([entry]);
       }));
     } else {
-      actCell.appendChild(rowAction("下载", "下载此文件", function () {
-        if (!perm("downloadFile") && !perm("preview")) { toast("没有权限下载文件", "error"); return; }
+      actCell.appendChild(rowAction(T("ui.common.download"), T("compat.action.download_title"), function () {
+        if (!perm("downloadFile") && !perm("preview")) { toast(T("compat.error.no_perm_download_file"), "error"); return; }
         doDownload([entry]);
       }));
     }
@@ -1027,18 +1134,37 @@
   function viewStatusBar() {
     var bar = el("div", { cls: "statusbar" });
     var wrap = el("span");
-    wrap.appendChild(el("span", { text: "当前为“" + roleLabel(state.me.role) + "”模式" }));
+    wrap.appendChild(el("span", { text: T("compat.status.role_mode", { role: roleLabel(state.me.role) }) }));
 
     if (state.me.groupId && state.me.groupId !== "default" && state.me.group) {
       wrap.appendChild(el("span", { cls: "sep", text: "|" }));
-      wrap.appendChild(el("span", { text: "小组：" + (state.me.group.name || "") }));
+      wrap.appendChild(el("span", { text: T("compat.status.group", { name: state.me.group.name || "" }) }));
     }
 
     wrap.appendChild(el("span", { cls: "sep", text: "|" }));
-    wrap.appendChild(el("a", { href: "/", cls: "linkbtn", text: "返回正常页面" }));
+    wrap.appendChild(el("a", { href: "/", cls: "linkbtn", text: T("compat.status.back_normal") }));
 
     wrap.appendChild(el("span", { cls: "sep", text: "|" }));
-    wrap.appendChild(el("span", { text: "兼容模式（旧浏览器专用）" }));
+    wrap.appendChild(el("span", { text: T("compat.status.mode") }));
+
+    // 界面语言：与主界面共用 localStorage 的 zs-lang，选完只重画这一页
+    if (I18N.langs && I18N.langs.length > 1) {
+      wrap.appendChild(el("span", { cls: "sep", text: "|" }));
+      var langSel = el("select", { cls: "langsel", title: T("compat.status.language") });
+      for (var li = 0; li < I18N.langs.length; li++) {
+        var item = I18N.langs[li];
+        var opt = el("option", { value: item.code, text: item.name });
+        if (item.code === I18N.lang) opt.selected = true;
+        langSel.appendChild(opt);
+      }
+      langSel.onchange = function () {
+        var code = String(langSel.value || "zh");
+        storeSet("zs-lang", code);
+        applyLanguage(code, function () { render(); });
+        return false;
+      };
+      wrap.appendChild(langSel);
+    }
 
     bar.appendChild(wrap);
     return bar;
@@ -1052,9 +1178,9 @@
 
     var head = el("div", { cls: "preview-head" });
     var right = el("span", { style: "float:right;" });
-    right.appendChild(el("a", { cls: "btn btn-sm", href: downloadHref(p.path, false), text: "下载" }));
+    right.appendChild(el("a", { cls: "btn btn-sm", href: downloadHref(p.path, false), text: T("ui.common.download") }));
     right.appendChild(el("button", {
-      cls: "btn btn-sm", type: "button", text: "关闭",
+      cls: "btn btn-sm", type: "button", text: T("ui.common.close"),
       onclick: function () { closePreview(); }
     }));
     head.appendChild(right);
@@ -1074,15 +1200,15 @@
     var kind = p.kind;
 
     if (kind === "text") {
-      body.appendChild(el("pre", { cls: "preview-text", text: "正在加载…" }));
+      body.appendChild(el("pre", { cls: "preview-text", text: T("compat.state.loading") }));
       API.get("/fs/file", { path: p.path }, function (err, data) {
         if (!body.parentNode) return;
         clear(body);
         if (err) {
           body.appendChild(el("div", { cls: "preview-note" }, [
-            el("div", { cls: "big", text: "无法预览此文件" }),
-            el("div", { text: err.message || "读取失败" }),
-            el("div", { cls: "hint", text: "可以点右上角「下载」用本地程序打开。" })
+            el("div", { cls: "big", text: T("compat.preview.cannot") }),
+            el("div", { text: err.message || T("compat.error.read_failed") }),
+            el("div", { cls: "hint", text: T("compat.preview.open_locally_maybe") })
           ]));
           return;
         }
@@ -1090,7 +1216,7 @@
         if (data && data.encodingConfident === false) {
           body.appendChild(el("div", {
             cls: "warnbox",
-            text: "编码识别为 " + (data.encoding || "未知") + "，若显示乱码请下载后用本地编辑器打开"
+            text: T("compat.preview.encoding", { encoding: data.encoding || T("ui.common.unknown") })
           }));
         }
         // 用文本节点渲染：不做任何 HTML 解释，杜绝文件内容被当标签执行
@@ -1099,7 +1225,7 @@
           body.appendChild(el("div", {
             cls: "hint",
             style: "padding:0 16px 20px;",
-            text: "大小：" + formatBytes(data.size) + " · 兼容模式只提供只读预览，不提供在线编辑"
+            text: T("compat.preview.size_readonly", { size: formatBytes(data.size) })
           }));
         }
       });
@@ -1113,7 +1239,7 @@
       var img = el("img", { cls: "preview-img", alt: p.name, src: downloadHref(p.path, true) });
       img.onerror = function () {
         clear(ibox);
-        ibox.appendChild(unsupportedNote("浏览器无法显示这张图片（可能是不支持的格式，如 HEIC / TIFF）。"));
+        ibox.appendChild(unsupportedNote(T("compat.preview.image_failed")));
       };
       ibox.appendChild(img);
       holder.appendChild(ibox);
@@ -1126,7 +1252,7 @@
       v.src = downloadHref(p.path, true);
       v.onerror = function () {
         clear(body);
-        body.appendChild(unsupportedNote("浏览器无法播放此视频（可能是不支持的编码，如 HEVC / H.265）。"));
+        body.appendChild(unsupportedNote(T("compat.preview.video_failed")));
       };
       body.appendChild(v);
       return;
@@ -1140,7 +1266,7 @@
       au.src = downloadHref(p.path, true);
       au.onerror = function () {
         clear(abox);
-        abox.appendChild(unsupportedNote("浏览器无法播放此音频。"));
+        abox.appendChild(unsupportedNote(T("compat.preview.audio_failed")));
       };
       abox.appendChild(au);
       ac.appendChild(abox);
@@ -1155,23 +1281,23 @@
       body.appendChild(el("div", {
         cls: "hint",
         style: "padding:8px 16px;",
-        text: "若上方空白，说明此浏览器没有内置 PDF 阅读器，请点「下载」用本地程序打开。"
+        text: T("compat.preview.pdf_hint")
       }));
       return;
     }
 
     body.appendChild(el("div", { cls: "preview-note" }, [
-      el("div", { cls: "big", text: "无法预览此格式" }),
-      el("div", { text: "当前浏览器不支持直接显示该文件类型。" }),
-      el("div", { cls: "hint", text: "请点右上角「下载」用本地程序打开。" })
+      el("div", { cls: "big", text: T("compat.preview.unsupported") }),
+      el("div", { text: T("compat.preview.unsupported_desc") }),
+      el("div", { cls: "hint", text: T("compat.preview.open_locally") })
     ]));
   }
 
   function unsupportedNote(text) {
     return el("div", { cls: "preview-note" }, [
-      el("div", { cls: "big", text: "浏览器不支持此格式" }),
+      el("div", { cls: "big", text: T("compat.preview.unsupported_note") }),
       el("div", { text: text }),
-      el("div", { cls: "hint", text: "请点右上角「下载」用本地程序打开。" })
+      el("div", { cls: "hint", text: T("compat.preview.open_locally") })
     ]);
   }
 
@@ -1225,11 +1351,11 @@
           body.appendChild(el("div", { cls: "hint", style: "margin-top:8px;", text: opts.detail }));
         }
         var foot = el("div", { cls: "modal-foot" });
-        foot.appendChild(el("button", { cls: "btn", type: "button", text: "取消", onclick: closeDialog }));
+        foot.appendChild(el("button", { cls: "btn", type: "button", text: T("ui.common.cancel"), onclick: closeDialog }));
         foot.appendChild(el("button", {
           cls: "btn " + (opts.danger ? "btn-danger" : "btn-primary"),
           type: "button",
-          text: opts.okText || "确定",
+          text: opts.okText || T("ui.common.ok"),
           onclick: function () {
             closeDialog();
             if (opts.onOk) opts.onOk();
@@ -1251,7 +1377,7 @@
       build: function (body, modal) {
         var input = el("input", { cls: "form-input", type: "text", value: opts.value || "" });
         body.appendChild(el("div", { cls: "form-row" }, [
-          el("label", { cls: "form-label", text: opts.label || "名称" }),
+          el("label", { cls: "form-label", text: opts.label || T("ui.common.name") }),
           input
         ]));
         body.appendChild(el("div", { cls: "err" }));
@@ -1269,9 +1395,9 @@
         };
 
         var foot = el("div", { cls: "modal-foot" });
-        foot.appendChild(el("button", { cls: "btn", type: "button", text: "取消", onclick: closeDialog }));
+        foot.appendChild(el("button", { cls: "btn", type: "button", text: T("ui.common.cancel"), onclick: closeDialog }));
         foot.appendChild(el("button", {
-          cls: "btn btn-primary", type: "button", text: opts.confirmText || "确定",
+          cls: "btn btn-primary", type: "button", text: opts.confirmText || T("ui.common.ok"),
           onclick: submit
         }));
         modal.appendChild(foot);
@@ -1310,13 +1436,13 @@
     }
 
     state.dialog = {
-      title: "同名文件处理",
+      title: T("compat.dialog.conflict_title"),
       wide: true,
       build: function (body, modal) {
         body.appendChild(el("div", {
           cls: "hint",
           style: "margin-bottom:10px;",
-          text: "目标位置已存在 " + items.length + " 个同名项目，请逐项选择处理方式。"
+          text: T("compat.dialog.conflict_desc", { count: items.length })
         }));
 
         var listBox = el("div");
@@ -1332,7 +1458,7 @@
         var applyAll = el("input", { type: "checkbox" });
         body.appendChild(el("label", { cls: "hint", style: "display:block;margin-top:6px;" }, [
           applyAll,
-          el("span", { text: " 对接下来所有同名项目执行同样的选择（「重命名」仍会各自取名）" })
+          el("span", { text: T("compat.dialog.apply_all") })
         ]));
 
         // 事件委托：选项按钮是动态重画的，逐个绑监听不如在容器上兜一次
@@ -1370,11 +1496,11 @@
 
         var foot = el("div", { cls: "modal-foot" });
         foot.appendChild(el("button", {
-          cls: "btn", type: "button", text: "取消",
+          cls: "btn", type: "button", text: T("ui.common.cancel"),
           onclick: function () { state.dialog = null; render(); }
         }));
         foot.appendChild(el("button", {
-          cls: "btn btn-primary", type: "button", text: "确认",
+          cls: "btn btn-primary", type: "button", text: T("ui.common.confirm"),
           onclick: function () {
             var out = {};
             for (var p = 0; p < items.length; p++) out[items[p].name] = decisions[items[p].name];
@@ -1405,10 +1531,10 @@
       }));
     };
 
-    add("rename", "重命名为 " + (cur.newName || item.name));
-    add("skip", "跳过");
-    add("overwrite", "覆盖");
-    if (item.isDir && allowMerge) add("merge", "合并");
+    add("rename", T("compat.dialog.rename_to", { name: cur.newName || item.name }));
+    add("skip", T("compat.dialog.skip"));
+    add("overwrite", T("compat.dialog.overwrite"));
+    if (item.isDir && allowMerge) add("merge", T("compat.dialog.merge"));
 
     box.appendChild(opts);
     return box;
@@ -1434,7 +1560,7 @@
     var cur = { path: "", dirs: [], loading: true };
 
     state.dialog = {
-      title: opts.title || "选择目录",
+      title: opts.title || T("compat.picker.title"),
       wide: true,
       build: function (body, modal) {
         var pathBox = el("div", { cls: "picker-path" });
@@ -1456,16 +1582,16 @@
           clear(listBox);
 
           if (cur.path) {
-            var up = el("div", { cls: "picker-row", text: "↑ 返回上级" });
+            var up = el("div", { cls: "picker-row", text: T("compat.picker.up") });
             up.onclick = function () { load(cur, parentOf(cur.path), paint); return false; };
             listBox.appendChild(up);
           }
           if (cur.loading) {
-            listBox.appendChild(el("div", { cls: "picker-row is-disabled", text: "加载中…" }));
+            listBox.appendChild(el("div", { cls: "picker-row is-disabled", text: T("ui.common.loading") }));
             return;
           }
           if (!cur.dirs.length) {
-            listBox.appendChild(el("div", { cls: "picker-row is-disabled", text: "没有子文件夹" }));
+            listBox.appendChild(el("div", { cls: "picker-row is-disabled", text: T("compat.picker.empty") }));
             return;
           }
           for (var i = 0; i < cur.dirs.length; i++) {
@@ -1474,9 +1600,9 @@
         };
 
         var foot = el("div", { cls: "modal-foot" });
-        foot.appendChild(el("button", { cls: "btn", type: "button", text: "取消", onclick: closeDialog }));
+        foot.appendChild(el("button", { cls: "btn", type: "button", text: T("ui.common.cancel"), onclick: closeDialog }));
         foot.appendChild(el("button", {
-          cls: "btn btn-primary", type: "button", text: "选择此目录",
+          cls: "btn btn-primary", type: "button", text: T("compat.picker.choose"),
           onclick: function () {
             var target = cur.path;
             closeDialog();
@@ -1594,12 +1720,12 @@
     if (perm("preview") && kind) { openPreview(entry); return; }
     if (perm("downloadFile")) { doDownload([entry]); return; }
     if (perm("preview")) { openPreview(entry); return; }
-    toast("没有权限打开此文件", "error");
+    toast(T("compat.error.no_perm_open"), "error");
   }
 
   function openShortcut(entry) {
     var s = entry.shortcut;
-    if (!s || !s.targetUrl) { toast("快捷方式数据损坏", "error"); return; }
+    if (!s || !s.targetUrl) { toast(T("compat.error.shortcut_corrupt"), "error"); return; }
     if (s.targetType === "path" || s.targetType === "soft_path") { goto(s.targetUrl); return; }
 
     // 文件类快捷方式：按目标路径当成一个"搜索结果"来处理
@@ -1609,7 +1735,7 @@
     };
     if (perm("preview") && previewKindOf(fake.name)) { openPreview(fake); return; }
     if (perm("downloadFile")) { doDownload([fake]); return; }
-    toast("快捷方式目标不存在或无权访问", "error");
+    toast(T("compat.error.shortcut_target"), "error");
   }
 
   /** 返回 "" / "text" / "image" / "video" / "audio" / "pdf" */
@@ -1622,7 +1748,7 @@
 
   function openPreview(entry) {
     var kind = previewKindOf(entry.name);
-    if (!kind) { toast("此格式无法预览，请下载后用本地程序打开", "error"); return; }
+    if (!kind) { toast(T("compat.error.preview_unsupported"), "error"); return; }
     state.preview = { path: entryPath(entry), name: displayName(entry), kind: kind };
     render();
   }
@@ -1632,12 +1758,12 @@
 
     if (targets.length === 1 && !isDir(targets[0])) {
       // 只有「预览」没有「下载」时也允许：服务端会强制 inline 返回
-      if (!perm("downloadFile") && !perm("preview")) { toast("没有权限下载文件", "error"); return; }
+      if (!perm("downloadFile") && !perm("preview")) { toast(T("compat.error.no_perm_download_file"), "error"); return; }
       navigateToDownload(downloadHref(entryPath(targets[0]), false));
       return;
     }
 
-    if (!perm("downloadFolder")) { toast("没有权限下载文件夹", "error"); return; }
+    if (!perm("downloadFolder")) { toast(T("compat.error.no_perm_download_folder"), "error"); return; }
     var paths = [];
     for (var i = 0; i < targets.length; i++) paths.push(entryPath(targets[i]));
     navigateToDownload(zipHref(paths));
@@ -1646,11 +1772,11 @@
   function doClipboard(mode) {
     var targets = selectedEntries();
     if (!targets.length) return;
-    if (mode === "copy" && !perm("copy")) { toast("没有权限执行此操作", "error"); return; }
-    if (mode === "cut" && !perm("move")) { toast("没有权限执行此操作", "error"); return; }
+    if (mode === "copy" && !perm("copy")) { toast(T("api.auth.forbidden"), "error"); return; }
+    if (mode === "cut" && !perm("move")) { toast(T("api.auth.forbidden"), "error"); return; }
     if (mode === "cut") {
       for (var i = 0; i < targets.length; i++) {
-        if (isSoft(targets[i])) { toast("外部映射目录仅支持只读操作", "error"); return; }
+        if (isSoft(targets[i])) { toast(T("compat.error.readonly_mapping"), "error"); return; }
       }
     }
     var items = [];
@@ -1658,7 +1784,9 @@
       items.push({ path: entryPath(targets[j]), name: targets[j].name, type: targets[j].type });
     }
     state.clipboard = { mode: mode, items: items };
-    toast("已" + (mode === "copy" ? "复制" : "剪切") + " " + items.length + " 项", "ok");
+    toast(mode === "copy"
+      ? T("compat.toast.clipboard_copied", { count: items.length })
+      : T("compat.toast.clipboard_cut", { count: items.length }), "ok");
     render();
   }
 
@@ -1668,7 +1796,7 @@
     if (!targets.length) return;
     if (mode === "cut") {
       for (var i = 0; i < targets.length; i++) {
-        if (isSoft(targets[i])) { toast("外部映射目录仅支持只读操作", "error"); return; }
+        if (isSoft(targets[i])) { toast(T("compat.error.readonly_mapping"), "error"); return; }
       }
     }
     var sourcePaths = [];
@@ -1680,7 +1808,7 @@
     }
 
     dlgPicker({
-      title: mode === "copy" ? "复制到…" : "移动到…",
+      title: mode === "copy" ? T("compat.toolbar.copy_to") : T("compat.toolbar.move_to"),
       sourcePaths: sourcePaths,
       done: function (dest) { runTransfer(mode, sourcePaths, srcDirs, dest); }
     });
@@ -1742,7 +1870,7 @@
             plain.push(sources[k]);
             if (dec.newName) targetNames[sources[k]] = dec.newName;
           }
-          if (!plain.length && !mergeList.length) { toast("已全部跳过，未做任何改动"); return; }
+          if (!plain.length && !mergeList.length) { toast(T("compat.toast.all_skipped")); return; }
 
           sendTransfer(apiPath, plain, dest, overwrite, targetNames, false, function () {
             if (mergeList.length) {
@@ -1770,7 +1898,7 @@
     }
     API.post(apiPath, body, null, function (err) {
       if (err) { toast(err.message, "error"); reload(); return; }
-      toast(apiPath === "/fs/copy" ? "复制完成" : "移动完成", "ok");
+      toast(apiPath === "/fs/copy" ? T("compat.toast.copy_done") : T("compat.toast.move_done"), "ok");
       if (done) done();
     });
   }
@@ -1781,13 +1909,13 @@
     var isLink = isShortcut(entry);
 
     dlgPrompt({
-      title: "重命名",
-      label: "新名称",
+      title: T("ui.common.rename"),
+      label: T("compat.dialog.new_name"),
       value: displayName(entry),
-      confirmText: "确定",
-      hint: "不能包含 \\ / : * ? \" < > | 这些字符，也不能以空格或点结尾。",
+      confirmText: T("ui.common.ok"),
+      hint: T("compat.dialog.name_rule"),
       onOk: function (newName) {
-        if (!newName) { toast("名称不能为空", "error"); return true; }
+        if (!newName) { toast(T("compat.error.name_required"), "error"); return true; }
         var finalName = newName;
         if (isLink && !/\.zeropath$/i.test(finalName)) finalName += ".zeropath";
         if (finalName === oldName) return false; // 没改，直接关掉
@@ -1801,14 +1929,14 @@
             existing: taken,
             done: function (decisions) {
               var dec = decisions[finalName] || { action: "skip" };
-              if (dec.action === "skip") { toast("已取消"); return; }
+              if (dec.action === "skip") { toast(T("compat.toast.cancelled")); return; }
               var body = { path: entryPath(entry), newName: finalName };
               if (dec.action === "overwrite") body.overwrite = true;
               if (dec.action === "merge") body.merge = true;
               if (dec.action === "rename" && dec.newName) body.newName = dec.newName;
               API.post("/fs/rename", body, null, function (err) {
                 if (err) { toast(err.message, "error"); return; }
-                toast("已重命名", "ok");
+                toast(T("compat.toast.renamed"), "ok");
                 reload();
               });
             }
@@ -1818,7 +1946,7 @@
 
         API.post("/fs/rename", { path: entryPath(entry), newName: finalName }, null, function (err) {
           if (err) { toast(err.message, "error"); return; }
-          toast("已重命名", "ok");
+          toast(T("compat.toast.renamed"), "ok");
           reload();
         });
         return false;
@@ -1828,15 +1956,15 @@
 
   function newFolderDialog() {
     dlgPrompt({
-      title: "新建文件夹",
-      label: "文件夹名称",
-      value: "新建文件夹",
-      confirmText: "创建",
+      title: T("compat.toolbar.new_folder"),
+      label: T("compat.dialog.folder_name"),
+      value: T("compat.toolbar.new_folder"),
+      confirmText: T("compat.dialog.create"),
       onOk: function (name) {
-        if (!name) { toast("名称不能为空", "error"); return true; }
+        if (!name) { toast(T("compat.error.name_required"), "error"); return true; }
         API.post("/fs/mkdir", { path: state.path, name: name }, null, function (err) {
           if (err) { toast(err.message, "error"); return; }
-          toast("文件夹已创建", "ok");
+          toast(T("compat.toast.folder_created"), "ok");
           reload();
         });
         return false;
@@ -1853,17 +1981,18 @@
       paths.push(entryPath(targets[i]));
     }
     dlgConfirm({
-      title: "确认删除",
+      title: T("compat.dialog.delete_title"),
       message: targets.length === 1
-        ? "将永久删除「" + names[0] + "」，此操作不可撤销。"
-        : "将永久删除选中的 " + targets.length + " 项，此操作不可撤销。",
-      detail: names.slice(0, 8).join("、") + (names.length > 8 ? " 等" : ""),
-      okText: "删除",
+        ? T("compat.dialog.delete_one", { name: names[0] })
+        : T("compat.dialog.delete_many", { count: targets.length }),
+      detail: names.slice(0, 8).join(T("compat.list.separator")) +
+        (names.length > 8 ? T("compat.dialog.delete_more") : ""),
+      okText: T("ui.common.delete"),
       danger: true,
       onOk: function () {
         API.post("/fs/delete", { paths: paths }, null, function (err) {
           if (err) { toast(err.message, "error"); return; }
-          toast("已删除 " + paths.length + " 项", "ok");
+          toast(T("compat.toast.deleted", { count: paths.length }), "ok");
           clearSelection();
           reload();
         });
@@ -1886,7 +2015,7 @@
   function startUpload(files, isFolder) {
     var inSoft = state.entries.length > 0 && allSoft(state.entries);
     if (!perm("upload") || inSoft) { deny(inSoft); return; }
-    if (isFolder && !perm("uploadFolders")) { toast("没有权限上传文件夹", "error"); return; }
+    if (isFolder && !perm("uploadFolders")) { toast(T("compat.error.no_perm_upload_folder"), "error"); return; }
 
     var list = [];
     for (var i = 0; i < files.length; i++) list.push(files[i]);
@@ -1950,7 +2079,7 @@
           if (top && renameMap[top]) out.push(renameFile(normalized[g], renameMap[top] + path.substring(top.length)));
           else out.push(normalized[g]);
         }
-        if (!out.length) { toast("已全部跳过，未上传任何文件"); return; }
+        if (!out.length) { toast(T("compat.toast.all_skipped_upload")); return; }
         runUploadBatches(out, overwriteNames);
       }
     });
@@ -2003,11 +2132,11 @@
     var next = function () {
       if (doneBatches >= batches.length) {
         if (failed.length) {
-          toast("已上传 " + savedCount + " 个，" + failed.length + " 个失败", "error");
+          toast(T("compat.toast.upload_partial", { ok: savedCount, failed: failed.length }), "error");
         } else {
-          toast("已上传 " + savedCount + " 个文件", "ok");
+          toast(T("compat.toast.upload_done", { count: savedCount }), "ok");
         }
-        if (truncated) toast("单次请求文件数超过上限，已自动分批，请确认是否有遗漏", "error");
+        if (truncated) toast(T("compat.toast.upload_truncated"), "error");
         if (progressNode && progressNode.parentNode) progressNode.parentNode.removeChild(progressNode);
         progressNode = null;
         reload();
@@ -2019,26 +2148,38 @@
       var bytesOf = 0;
       for (var b = 0; b < batch.length; b++) bytesOf += batch[b].size || 0;
 
-      setProgressText("正在上传第 " + batchIndex + "/" + batches.length + " 批（本批 " +
-        batch.length + " 个，共 " + formatBytes(bytesOf) + "）…");
+      setProgressText(T("compat.upload.progress_batch", {
+        index: batchIndex,
+        total: batches.length,
+        count: batch.length,
+        size: formatBytes(bytesOf)
+      }));
 
       var onProgress = function (loaded, total) {
         var pct = total ? Math.round((loaded / total) * 100) : 0;
-        setProgressText("正在上传第 " + batchIndex + "/" + batches.length + " 批：" +
-          formatBytes(loaded) + " / " + formatBytes(total) + "（" + pct + "%）");
+        setProgressText(T("compat.upload.progress_bytes", {
+          index: batchIndex,
+          total: batches.length,
+          loaded: formatBytes(loaded),
+          totalSize: formatBytes(total),
+          percent: pct
+        }));
       };
 
       upload(state.path, batch, overwriteNames, onProgress, function (err, data) {
         if (err) {
           // 整批失败：记下原因继续下一批，不让一批拖垮全部
-          failed.push(err.message || "上传失败");
+          failed.push(err.message || T("compat.error.upload_failed"));
         } else {
           var results = (data && data.results) || [];
           for (var r = 0; r < results.length; r++) {
             if (results[r] && results[r].ok) savedCount++;
             else {
-              failed.push(((results[r] && results[r].name) ? results[r].name + "：" : "") +
-                ((results[r] && results[r].error) || "失败"));
+              var itemName = results[r] && results[r].name;
+              var itemErr = (results[r] && results[r].error) || T("compat.error.failed");
+              failed.push(itemName
+                ? T("compat.error.file_failed", { name: itemName, reason: itemErr })
+                : itemErr);
             }
           }
           if (data && data.truncated) truncated = true;
@@ -2057,7 +2198,7 @@
     API.get("/auth/me", null, function (err, data) {
       if (err) {
         state.me = { role: "guest", username: null, userId: null, perms: LOGIN_PERMS, groupId: "default", group: null };
-        state.authError = err.message || "无法获取身份";
+        state.authError = err.message || T("compat.error.identity_failed");
       } else if (data) {
         state.me = data;
         if (!state.me.perms) state.me.perms = LOGIN_PERMS;
@@ -2123,12 +2264,12 @@
       var c = getCard();
       if (c) c.className = "listcard";
 
-      if (!perm("upload")) { toast("没有权限上传文件", "error"); return false; }
+      if (!perm("upload")) { toast(T("compat.error.no_perm_upload_file"), "error"); return false; }
       var dt = ev.dataTransfer;
       if (!dt) return false;
       var files = dt.files;
       if (!files || !files.length) {
-        toast("拖入的是文件夹或不受支持的内容；请用「上传文件夹」按钮", "error");
+        toast(T("compat.error.drop_folder"), "error");
         return false;
       }
 
@@ -2143,7 +2284,7 @@
         else real.push(f);
       }
       if (skippedFolders) {
-        toast("已忽略 " + skippedFolders + " 个文件夹（拖拽不支持目录），请用「上传文件夹」按钮", "error");
+        toast(T("compat.upload.folders_skipped", { count: skippedFolders }), "error");
       }
       if (!real.length) return false;
       startUpload(real, false);
@@ -2157,9 +2298,12 @@
     applyTheme(currentTheme());
     bindDrop();
 
-    // 先把"正在加载"画出来，再拉身份（旧机器上首屏白屏最容易被当成坏了）
-    render();
-    bootstrap();
+    // 先把"正在加载"画出来，再拉身份（旧机器上首屏白屏最容易被当成坏了）。
+    // 语言字典要先于 render()：命名键在缺字典时会显示成 compat.xxx.yyy。
+    loadLanguage(function () {
+      render();
+      bootstrap();
+    });
 
     // 回到前台时刷新一次（老机器常被切走/挂起，回来看到的是过期列表）
     if (document.addEventListener) {

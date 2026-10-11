@@ -1,3 +1,5 @@
+import { translate } from "@/lib/i18n"
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "-"
   if (bytes < 1024) return `${bytes} B`
@@ -23,95 +25,100 @@ export function formatUptime(sec: number): string {
   const days = Math.floor(sec / 86400)
   const hours = Math.floor((sec % 86400) / 3600)
   const minutes = Math.floor((sec % 3600) / 60)
-  if (days > 0) return `${days} 天 ${hours} 小时`
-  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`
-  return `${minutes} 分钟 ${sec % 60} 秒`
+  if (days > 0) return translate("ui.format.uptime_days_hours", { days, hours })
+  if (hours > 0) return translate("ui.format.uptime_hours_minutes", { hours, minutes })
+  return translate("ui.format.uptime_minutes_seconds", { minutes, seconds: sec % 60 })
 }
 
+/**
+ * 扩展名 → {图标, 文案键}。
+ * 这里存的是**键**而不是译文：模块只在加载时执行一次，若在此处调 translate()，
+ * 切换语言后这张表不会刷新。真正取文案在 fileKind() 里做。
+ */
 const EXT_KIND: Record<string, { icon: string; label: string }> = {
-  jpg: { icon: "image", label: "图片" },
-  jpeg: { icon: "image", label: "图片" },
-  png: { icon: "image", label: "图片" },
-  gif: { icon: "image", label: "图片" },
-  webp: { icon: "image", label: "图片" },
-  bmp: { icon: "image", label: "图片" },
-  avif: { icon: "image", label: "图片" },
-  tiff: { icon: "image", label: "图片" },
-  tif: { icon: "image", label: "图片" },
-  heic: { icon: "image", label: "图片" },
-  svg: { icon: "image", label: "图片" },
-  ico: { icon: "image", label: "图片" },
-  mp4: { icon: "film", label: "视频" },
-  webm: { icon: "film", label: "视频" },
-  mkv: { icon: "film", label: "视频" },
-  avi: { icon: "film", label: "视频" },
-  mov: { icon: "film", label: "视频" },
-  wmv: { icon: "film", label: "视频" },
-  flv: { icon: "film", label: "视频" },
-  "3gp": { icon: "film", label: "视频" },
-  m4v: { icon: "film", label: "视频" },
-  mp3: { icon: "music", label: "音频" },
-  wav: { icon: "music", label: "音频" },
-  flac: { icon: "music", label: "音频" },
-  m4a: { icon: "music", label: "音频" },
-  ogg: { icon: "music", label: "音频" },
-  aac: { icon: "music", label: "音频" },
-  zip: { icon: "folder-archive", label: "压缩包" },
-  rar: { icon: "folder-archive", label: "压缩包" },
-  "7z": { icon: "folder-archive", label: "压缩包" },
-  tar: { icon: "folder-archive", label: "压缩包" },
-  gz: { icon: "folder-archive", label: "压缩包" },
-  pdf: { icon: "file-text", label: "PDF" },
-  doc: { icon: "file-text", label: "文档" },
-  docx: { icon: "file-text", label: "文档" },
-  xls: { icon: "table", label: "表格" },
-  xlsx: { icon: "table", label: "表格" },
-  csv: { icon: "table", label: "表格" },
-  ppt: { icon: "presentation", label: "演示" },
-  pptx: { icon: "presentation", label: "演示" },
-  txt: { icon: "file-text", label: "文本" },
-  md: { icon: "file-text", label: "文本" },
-  log: { icon: "file-text", label: "文本" },
-  json: { icon: "file-code", label: "代码" },
-  js: { icon: "file-code", label: "代码" },
-  ts: { icon: "file-code", label: "代码" },
-  tsx: { icon: "file-code", label: "代码" },
-  jsx: { icon: "file-code", label: "代码" },
-  css: { icon: "file-code", label: "代码" },
-  html: { icon: "file-code", label: "代码" },
-  py: { icon: "file-code", label: "代码" },
-  java: { icon: "file-code", label: "代码" },
-  c: { icon: "file-code", label: "代码" },
-  cpp: { icon: "file-code", label: "代码" },
-  sh: { icon: "file-code", label: "代码" },
-  yml: { icon: "file-code", label: "代码" },
-  yaml: { icon: "file-code", label: "代码" },
-  rst: { icon: "file-text", label: "文档" },
-  adoc: { icon: "file-text", label: "文档" },
-  tex: { icon: "file-text", label: "文档" },
-  rtf: { icon: "file-text", label: "文档" },
-  org: { icon: "file-text", label: "文档" },
-  bat: { icon: "file-code", label: "脚本" },
-  ps1: { icon: "file-code", label: "脚本" },
-  vbs: { icon: "file-code", label: "脚本" },
-  lua: { icon: "file-code", label: "代码" },
-  rb: { icon: "file-code", label: "代码" },
-  php: { icon: "file-code", label: "代码" },
-  pl: { icon: "file-code", label: "代码" },
-  sql: { icon: "file-code", label: "代码" },
-  toml: { icon: "file-code", label: "配置" },
-  properties: { icon: "file-code", label: "配置" },
-  graphql: { icon: "file-code", label: "代码" },
-  cmake: { icon: "file-code", label: "配置" },
-  gradle: { icon: "file-code", label: "配置" },
-  ".gitignore": { icon: "file-code", label: "配置" },
-  ".env": { icon: "file-text", label: "配置" },
-  dockerfile: { icon: "file-code", label: "配置" },
-  makefile: { icon: "file-code", label: "配置" },
-  exe: { icon: "app-window", label: "程序" },
-  msi: { icon: "app-window", label: "程序" },
-  apk: { icon: "app-window", label: "程序" },
-  iso: { icon: "disc", label: "镜像" },
+  jpg: { icon: "image", label: "ui.format.kind.image" },
+  jpeg: { icon: "image", label: "ui.format.kind.image" },
+  png: { icon: "image", label: "ui.format.kind.image" },
+  gif: { icon: "image", label: "ui.format.kind.image" },
+  webp: { icon: "image", label: "ui.format.kind.image" },
+  bmp: { icon: "image", label: "ui.format.kind.image" },
+  avif: { icon: "image", label: "ui.format.kind.image" },
+  tiff: { icon: "image", label: "ui.format.kind.image" },
+  tif: { icon: "image", label: "ui.format.kind.image" },
+  heic: { icon: "image", label: "ui.format.kind.image" },
+  svg: { icon: "image", label: "ui.format.kind.image" },
+  ico: { icon: "image", label: "ui.format.kind.image" },
+  mp4: { icon: "film", label: "ui.format.kind.video" },
+  webm: { icon: "film", label: "ui.format.kind.video" },
+  mkv: { icon: "film", label: "ui.format.kind.video" },
+  avi: { icon: "film", label: "ui.format.kind.video" },
+  mov: { icon: "film", label: "ui.format.kind.video" },
+  wmv: { icon: "film", label: "ui.format.kind.video" },
+  flv: { icon: "film", label: "ui.format.kind.video" },
+  "3gp": { icon: "film", label: "ui.format.kind.video" },
+  m4v: { icon: "film", label: "ui.format.kind.video" },
+  mp3: { icon: "music", label: "ui.format.kind.audio" },
+  wav: { icon: "music", label: "ui.format.kind.audio" },
+  flac: { icon: "music", label: "ui.format.kind.audio" },
+  m4a: { icon: "music", label: "ui.format.kind.audio" },
+  ogg: { icon: "music", label: "ui.format.kind.audio" },
+  aac: { icon: "music", label: "ui.format.kind.audio" },
+  zip: { icon: "folder-archive", label: "ui.format.kind.archive" },
+  rar: { icon: "folder-archive", label: "ui.format.kind.archive" },
+  "7z": { icon: "folder-archive", label: "ui.format.kind.archive" },
+  tar: { icon: "folder-archive", label: "ui.format.kind.archive" },
+  gz: { icon: "folder-archive", label: "ui.format.kind.archive" },
+  pdf: { icon: "file-text", label: "ui.format.kind.pdf" },
+  doc: { icon: "file-text", label: "ui.format.kind.document" },
+  docx: { icon: "file-text", label: "ui.format.kind.document" },
+  xls: { icon: "table", label: "ui.format.kind.spreadsheet" },
+  xlsx: { icon: "table", label: "ui.format.kind.spreadsheet" },
+  csv: { icon: "table", label: "ui.format.kind.spreadsheet" },
+  ppt: { icon: "presentation", label: "ui.format.kind.presentation" },
+  pptx: { icon: "presentation", label: "ui.format.kind.presentation" },
+  txt: { icon: "file-text", label: "ui.format.kind.text" },
+  md: { icon: "file-text", label: "ui.format.kind.text" },
+  log: { icon: "file-text", label: "ui.format.kind.text" },
+  json: { icon: "file-code", label: "ui.format.kind.code" },
+  js: { icon: "file-code", label: "ui.format.kind.code" },
+  ts: { icon: "file-code", label: "ui.format.kind.code" },
+  tsx: { icon: "file-code", label: "ui.format.kind.code" },
+  jsx: { icon: "file-code", label: "ui.format.kind.code" },
+  css: { icon: "file-code", label: "ui.format.kind.code" },
+  html: { icon: "file-code", label: "ui.format.kind.code" },
+  py: { icon: "file-code", label: "ui.format.kind.code" },
+  java: { icon: "file-code", label: "ui.format.kind.code" },
+  c: { icon: "file-code", label: "ui.format.kind.code" },
+  cpp: { icon: "file-code", label: "ui.format.kind.code" },
+  sh: { icon: "file-code", label: "ui.format.kind.code" },
+  yml: { icon: "file-code", label: "ui.format.kind.code" },
+  yaml: { icon: "file-code", label: "ui.format.kind.code" },
+  rst: { icon: "file-text", label: "ui.format.kind.document" },
+  adoc: { icon: "file-text", label: "ui.format.kind.document" },
+  tex: { icon: "file-text", label: "ui.format.kind.document" },
+  rtf: { icon: "file-text", label: "ui.format.kind.document" },
+  org: { icon: "file-text", label: "ui.format.kind.document" },
+  bat: { icon: "file-code", label: "ui.format.kind.script" },
+  ps1: { icon: "file-code", label: "ui.format.kind.script" },
+  vbs: { icon: "file-code", label: "ui.format.kind.script" },
+  lua: { icon: "file-code", label: "ui.format.kind.code" },
+  rb: { icon: "file-code", label: "ui.format.kind.code" },
+  php: { icon: "file-code", label: "ui.format.kind.code" },
+  pl: { icon: "file-code", label: "ui.format.kind.code" },
+  sql: { icon: "file-code", label: "ui.format.kind.code" },
+  toml: { icon: "file-code", label: "ui.format.kind.config" },
+  properties: { icon: "file-code", label: "ui.format.kind.config" },
+  graphql: { icon: "file-code", label: "ui.format.kind.code" },
+  cmake: { icon: "file-code", label: "ui.format.kind.config" },
+  gradle: { icon: "file-code", label: "ui.format.kind.config" },
+  ".gitignore": { icon: "file-code", label: "ui.format.kind.config" },
+  ".env": { icon: "file-text", label: "ui.format.kind.config" },
+  dockerfile: { icon: "file-code", label: "ui.format.kind.config" },
+  makefile: { icon: "file-code", label: "ui.format.kind.config" },
+  exe: { icon: "app-window", label: "ui.format.kind.app" },
+  msi: { icon: "app-window", label: "ui.format.kind.app" },
+  apk: { icon: "app-window", label: "ui.format.kind.app" },
+  iso: { icon: "disc", label: "ui.format.kind.disc" },
 }
 
 export function ext(name: string): string {
@@ -120,9 +127,19 @@ export function ext(name: string): string {
 }
 
 export function fileKind(name: string, type: string, softReadOnly?: boolean, shortcutLogo?: string | null) {
-  if (type === "shortcut") return { icon: shortcutLogo || "external-link", label: "快捷方式" }
-  if (type === "dir") return { icon: softReadOnly ? "folder-lock" : "folder", label: softReadOnly ? "外部文件夹（只读）" : "文件夹" }
-  return EXT_KIND[ext(name)] || { icon: "file", label: "文件" }
+  if (type === "shortcut") {
+    return { icon: shortcutLogo || "external-link", label: translate("ui.format.kind.shortcut") }
+  }
+  if (type === "dir") {
+    return {
+      icon: softReadOnly ? "folder-lock" : "folder",
+      label: softReadOnly ? translate("ui.format.kind.folder_readonly") : translate("ui.common.folder"),
+    }
+  }
+  const hit = EXT_KIND[ext(name)]
+  return hit
+    ? { icon: hit.icon, label: translate(hit.label) }
+    : { icon: "file", label: translate("ui.common.file") }
 }
 
 const PREVIEWABLE = new Set([

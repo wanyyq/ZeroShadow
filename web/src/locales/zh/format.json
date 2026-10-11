@@ -1,0 +1,21 @@
+{
+  "ui.format.uptime_days_hours": "{days} 天 {hours} 小时",
+  "ui.format.uptime_hours_minutes": "{hours} 小时 {minutes} 分钟",
+  "ui.format.uptime_minutes_seconds": "{minutes} 分钟 {seconds} 秒",
+  "ui.format.kind.image": "图片",
+  "ui.format.kind.video": "视频",
+  "ui.format.kind.audio": "音频",
+  "ui.format.kind.archive": "压缩包",
+  "ui.format.kind.pdf": "PDF",
+  "ui.format.kind.document": "文档",
+  "ui.format.kind.spreadsheet": "表格",
+  "ui.format.kind.presentation": "演示",
+  "ui.format.kind.text": "文本",
+  "ui.format.kind.code": "代码",
+  "ui.format.kind.script": "脚本",
+  "ui.format.kind.config": "配置",
+  "ui.format.kind.app": "程序",
+  "ui.format.kind.disc": "镜像",
+  "ui.format.kind.shortcut": "快捷方式",
+  "ui.format.kind.folder_readonly": "外部文件夹（只读）"
+}

@@ -87,6 +87,7 @@
 - **快捷方式** `.zeropath` 文件可以把入口指向任意目录或文件，并自定义显示名与图标
 - **链接下载器** 填一个 `http/https` 直链，服务端帮你抓进网盘目录（带进度、可自定义文件名）
 - **实用工具** 内置文件大小单位换算
+- **多语言** 界面自带**简体中文**与 **English**，一键切换、记住在本机（登录页也能切）；管理员往服务端 `data/lang/` 丢一个 JSON 就能加一门语言，界面里还能**导出翻译模板**（含全部文案键），服务端返回的提示与文件属性字段名同样跟着切换
 
 ### 权限体系
 
@@ -276,9 +277,10 @@ ZeroShadow/
 ├── web/                    # 前端 (React 19 + Tailwind v4 + shadcn)
 │   ├── src/
 │   │   ├── pages/          # 页面：浏览 / 登录 / 设置 / 团队待办 / 预览 / 编辑 / HTML / 工具 / 软件开源信息
-│   │   ├── components/     # UI 组件 · 布局 · 业务弹窗 · 头像 · 错误边界
+│   │   ├── components/     # UI 组件 · 布局 · 业务弹窗 · 头像 · 错误边界 · 语言选择器
+│   │   ├── locales/        # 界面文案：locales/zh/<区域>.json 与 locales/en/<区域>.json
 │   │   ├── state/          # 状态：认证 · 小组上下文 · 剪贴板 · 上传 · 长任务 · 客户端偏好
-│   │   └── lib/            # API 客户端 · 类型 · 头像缓存(IndexedDB) · 格式化 · 冲突检测
+│   │   └── lib/            # API 客户端 · 类型 · 多语言运行时 · 头像缓存(IndexedDB) · 格式化 · 冲突检测
 │   └── dist/               # 构建产物（pnpm build 生成）
 │
 ├── public/resources/       # 静态资源（字体 / lucide / gsap / tailwind）
@@ -290,6 +292,7 @@ ZeroShadow/
 │   ├── todos.json          # 团队待办
 │   ├── avatars/            # 用户头像（<owner>.webp，128×128）
 │   ├── backups/            # 数据快照（含 corrupt/ 隔离区）
+│   ├── lang/               # 自定义界面语言（<语言代码>.json；首次启动生成 README.md）
 │   ├── metrics/            # 指标落盘（zs-YYYY-MM-DD.jsonl，保留 7 天）
 │   ├── .jwt-secret         # 会话签名密钥
 │   ├── files/              # 网盘文件根目录
@@ -302,6 +305,7 @@ ZeroShadow/
 ├── security-test.ps1       # 安全回归测试（19 组断言）
 ├── smoke-test.ps1          # 冒烟测试（38 项断言，跑完自动还原现场）
 ├── encoding-test.mjs       # 在线编辑器编码单测（60 项断言，node encoding-test.mjs）
+├── i18n-check.mjs          # 多语言文案校验（键完整性 + 剩余硬编码中文统计）
 └── .github/workflows/      # GitHub Actions：五平台 node18 自动编译
 ```
 

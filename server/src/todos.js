@@ -2,6 +2,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { DATA_DIR } from "./env.js"
 import { readJsonTyped, withLock, writeJsonAtomic } from "./store.js"
+import { httpError } from "./http.js"
 
 // ============================================================================
 //  todos.js - 团队 Todo
@@ -67,9 +68,10 @@ function persist() {
 export async function createTodo(data) {
   return withLock("todos", async () => {
     if (todos.length >= MAX_TODOS) {
-      const err = new Error(`Todo 数量已达上限 ${MAX_TODOS}`)
-      err.status = 400
-      throw err
+      throw httpError(400, `Todo 数量已达上限 ${MAX_TODOS}`, {
+        errorKey: "api.todos.limit_reached",
+        errorParams: { max: MAX_TODOS },
+      })
     }
     const todo = sanitizeTodo({
       id: crypto.randomUUID(),
@@ -88,9 +90,7 @@ export async function updateTodo(id, patch) {
   return withLock("todos", async () => {
     const todo = getTodo(id)
     if (!todo) {
-      const err = new Error("Todo 不存在")
-      err.status = 404
-      throw err
+      throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
     }
     const allowed = ["title", "note", "priority", "dueAt", "allowAssigneeEdit", "scope", "groupId", "memberId"]
     const merged = { ...todo }
@@ -108,9 +108,7 @@ export async function setTodoDone(id, done, actorName) {
   return withLock("todos", async () => {
     const todo = getTodo(id)
     if (!todo) {
-      const err = new Error("Todo 不存在")
-      err.status = 404
-      throw err
+      throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
     }
     todo.done = !!done
     todo.doneAt = done ? new Date().toISOString() : null

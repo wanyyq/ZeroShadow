@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { ConfirmProvider } from "@/components/confirm-dialog"
 import { AuthProvider, useAuth } from "@/state/auth"
+import { I18nProvider } from "@/lib/i18n"
 import { GroupsProvider } from "@/state/groups"
 import { ClientSettingsProvider } from "@/state/client-settings"
 import { ClipboardProvider } from "@/state/clipboard"
@@ -35,38 +36,41 @@ export default function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="zs-theme">
       <ErrorBoundary>
-        <AuthProvider>
-          <GroupsProvider>
-            <AvatarSync />
-            <ClientSettingsProvider>
-              <ClipboardProvider>
-                <UploadsProvider>
-                  <OperationsProvider>
-                    <TooltipProvider delay={300}>
-                      <ConfirmProvider>
-                        <BrowserRouter>
-                          <Routes>
-                            <Route path="/" element={<BrowserPage />} />
-                            <Route path="/login" element={<LoginPage />} />
-                            <Route path="/settings" element={<SettingsPage />} />
-                            <Route path="/team" element={<TeamPage />} />
-                            <Route path="/preview" element={<PreviewPage />} />
-                            <Route path="/editor" element={<EditorPage />} />
-                            <Route path="/html-preview" element={<HtmlPage />} />
-                            <Route path="/tools" element={<ToolsPage />} />
-                            <Route path="/about" element={<AboutPage />} />
-                            <Route path="*" element={<Navigate to="/" replace />} />
-                          </Routes>
-                        </BrowserRouter>
-                        <Toaster position="bottom-center" />
-                      </ConfirmProvider>
-                    </TooltipProvider>
-                  </OperationsProvider>
-                </UploadsProvider>
-              </ClipboardProvider>
-            </ClientSettingsProvider>
-          </GroupsProvider>
-        </AuthProvider>
+        {/* 语言放在最外层：登录页、错误边界里的提示，以及下面所有 Provider 都可能用到它 */}
+        <I18nProvider>
+          <AuthProvider>
+            <GroupsProvider>
+              <AvatarSync />
+              <ClientSettingsProvider>
+                <ClipboardProvider>
+                  <UploadsProvider>
+                    <OperationsProvider>
+                      <TooltipProvider delay={300}>
+                        <ConfirmProvider>
+                          <BrowserRouter>
+                            <Routes>
+                              <Route path="/" element={<BrowserPage />} />
+                              <Route path="/login" element={<LoginPage />} />
+                              <Route path="/settings" element={<SettingsPage />} />
+                              <Route path="/team" element={<TeamPage />} />
+                              <Route path="/preview" element={<PreviewPage />} />
+                              <Route path="/editor" element={<EditorPage />} />
+                              <Route path="/html-preview" element={<HtmlPage />} />
+                              <Route path="/tools" element={<ToolsPage />} />
+                              <Route path="/about" element={<AboutPage />} />
+                              <Route path="*" element={<Navigate to="/" replace />} />
+                            </Routes>
+                          </BrowserRouter>
+                          <Toaster position="bottom-center" />
+                        </ConfirmProvider>
+                      </TooltipProvider>
+                    </OperationsProvider>
+                  </UploadsProvider>
+                </ClipboardProvider>
+              </ClientSettingsProvider>
+            </GroupsProvider>
+          </AuthProvider>
+        </I18nProvider>
       </ErrorBoundary>
     </ThemeProvider>
   )

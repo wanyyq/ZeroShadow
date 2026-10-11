@@ -21,11 +21,13 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Icon } from "@/components/icon"
+import { LanguageSelect } from "@/components/language-select"
 import { Avatar } from "@/components/avatar"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/state/auth"
 import { useClientSettings } from "@/state/client-settings"
 import { useConfirm } from "@/components/confirm-dialog"
+import { useT } from "@/lib/i18n"
 import { PathPicker } from "@/components/browser/path-picker"
 import { api, uploadAvatar, deleteAvatar } from "@/lib/api"
 import { ownerForUser, primeAvatar, forgetAvatar } from "@/lib/avatar-cache"
@@ -40,29 +42,30 @@ import { LogsMetricsSection } from "@/pages/settings/logs-metrics-section"
 
 export function SettingsPage() {
   const { me, ready } = useAuth()
+  const t = useT()
   const isSuper = me.role === "superadmin"
 
   return (
     <AppShell>
       <div className="flex flex-1 flex-col overflow-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">设置</h1>
-          <p className="mb-6 text-sm text-muted-foreground">{isSuper ? "管理外观、服务器、成员与权限" : "个性化浏览体验"}</p>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">{t("ui.settings.page.title")}</h1>
+          <p className="mb-6 text-sm text-muted-foreground">{isSuper ? t("ui.settings.page.subtitle_admin") : t("ui.settings.page.subtitle_member")}</p>
           {ready && (
             <Tabs defaultValue="appearance">
               <TabsList variant="line" className="mb-6 flex-wrap">
-                <TabsTrigger value="appearance"><Icon name="palette" /> 外观</TabsTrigger>
+                <TabsTrigger value="appearance"><Icon name="palette" /> {t("ui.settings.tabs.appearance")}</TabsTrigger>
                 {isSuper && (
                   <>
-                    <TabsTrigger value="status"><Icon name="activity" /> 状态</TabsTrigger>
-                    <TabsTrigger value="logs"><Icon name="scroll-text" /> 日志与指标</TabsTrigger>
-                    <TabsTrigger value="members"><Icon name="users" /> 成员</TabsTrigger>
-                    <TabsTrigger value="groups"><Icon name="layers" /> 小组</TabsTrigger>
-                    <TabsTrigger value="perms"><Icon name="shield-check" /> 权限</TabsTrigger>
-                    <TabsTrigger value="data"><Icon name="database" /> 数据与保留</TabsTrigger>
-                    <TabsTrigger value="trash"><Icon name="trash-2" /> 回收站</TabsTrigger>
-                    <TabsTrigger value="security"><Icon name="lock" /> 安全</TabsTrigger>
-                    <TabsTrigger value="tunnel"><Icon name="globe" /> 公网</TabsTrigger>
+                    <TabsTrigger value="status"><Icon name="activity" /> {t("ui.settings.tabs.status")}</TabsTrigger>
+                    <TabsTrigger value="logs"><Icon name="scroll-text" /> {t("ui.settings.tabs.logs")}</TabsTrigger>
+                    <TabsTrigger value="members"><Icon name="users" /> {t("ui.settings.tabs.members")}</TabsTrigger>
+                    <TabsTrigger value="groups"><Icon name="layers" /> {t("ui.settings.tabs.groups")}</TabsTrigger>
+                    <TabsTrigger value="perms"><Icon name="shield-check" /> {t("ui.settings.tabs.perms")}</TabsTrigger>
+                    <TabsTrigger value="data"><Icon name="database" /> {t("ui.settings.tabs.data")}</TabsTrigger>
+                    <TabsTrigger value="trash"><Icon name="trash-2" /> {t("ui.settings.tabs.trash")}</TabsTrigger>
+                    <TabsTrigger value="security"><Icon name="lock" /> {t("ui.settings.tabs.security")}</TabsTrigger>
+                    <TabsTrigger value="tunnel"><Icon name="globe" /> {t("ui.settings.tabs.tunnel")}</TabsTrigger>
                   </>
                 )}
               </TabsList>
@@ -85,7 +88,7 @@ export function SettingsPage() {
         </div>
       </div>
       <div className="border-t border-border/30 px-3 py-2">
-        <div className="text-center text-[11px] text-muted-foreground">管理外观、服务器、成员与权限</div>
+        <div className="text-center text-[11px] text-muted-foreground">{t("ui.settings.page.subtitle_admin")}</div>
       </div>
     </AppShell>
   )
@@ -109,11 +112,12 @@ function AppearanceSection() {
   const { theme, setTheme } = useTheme()
   const settings = useClientSettings()
   const confirm = useConfirm()
+  const t = useT()
 
   const themeOptions = [
-    ["light", "sun", "浅色"],
-    ["dark", "moon", "深色"],
-    ["system", "monitor", "跟随系统"],
+    ["light", "sun", t("ui.common.platform_theme_light")],
+    ["dark", "moon", t("ui.common.platform_theme_dark")],
+    ["system", "monitor", t("ui.common.platform_theme_system")],
   ] as const
 
   return (
@@ -122,30 +126,30 @@ function AppearanceSection() {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <CardTitle>外观</CardTitle>
-              <CardDescription>只作用于这台设备的浏览器（保存在 localStorage）</CardDescription>
+              <CardTitle>{t("ui.settings.tabs.appearance")}</CardTitle>
+              <CardDescription>{t("ui.settings.appearance.device_only_hint")}</CardDescription>
             </div>
             <Button size="sm" variant="outline" onClick={async () => {
               if (!(await confirm({
-                title: "恢复默认外观？",
-                description: "主题、界面密度、字号、侧边栏折叠、背景噪点、减少动画与文件浏览默认值都会回到出厂设置。",
-                confirmText: "恢复默认",
+                title: t("ui.settings.appearance.reset_confirm_title"),
+                description: t("ui.settings.appearance.reset_confirm_desc"),
+                confirmText: t("ui.settings.appearance.reset_default"),
               }))) return
               settings.reset()
               // 主题不归 ClientSettingsProvider 管（它在 ThemeProvider 自己的
               // "zs-theme" 键里）。不在这里一起重置的话，确认框承诺了"主题回到
               // 出厂设置"但实际不会生效。
               setTheme("system")
-              toast.success("已恢复默认外观")
+              toast.success(t("ui.settings.appearance.reset_done"))
             }}>
-              <Icon name="rotate-ccw" data-icon="inline-start" /> 恢复默认
+              <Icon name="rotate-ccw" data-icon="inline-start" /> {t("ui.settings.appearance.reset_default")}
             </Button>
           </div>
         </CardHeader>
         <CardContent>
           <FieldGroup className="gap-6">
             <FieldSet>
-              <FieldLegend variant="label">主题</FieldLegend>
+              <FieldLegend variant="label">{t("ui.settings.appearance.theme_legend")}</FieldLegend>
               <ToggleGroup
                 value={[theme]}
                 onValueChange={(v) => {
@@ -159,15 +163,20 @@ function AppearanceSection() {
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
-              <FieldDescription className="mt-2">任意页面按 `D` 键也能循环切换主题。</FieldDescription>
+              <FieldDescription className="mt-2">{t("ui.settings.appearance.theme_shortcut_hint")}</FieldDescription>
             </FieldSet>
 
             <Separator />
 
             <FieldSet>
-              <FieldLegend variant="label">界面</FieldLegend>
+              <FieldLegend variant="label">{t("ui.settings.appearance.ui_legend")}</FieldLegend>
               <div className="flex flex-col divide-y divide-border/60 [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
-                <SettingRow label="界面密度" hint="紧凑会收紧列表行高与卡片内边距，一屏能放下更多条目。">
+                {/* 界面语言放在最前：它是唯一会同时影响"这一页怎么显示"的偏好 */}
+                <SettingRow label={t("ui.i18n.language")}>
+                  <LanguageSelect />
+                </SettingRow>
+
+                <SettingRow label={t("ui.settings.appearance.density_label")} hint={t("ui.settings.appearance.density_hint")}>
                   <ToggleGroup
                     value={[settings.density]}
                     onValueChange={(v) => {
@@ -175,12 +184,12 @@ function AppearanceSection() {
                       if (next) settings.update({ density: next })
                     }}
                   >
-                    <ToggleGroupItem value="comfortable">舒适</ToggleGroupItem>
-                    <ToggleGroupItem value="compact">紧凑</ToggleGroupItem>
+                    <ToggleGroupItem value="comfortable">{t("ui.settings.appearance.density_comfortable")}</ToggleGroupItem>
+                    <ToggleGroupItem value="compact">{t("ui.settings.appearance.density_compact")}</ToggleGroupItem>
                   </ToggleGroup>
                 </SettingRow>
 
-                <SettingRow label="字号" hint="整体缩放界面文字（Tailwind 的尺寸都是 rem，改根字号即可）。">
+                <SettingRow label={t("ui.settings.appearance.font_scale_label")} hint={t("ui.settings.appearance.font_scale_hint")}>
                   <ToggleGroup
                     value={[settings.fontScale]}
                     onValueChange={(v) => {
@@ -188,24 +197,24 @@ function AppearanceSection() {
                       if (next) settings.update({ fontScale: next })
                     }}
                   >
-                    <ToggleGroupItem value="sm">小</ToggleGroupItem>
-                    <ToggleGroupItem value="base">标准</ToggleGroupItem>
-                    <ToggleGroupItem value="lg">大</ToggleGroupItem>
+                    <ToggleGroupItem value="sm">{t("ui.settings.appearance.font_small")}</ToggleGroupItem>
+                    <ToggleGroupItem value="base">{t("ui.settings.appearance.font_base")}</ToggleGroupItem>
+                    <ToggleGroupItem value="lg">{t("ui.settings.appearance.font_large")}</ToggleGroupItem>
                   </ToggleGroup>
                 </SettingRow>
 
-                <SettingRow label="默认折叠侧边栏" hint="仅影响桌面端；窄屏抽屉不受影响。">
+                <SettingRow label={t("ui.settings.appearance.sidebar_collapsed_label")} hint={t("ui.settings.appearance.sidebar_collapsed_hint")}>
                   <Switch
                     checked={settings.sidebarCollapsed}
                     onCheckedChange={(v) => settings.update({ sidebarCollapsed: !!v })}
                   />
                 </SettingRow>
 
-                <SettingRow label="背景噪点" hint="页面底层的细微噪点纹理，关掉后背景更纯净。">
+                <SettingRow label={t("ui.settings.appearance.noise_label")} hint={t("ui.settings.appearance.noise_hint")}>
                   <Switch checked={settings.noise} onCheckedChange={(v) => settings.update({ noise: !!v })} />
                 </SettingRow>
 
-                <SettingRow label="减少动画" hint="关闭页面与列表的入场动画、以及界面过渡效果。">
+                <SettingRow label={t("ui.settings.appearance.reduce_motion_label")} hint={t("ui.settings.appearance.reduce_motion_hint")}>
                   <Switch
                     checked={settings.reduceMotion}
                     onCheckedChange={(v) => settings.update({ reduceMotion: !!v })}
@@ -219,13 +228,13 @@ function AppearanceSection() {
 
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>文件浏览默认值</CardTitle>
-          <CardDescription>打开文件页时使用的初始视图与排序（页面上随时可改，改完同样会记在这里）</CardDescription>
+          <CardTitle>{t("ui.settings.appearance.file_browse_defaults_title")}</CardTitle>
+          <CardDescription>{t("ui.settings.appearance.file_browse_defaults_desc")}</CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup className="gap-6">
             <FieldSet>
-              <FieldLegend variant="label">视图</FieldLegend>
+              <FieldLegend variant="label">{t("ui.settings.appearance.view_legend")}</FieldLegend>
               <ToggleGroup
                 value={[settings.view]}
                 onValueChange={(v) => {
@@ -234,10 +243,10 @@ function AppearanceSection() {
                 }}
               >
                 <ToggleGroupItem value="list">
-                  <Icon name="list" data-icon="inline-start" /> 列表
+                  <Icon name="list" data-icon="inline-start" /> {t("ui.settings.appearance.view_list")}
                 </ToggleGroupItem>
                 <ToggleGroupItem value="grid">
-                  <Icon name="layout-grid" data-icon="inline-start" /> 网格
+                  <Icon name="layout-grid" data-icon="inline-start" /> {t("ui.settings.appearance.view_grid")}
                 </ToggleGroupItem>
               </ToggleGroup>
             </FieldSet>
@@ -245,9 +254,9 @@ function AppearanceSection() {
             <Separator />
 
             <FieldSet>
-              <FieldLegend variant="label">排序</FieldLegend>
+              <FieldLegend variant="label">{t("ui.settings.appearance.sort_legend")}</FieldLegend>
               <div className="flex flex-col divide-y divide-border/60 [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
-                <SettingRow label="排序字段">
+                <SettingRow label={t("ui.settings.appearance.sort_by_label")}>
                   <ToggleGroup
                     value={[settings.sortBy]}
                     onValueChange={(v) => {
@@ -255,13 +264,13 @@ function AppearanceSection() {
                       if (next) settings.update({ sortBy: next })
                     }}
                   >
-                    <ToggleGroupItem value="name">名称</ToggleGroupItem>
-                    <ToggleGroupItem value="size">大小</ToggleGroupItem>
-                    <ToggleGroupItem value="mtime">修改时间</ToggleGroupItem>
+                    <ToggleGroupItem value="name">{t("ui.common.name")}</ToggleGroupItem>
+                    <ToggleGroupItem value="size">{t("ui.common.size")}</ToggleGroupItem>
+                    <ToggleGroupItem value="mtime">{t("ui.settings.appearance.sort_mtime")}</ToggleGroupItem>
                   </ToggleGroup>
                 </SettingRow>
 
-                <SettingRow label="排序方向">
+                <SettingRow label={t("ui.settings.appearance.sort_dir_label")}>
                   <ToggleGroup
                     value={[settings.sortDir]}
                     onValueChange={(v) => {
@@ -269,12 +278,12 @@ function AppearanceSection() {
                       if (next) settings.update({ sortDir: next })
                     }}
                   >
-                    <ToggleGroupItem value="asc">升序</ToggleGroupItem>
-                    <ToggleGroupItem value="desc">降序</ToggleGroupItem>
+                    <ToggleGroupItem value="asc">{t("ui.settings.appearance.sort_asc")}</ToggleGroupItem>
+                    <ToggleGroupItem value="desc">{t("ui.settings.appearance.sort_desc")}</ToggleGroupItem>
                   </ToggleGroup>
                 </SettingRow>
 
-                <SettingRow label="文件夹置顶" hint="排序时始终把文件夹排在文件前面。">
+                <SettingRow label={t("ui.settings.appearance.folders_first_label")} hint={t("ui.settings.appearance.folders_first_hint")}>
                   <Switch checked={settings.foldersFirst} onCheckedChange={(v) => settings.update({ foldersFirst: !!v })} />
                 </SettingRow>
               </div>
@@ -288,22 +297,23 @@ function AppearanceSection() {
 
 /* ==================== 状态 ==================== */
 function StatusSection() {
+  const t = useT()
   const [status, setStatus] = React.useState<ServerStatus | null>(null)
   const load = React.useCallback(() => { api.get<ServerStatus>("/admin/status").then(setStatus).catch((e) => toast.error((e as Error).message)) }, [])
-  React.useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t) }, [load])
-  if (!status) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+  React.useEffect(() => { load(); const timer = setInterval(load, 10000); return () => clearInterval(timer) }, [load])
+  if (!status) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   return (
     <div className="grid gap-5">
       {/* 关键指标：横向条形网格 */}
       <div className="edge-highlight grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
         {[
-          ["timer", "运行", formatUptime(status.uptimeSec)],
-          ["hard-drive", "存储", formatBytes(status.storage.bytes)],
-          ["memory-stick", "内存", formatBytes(status.memory.rss)],
+          ["timer", t("ui.settings.status.label_uptime"), formatUptime(status.uptimeSec)],
+          ["hard-drive", t("ui.settings.status.label_storage"), formatBytes(status.storage.bytes)],
+          ["memory-stick", t("ui.settings.status.label_memory"), formatBytes(status.memory.rss)],
           ["cpu", "Node", status.node],
-          ["database", "文件数", `${status.storage.files} 文件 / ${status.storage.dirs} 文件夹`],
-          ["hard-drive", "磁盘", status.disk ? `可用 ${formatBytes(status.disk.free)}` : "不可用"],
+          ["database", t("ui.settings.status.label_files"), t("ui.settings.status.files_dirs", { files: status.storage.files, dirs: status.storage.dirs })],
+          ["hard-drive", t("ui.settings.status.label_disk"), status.disk ? t("ui.settings.status.disk_free", { size: formatBytes(status.disk.free) }) : t("ui.settings.status.disk_unavailable")],
         ].map(([icon, label, value]) => (
           <div key={label} className="flex items-center gap-3 bg-card p-3">
             <Icon name={icon} className="size-4 shrink-0 text-muted-foreground" />
@@ -317,17 +327,17 @@ function StatusSection() {
 
       {/* 访问地址：简洁列表 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-3">
-        <h3 className="mb-2 text-sm font-medium">局域网访问</h3>
+        <h3 className="mb-2 text-sm font-medium">{t("ui.settings.status.lan_access")}</h3>
         <div className="grid gap-1.5">
           {[`http://localhost:${status.port}`, ...status.lan.map((ip) => `http://${ip}:${status.port}`)].map((url) => (
             <div key={url} className="flex items-center gap-2">
-              <Badge variant="secondary" className="w-12 shrink-0 justify-center text-[10px]">{url.includes("localhost") ? "本机" : "局域网"}</Badge>
+              <Badge variant="secondary" className="w-12 shrink-0 justify-center text-[10px]">{url.includes("localhost") ? t("ui.settings.status.badge_local") : t("ui.settings.status.badge_lan")}</Badge>
               <Input readOnly value={url} className="h-7 font-mono text-xs" onFocus={(e) => e.target.select()} />
             </div>
           ))}
           {status.tunnel.running && status.tunnel.url && (
             <div className="flex items-center gap-2">
-              <Badge className="w-12 shrink-0 justify-center text-[10px]">公网</Badge>
+              <Badge className="w-12 shrink-0 justify-center text-[10px]">{t("ui.settings.status.badge_public")}</Badge>
               <Input readOnly value={status.tunnel.url} className="h-7 font-mono text-xs border-ring" onFocus={(e) => e.target.select()} />
             </div>
           )}
@@ -340,6 +350,7 @@ function StatusSection() {
 /* ==================== 成员 ==================== */
 function MembersSection() {
   const confirm = useConfirm()
+  const t = useT()
   const [members, setMembers] = React.useState<Member[]>([])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [showCreate, setShowCreate] = React.useState(false)
@@ -372,7 +383,7 @@ function MembersSection() {
       const blob = await fileToAvatarWebp(file)
       const meta = await uploadAvatar(ownerForUser(target.id), blob)
       await primeAvatar(meta.owner, meta.md5, blob)
-      toast.success(`已更新 ${target.username} 的头像`)
+      toast.success(t("ui.settings.members.avatar_updated", { name: target.username }))
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -384,16 +395,16 @@ function MembersSection() {
   const removeAvatar = (m: Member) => {
     const owner = ownerForUser(m.id)
     void confirm({
-      title: `把「${m.username}」的头像恢复成默认？`,
-      description: "已上传的头像文件会被删除，无法恢复。",
-      confirmText: "恢复默认头像",
+      title: t("ui.settings.members.avatar_reset_confirm_title", { name: m.username }),
+      description: t("ui.settings.members.avatar_reset_confirm_desc"),
+      confirmText: t("ui.settings.members.avatar_reset_confirm_action"),
       // 把动作交给确认框执行：成功才关、失败会留在框里显示原因。
       // 旧写法是"先 await 确认、再自己 try/catch"，失败时框已经关了，
       // 用户只能从右下角一条 toast 里猜到底成没成。
       onConfirm: async () => {
         await deleteAvatar(owner)
         await forgetAvatar(owner)
-        toast.success("已恢复默认头像")
+        toast.success(t("ui.settings.members.avatar_reset_done"))
         load()
       },
     })
@@ -409,8 +420,8 @@ function MembersSection() {
       const { results } = await api.post<{ results: { username: string; ok: boolean; error?: string }[] }>("/admin/members", { users })
       const okList = results.filter((r) => r.ok).map((r) => { const u = users.find((x) => x.username === r.username); return `${r.username}  ${u?.password || ""}` })
       const failList = results.filter((r) => !r.ok)
-      if (okList.length) { setCreatedInfo(okList); toast.success(`已创建 ${okList.length} 个成员`) }
-      for (const f of failList) toast.error(`${f.username || "(空)"}：${f.error}`)
+      if (okList.length) { setCreatedInfo(okList); toast.success(t("ui.settings.members.created_count", { count: okList.length })) }
+      for (const f of failList) toast.error(t("ui.settings.members.member_error", { name: f.username || t("ui.settings.members.empty_username"), error: f.error ?? "" }))
       setBatchText(""); setShowCreate(false); load()
     } catch (e) { toast.error((e as Error).message) }
   }
@@ -418,13 +429,13 @@ function MembersSection() {
   const batch = async (action: "enable" | "disable" | "delete", singleId?: string) => {
     const ids = singleId ? [singleId] : [...selected]
     if (!ids.length) return
-    try { await api.post("/admin/members/batch", { action, ids }); toast.success("操作完成"); load() }
+    try { await api.post("/admin/members/batch", { action, ids }); toast.success(t("ui.settings.members.action_done")); load() }
     catch (e) { toast.error((e as Error).message) }
   }
 
   const doReset = async () => {
     if (!resetTarget) return
-    try { await api.post(`/admin/members/${resetTarget.id}/password`, { password: resetPassword }); toast.success(`已重置 ${resetTarget.username} 的密码`); setResetTarget(null); setResetPassword("") }
+    try { await api.post(`/admin/members/${resetTarget.id}/password`, { password: resetPassword }); toast.success(t("ui.settings.members.password_reset", { name: resetTarget.username })); setResetTarget(null); setResetPassword("") }
     catch (e) { toast.error((e as Error).message) }
   }
 
@@ -433,20 +444,20 @@ function MembersSection() {
   return (
     <Card className="edge-highlight">
       <CardHeader>
-        <CardTitle>团队成员（低级管理员）</CardTitle>
-        <CardDescription>成员可操作文件，无法进入服务器管理。共 {members.length} 人</CardDescription>
+        <CardTitle>{t("ui.settings.members.title")}</CardTitle>
+        <CardDescription>{t("ui.settings.members.desc", { count: members.length })}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => setShowCreate(true)}><Icon name="user-plus" /> 添加成员</Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}><Icon name="user-plus" /> {t("ui.settings.members.add_member")}</Button>
           {selected.size > 0 && (
             <>
               <Separator orientation="vertical" className="h-5" />
-              <span className="text-xs text-muted-foreground">已选 {selected.size}</span>
-              <Button size="sm" variant="outline" onClick={() => batch("enable")}>启用</Button>
-              <Button size="sm" variant="outline" onClick={() => batch("disable")}>禁用</Button>
-              <Button size="sm" variant="outline" onClick={() => setResetBatch(true)}>批量重置密码</Button>
-              <Button size="sm" variant="destructive" onClick={() => setConfirmDelete({})}>删除</Button>
+              <span className="text-xs text-muted-foreground">{t("ui.settings.members.selected_count", { count: selected.size })}</span>
+              <Button size="sm" variant="outline" onClick={() => batch("enable")}>{t("ui.common.enable")}</Button>
+              <Button size="sm" variant="outline" onClick={() => batch("disable")}>{t("ui.common.disable")}</Button>
+              <Button size="sm" variant="outline" onClick={() => setResetBatch(true)}>{t("ui.settings.members.batch_reset_password")}</Button>
+              <Button size="sm" variant="destructive" onClick={() => setConfirmDelete({})}>{t("ui.common.delete")}</Button>
             </>
           )}
         </div>
@@ -454,7 +465,7 @@ function MembersSection() {
         {createdInfo.length > 0 && (
           <div className="rounded-md border border-border bg-muted/50 p-3">
             <div className="mb-1 flex items-center justify-between">
-              <p className="text-xs font-medium">创建成功，请保存账号信息（用户名 密码）：</p>
+              <p className="text-xs font-medium">{t("ui.settings.members.created_notice")}</p>
               <Button size="icon-xs" variant="ghost" onClick={() => setCreatedInfo([])}><Icon name="x" /></Button>
             </div>
             <pre className="font-mono text-xs whitespace-pre-wrap select-all">{createdInfo.join("\n")}</pre>
@@ -468,15 +479,15 @@ function MembersSection() {
                 <TableHead className="w-10">
                   <Checkbox checked={allChecked} onCheckedChange={() => setSelected(allChecked ? new Set() : new Set(members.map((m) => m.id)))} />
                 </TableHead>
-                <TableHead className="w-14">头像</TableHead>
-                <TableHead>用户名</TableHead>
-                <TableHead className="w-20">状态</TableHead>
-                <TableHead className="w-40">创建时间</TableHead>
-                <TableHead className="w-12 text-right">操作</TableHead>
+                <TableHead className="w-14">{t("ui.settings.members.col_avatar")}</TableHead>
+                <TableHead>{t("ui.settings.members.col_username")}</TableHead>
+                <TableHead className="w-20">{t("ui.common.status")}</TableHead>
+                <TableHead className="w-40">{t("ui.settings.members.col_created_at")}</TableHead>
+                <TableHead className="w-12 text-right">{t("ui.common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {members.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">还没有成员，点击"添加成员"创建</TableCell></TableRow>}
+              {members.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">{t("ui.settings.members.empty_hint")}</TableCell></TableRow>}
               {members.map((m) => (
                 <ContextMenu key={m.id}>
                   <ContextMenuTrigger render={
@@ -485,37 +496,37 @@ function MembersSection() {
                         <Checkbox checked={selected.has(m.id)} onCheckedChange={() => setSelected((prev) => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next })} />
                       </TableCell>
                       <TableCell>
-                        <button type="button" onClick={() => pickAvatar(m)} title="点击更换头像" className="rounded-full">
+                        <button type="button" onClick={() => pickAvatar(m)} title={t("ui.settings.members.change_avatar_hint")} className="rounded-full">
                           <Avatar owner={ownerForUser(m.id)} name={m.username} size={28} />
                         </button>
                       </TableCell>
                       <TableCell className="font-medium">{m.username}</TableCell>
-                      <TableCell><Badge variant={m.disabled ? "secondary" : "default"}>{m.disabled ? "已禁用" : "正常"}</Badge></TableCell>
+                      <TableCell><Badge variant={m.disabled ? "secondary" : "default"}>{m.disabled ? t("ui.common.disabled") : t("ui.settings.members.status_active")}</Badge></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{m.createdAt.replace("T", " ").slice(0, 19)}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" />}><Icon name="ellipsis-vertical" className="size-3.5" /></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {m.disabled ? <DropdownMenuItem onClick={() => batch("enable", m.id)}><Icon name="check-circle" /> 启用</DropdownMenuItem>
-                            : <DropdownMenuItem onClick={() => batch("disable", m.id)}><Icon name="circle-slash" /> 禁用</DropdownMenuItem>}
-                            <DropdownMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}><Icon name="pencil-line" /> 更改用户名</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setResetTarget(m)}><Icon name="key" /> 重置密码</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => pickAvatar(m)}><Icon name="image-plus" /> 设置头像</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => removeAvatar(m)}><Icon name="user-round-x" /> 恢复默认头像</DropdownMenuItem>
+                            {m.disabled ? <DropdownMenuItem onClick={() => batch("enable", m.id)}><Icon name="check-circle" /> {t("ui.common.enable")}</DropdownMenuItem>
+                            : <DropdownMenuItem onClick={() => batch("disable", m.id)}><Icon name="circle-slash" /> {t("ui.common.disable")}</DropdownMenuItem>}
+                            <DropdownMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}><Icon name="pencil-line" /> {t("ui.settings.members.rename_user")}</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setResetTarget(m)}><Icon name="key" /> {t("ui.settings.members.reset_password")}</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => pickAvatar(m)}><Icon name="image-plus" /> {t("ui.settings.members.set_avatar")}</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => removeAvatar(m)}><Icon name="user-round-x" /> {t("ui.settings.members.avatar_reset_confirm_action")}</DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}><Icon name="trash-2" /> 删除</DropdownMenuItem>
+                            <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}><Icon name="trash-2" /> {t("ui.common.delete")}</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   } />
                   <ContextMenuContent className="w-44">
-                    {m.disabled ? <ContextMenuItem onClick={() => batch("enable", m.id)}><Icon name="check-circle" /> 启用</ContextMenuItem>
-                    : <ContextMenuItem onClick={() => batch("disable", m.id)}><Icon name="circle-slash" /> 禁用</ContextMenuItem>}
-                    <ContextMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}><Icon name="pencil-line" /> 更改用户名</ContextMenuItem>
-                    <ContextMenuItem onClick={() => setResetTarget(m)}><Icon name="key" /> 重置密码</ContextMenuItem>
+                    {m.disabled ? <ContextMenuItem onClick={() => batch("enable", m.id)}><Icon name="check-circle" /> {t("ui.common.enable")}</ContextMenuItem>
+                    : <ContextMenuItem onClick={() => batch("disable", m.id)}><Icon name="circle-slash" /> {t("ui.common.disable")}</ContextMenuItem>}
+                    <ContextMenuItem onClick={() => { setRenameTarget(m); setNewUsername(m.username) }}><Icon name="pencil-line" /> {t("ui.settings.members.rename_user")}</ContextMenuItem>
+                    <ContextMenuItem onClick={() => setResetTarget(m)}><Icon name="key" /> {t("ui.settings.members.reset_password")}</ContextMenuItem>
                     <ContextMenuSeparator />
-                    <ContextMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}><Icon name="trash-2" /> 删除</ContextMenuItem>
+                    <ContextMenuItem variant="destructive" onClick={() => setConfirmDelete({ singleId: m.id })}><Icon name="trash-2" /> {t("ui.common.delete")}</ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
               ))}
@@ -529,28 +540,28 @@ function MembersSection() {
       {/* Dialogs */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent>
-          <DialogHeader><DialogTitle>批量添加成员</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("ui.settings.members.create_dialog_title")}</DialogTitle></DialogHeader>
           <div className="grid gap-2 text-sm">
-            <Label>每行一个账户：「用户名 密码」，省略密码则自动生成</Label>
+            <Label>{t("ui.settings.members.create_dialog_label")}</Label>
             <Textarea rows={6} placeholder="alice 123456\nbob\ncarol pass888" value={batchText} onChange={(e) => setBatchText(e.target.value)} className="font-mono text-xs" />
-            <p className="text-xs text-muted-foreground">用户名 2-32 位（字母/数字/_.-），密码至少 6 位</p>
+            <p className="text-xs text-muted-foreground">{t("ui.settings.members.create_dialog_hint")}</p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowCreate(false)}>取消</Button><Button onClick={createBatch} disabled={!batchText.trim()}>创建</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowCreate(false)}>{t("ui.common.cancel")}</Button><Button onClick={createBatch} disabled={!batchText.trim()}>{t("ui.common.create")}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={resetTarget !== null || resetBatch} onOpenChange={(o) => { if (!o) { setResetTarget(null); setResetBatch(false) } }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{resetBatch ? `批量重置 ${selected.size} 个密码` : `重置 ${resetTarget?.username} 的密码`}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{resetBatch ? t("ui.settings.members.batch_reset_title", { count: selected.size }) : t("ui.settings.members.reset_title", { name: resetTarget?.username ?? "" })}</DialogTitle></DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="reset-pwd">新密码</Label>
+            <Label htmlFor="reset-pwd">{t("ui.settings.members.new_password")}</Label>
             <div className="flex gap-2">
-              <Input id="reset-pwd" value={resetBatch ? batchNewPassword : resetPassword} onChange={(e) => resetBatch ? setBatchNewPassword(e.target.value) : setResetPassword(e.target.value)} placeholder="至少 6 位" />
-              <Button variant="outline" onClick={() => { const p = genPassword(); if (resetBatch) setBatchNewPassword(p); else setResetPassword(p) }}>随机生成</Button>
+              <Input id="reset-pwd" value={resetBatch ? batchNewPassword : resetPassword} onChange={(e) => resetBatch ? setBatchNewPassword(e.target.value) : setResetPassword(e.target.value)} placeholder={t("ui.settings.members.password_min_hint")} />
+              <Button variant="outline" onClick={() => { const p = genPassword(); if (resetBatch) setBatchNewPassword(p); else setResetPassword(p) }}>{t("ui.settings.members.generate_random")}</Button>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setResetTarget(null); setResetBatch(false) }}>取消</Button>
+            <Button variant="outline" onClick={() => { setResetTarget(null); setResetBatch(false) }}>{t("ui.common.cancel")}</Button>
             <Button onClick={resetBatch ? async () => {
               if (batchNewPassword.length < 6) return
               // 逐条重置：旧实现在这里没有 try/catch，任一条失败就是一个未处理的
@@ -565,36 +576,36 @@ function MembersSection() {
                   await api.post(`/admin/members/${id}/password`, { password: batchNewPassword })
                   ok += 1
                 } catch (err) {
-                  failed.push(`${who}：${(err as Error).message}`)
+                  failed.push(t("ui.settings.members.member_error", { name: who, error: (err as Error).message }))
                 }
               }
-              if (ok) toast.success(`已重置 ${ok} 个密码`)
+              if (ok) toast.success(t("ui.settings.members.reset_ok_count", { count: ok }))
               if (failed.length) {
-                toast.error(`${failed.length} 个未重置`, { description: failed.join("\n") })
+                toast.error(t("ui.settings.members.reset_failed_count", { count: failed.length }), { description: failed.join("\n") })
               }
               setResetBatch(false)
               setBatchNewPassword("")
               load()
-            } : doReset} disabled={resetBatch ? batchNewPassword.length < 6 : resetPassword.length < 6}>确定</Button>
+            } : doReset} disabled={resetBatch ? batchNewPassword.length < 6 : resetPassword.length < 6}>{t("ui.common.ok")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={renameTarget !== null} onOpenChange={(o) => !o && setRenameTarget(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>更改 {renameTarget?.username} 的用户名</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("ui.settings.members.rename_title", { name: renameTarget?.username ?? "" })}</DialogTitle></DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="rename-user">新用户名</Label>
-            <Input id="rename-user" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="2-32 位字母、数字、_ . -" />
+            <Label htmlFor="rename-user">{t("ui.settings.members.new_username")}</Label>
+            <Input id="rename-user" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder={t("ui.settings.members.username_hint")} />
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setRenameTarget(null)}>取消</Button><Button onClick={async () => { if (!renameTarget || !newUsername.trim()) return; try { await api.patch(`/admin/members/${renameTarget.id}`, { username: newUsername.trim() }); toast.success("用户名已更改"); setRenameTarget(null); load() } catch (e) { toast.error((e as Error).message) } }} disabled={!newUsername.trim()}>确定</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setRenameTarget(null)}>{t("ui.common.cancel")}</Button><Button onClick={async () => { if (!renameTarget || !newUsername.trim()) return; try { await api.patch(`/admin/members/${renameTarget.id}`, { username: newUsername.trim() }); toast.success(t("ui.settings.members.rename_done")); setRenameTarget(null); load() } catch (e) { toast.error((e as Error).message) } }} disabled={!newUsername.trim()}>{t("ui.common.ok")}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) setConfirmDelete(null) }}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>确认删除</AlertDialogTitle><AlertDialogDescription>{confirmDelete?.singleId ? "将永久删除该成员，不可撤销。" : `将永久删除选中的 ${selected.size} 个成员，不可撤销。`}</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={(e) => { e.preventDefault(); batch("delete", confirmDelete?.singleId); setConfirmDelete(null) }}>删除</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogHeader><AlertDialogTitle>{t("ui.settings.members.delete_confirm_title")}</AlertDialogTitle><AlertDialogDescription>{confirmDelete?.singleId ? t("ui.settings.members.delete_confirm_single") : t("ui.settings.members.delete_confirm_batch", { count: selected.size })}</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel><AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={(e) => { e.preventDefault(); batch("delete", confirmDelete?.singleId); setConfirmDelete(null) }}>{t("ui.common.delete")}</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </Card>
@@ -605,6 +616,7 @@ function MembersSection() {
 function PermsSection() {
   // 显式遮蔽 window.confirm —— 确认一律走应用内的 ConfirmProvider
   const confirm = useConfirm()
+  const t = useT()
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [superLimit, setSuperLimit] = React.useState("")
   const [memberLimit, setMemberLimit] = React.useState("")
@@ -646,29 +658,29 @@ function PermsSection() {
 
   const unhide = (p: string) => {
     void confirm({
-      title: `恢复访客对「${p}」的可见性？`,
-      description: "该目录会重新出现在访客的列表里。",
-      confirmText: "恢复可见",
+      title: t("ui.settings.perms.unhide_confirm_title", { path: p }),
+      description: t("ui.settings.perms.unhide_confirm_desc"),
+      confirmText: t("ui.settings.perms.unhide_confirm_action"),
       destructive: false,
       onConfirm: async () => {
         const next = await api.del<AdminConfig>("/admin/hidden-paths", { path: p })
         setConfig(next)
-        toast.success("已恢复访客可见")
+        toast.success(t("ui.settings.perms.unhide_done"))
       },
     })
   }
 
   // 用可视化目录选择器直接指定要隐藏的文件夹，不必先回到文件页右键
   const hidePath = async (p: string) => {
-    if (!p) { toast.error("不能隐藏根目录"); return }
+    if (!p) { toast.error(t("ui.settings.perms.cannot_hide_root")); return }
     try {
       await api.post("/fs/guest-visibility", { path: p, hidden: true })
-      toast.success(`已对访客隐藏 /${p}`)
+      toast.success(t("ui.settings.perms.hidden_done", { path: p }))
       load()
     } catch (e) { toast.error((e as Error).message) }
   }
 
-  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   const m = config.memberPerms
   const g = config.guestPerms
@@ -677,81 +689,81 @@ function PermsSection() {
   return (
     <div className="edge-highlight rounded-xl border border-border bg-card p-5">
       {/* ===== 上传大小限制 ===== */}
-      <h3 className="mb-3 text-sm font-medium">上传大小限制（单文件 MB）</h3>
+      <h3 className="mb-3 text-sm font-medium">{t("ui.settings.perms.upload_limit_title")}</h3>
       <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:gap-4">
         <div className="flex items-center gap-2">
-          <span className="w-24 shrink-0 text-sm text-muted-foreground">超级管理员</span>
+          <span className="w-24 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.superadmin")}</span>
           <Input className="w-24 text-right" inputMode="numeric" value={superLimit} onChange={(e) => setSuperLimit(e.target.value)} />
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-24 shrink-0 text-sm text-muted-foreground">团队成员</span>
+          <span className="w-24 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.member_role")}</span>
           <Input className="w-24 text-right" inputMode="numeric" value={memberLimit} onChange={(e) => setMemberLimit(e.target.value)} />
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
-        <Button size="sm" onClick={() => patch({ superUploadLimitMB: Number(superLimit), memberUploadLimitMB: Number(memberLimit) }, "上传限制已更新")}>保存</Button>
+        <Button size="sm" onClick={() => patch({ superUploadLimitMB: Number(superLimit), memberUploadLimitMB: Number(memberLimit) }, t("ui.settings.perms.upload_limit_updated"))}>{t("ui.common.save")}</Button>
       </div>
 
       <Separator className="mb-5" />
 
       {/* ===== ZIP 打包/解压限制 ===== */}
-      <h3 className="mb-3 text-sm font-medium">ZIP 打包 / 解压限制</h3>
+      <h3 className="mb-3 text-sm font-medium">{t("ui.settings.perms.zip_limit_title")}</h3>
       <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:flex-wrap sm:gap-4">
         <div className="flex items-center gap-2">
-          <span className="w-20 shrink-0 text-sm text-muted-foreground">最大文件数</span>
+          <span className="w-20 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.zip_max_files")}</span>
           <Input className="w-20 text-right" inputMode="numeric" value={zipMaxFiles} onChange={(e) => setZipMaxFiles(e.target.value)} />
-          <span className="text-xs text-muted-foreground">个</span>
+          <span className="text-xs text-muted-foreground">{t("ui.settings.perms.unit_items")}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-28 shrink-0 text-sm text-muted-foreground">单文件最大</span>
+          <span className="w-28 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.zip_max_single")}</span>
           <Input className="w-20 text-right" inputMode="numeric" value={zipMaxSingle} onChange={(e) => setZipMaxSingle(e.target.value)} />
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-24 shrink-0 text-sm text-muted-foreground">总大小最大</span>
+          <span className="w-24 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.zip_max_total")}</span>
           <Input className="w-20 text-right" inputMode="numeric" value={zipMaxTotal} onChange={(e) => setZipMaxTotal(e.target.value)} />
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-28 shrink-0 text-sm text-muted-foreground">解压ZIP最大</span>
+          <span className="w-28 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.zip_extract_max")}</span>
           <Input className="w-20 text-right" inputMode="numeric" value={extractMax} onChange={(e) => setExtractMax(e.target.value)} />
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
-        <Button size="sm" onClick={() => patch({ zipMaxFiles: Number(zipMaxFiles), zipMaxSingleMB: Number(zipMaxSingle), zipMaxTotalMB: Number(zipMaxTotal), extractMaxZipMB: Number(extractMax) }, "ZIP 限制已更新")}>保存</Button>
+        <Button size="sm" onClick={() => patch({ zipMaxFiles: Number(zipMaxFiles), zipMaxSingleMB: Number(zipMaxSingle), zipMaxTotalMB: Number(zipMaxTotal), extractMaxZipMB: Number(extractMax) }, t("ui.settings.perms.zip_limit_updated"))}>{t("ui.common.save")}</Button>
       </div>
 
       <Separator className="mb-5" />
 
       {/* ===== 链接下载工具（按 URL 抓取）===== */}
-      <h3 className="mb-3 text-sm font-medium">链接下载工具限制（单个文件 MB）</h3>
+      <h3 className="mb-3 text-sm font-medium">{t("ui.settings.perms.url_download_limit_title")}</h3>
       <div className="mb-4 grid gap-2 sm:flex sm:items-end sm:gap-4">
         <div className="flex items-center gap-2">
-          <span className="w-28 shrink-0 text-sm text-muted-foreground">单个文件最大</span>
+          <span className="w-28 shrink-0 text-sm text-muted-foreground">{t("ui.settings.perms.url_download_max")}</span>
           <Input className="w-24 text-right" inputMode="numeric" value={downloadMax} onChange={(e) => setDownloadMax(e.target.value)} />
           <span className="text-xs text-muted-foreground">MB</span>
         </div>
-        <Button size="sm" onClick={() => patch({ downloadUrlMaxMB: Number(downloadMax) }, "下载限制已更新")}>保存</Button>
+        <Button size="sm" onClick={() => patch({ downloadUrlMaxMB: Number(downloadMax) }, t("ui.settings.perms.download_limit_updated"))}>{t("ui.common.save")}</Button>
       </div>
 
       <Separator className="mb-5" />
 
       {/* ===== 团队成员权限 ===== */}
-      <h3 className="mb-4 text-sm font-medium">团队成员权限</h3>
+      <h3 className="mb-4 text-sm font-medium">{t("ui.settings.perms.member_perms_title")}</h3>
 
       {/* 文件操作（主开关 + 子项） */}
       <div className="mb-4">
         <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
-          <span className="text-sm font-medium">文件操作</span>
+          <span className="text-sm font-medium">{t("ui.settings.perms.file_write_title")}</span>
           <Switch checked={fw} onCheckedChange={(v) => patch({ memberPerms: { fileWrite: !!v } })} />
         </div>
         <div className={cn("mt-1 ml-1 grid gap-px sm:grid-cols-2", !fw && "pointer-events-none opacity-30")}>
-          {permItem("上传文件", fw && m.upload, (v) => patch({ memberPerms: { upload: !!v } }))}
-          {permItem("上传文件夹", fw && m.uploadFolders, (v) => patch({ memberPerms: { uploadFolders: !!v } }))}
-          {permItem("新建文件夹", fw && m.mkdir, (v) => patch({ memberPerms: { mkdir: !!v } }))}
-          {permItem("复制", fw && m.copy, (v) => patch({ memberPerms: { copy: !!v } }))}
-          {permItem("移动", fw && m.move, (v) => patch({ memberPerms: { move: !!v } }))}
-          {permItem("重命名", fw && m.rename, (v) => patch({ memberPerms: { rename: !!v } }))}
-          {permItem("删除", fw && m.delete, (v) => patch({ memberPerms: { delete: !!v } }))}
+          {permItem(t("ui.settings.perms.upload_file"), fw && m.upload, (v) => patch({ memberPerms: { upload: !!v } }))}
+          {permItem(t("ui.settings.perms.upload_folder"), fw && m.uploadFolders, (v) => patch({ memberPerms: { uploadFolders: !!v } }))}
+          {permItem(t("ui.settings.perms.mkdir"), fw && m.mkdir, (v) => patch({ memberPerms: { mkdir: !!v } }))}
+          {permItem(t("ui.common.copy"), fw && m.copy, (v) => patch({ memberPerms: { copy: !!v } }))}
+          {permItem(t("ui.settings.perms.move"), fw && m.move, (v) => patch({ memberPerms: { move: !!v } }))}
+          {permItem(t("ui.common.rename"), fw && m.rename, (v) => patch({ memberPerms: { rename: !!v } }))}
+          {permItem(t("ui.common.delete"), fw && m.delete, (v) => patch({ memberPerms: { delete: !!v } }))}
         </div>
       </div>
 
@@ -759,62 +771,62 @@ function PermsSection() {
 
       {/* 下载与预览 */}
       <div className="mb-4">
-        <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">下载与预览</h4>
+        <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("ui.settings.perms.download_preview_title")}</h4>
         <div className="grid gap-px sm:grid-cols-2">
-          {permItem("浏览目录", m.browse, (v) => patch({ memberPerms: { browse: !!v } }))}
-          {permItem("下载文件", m.downloadFile, (v) => patch({ memberPerms: { downloadFile: !!v } }))}
-          {permItem("下载文件夹", m.downloadFolder, (v) => patch({ memberPerms: { downloadFolder: !!v } }))}
-          {permItem("允许预览", m.preview, (v) => patch({ memberPerms: { preview: !!v } }))}
+          {permItem(t("ui.settings.perms.browse"), m.browse, (v) => patch({ memberPerms: { browse: !!v } }))}
+          {permItem(t("ui.settings.perms.download_file"), m.downloadFile, (v) => patch({ memberPerms: { downloadFile: !!v } }))}
+          {permItem(t("ui.settings.perms.download_folder"), m.downloadFolder, (v) => patch({ memberPerms: { downloadFolder: !!v } }))}
+          {permItem(t("ui.settings.perms.preview"), m.preview, (v) => patch({ memberPerms: { preview: !!v } }))}
         </div>
       </div>
 
       <Separator className="mb-4" />
 
       {/* 高级功能 */}
-      <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">高级功能</h4>
+      <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("ui.settings.perms.advanced_title")}</h4>
       <div className="mb-4 grid gap-px sm:grid-cols-2">
-        {permItem("压缩为 Zip", m.compressZip, (v) => patch({ memberPerms: { compressZip: !!v } }))}
-        {permItem("解压 Zip", m.extractZip, (v) => patch({ memberPerms: { extractZip: !!v } }))}
-        {permItem("多线程下载器", m.downloadUrl, (v) => patch({ memberPerms: { downloadUrl: !!v } }))}
-        {permItem("HTML 全屏预览", m.htmlPreview, (v) => patch({ memberPerms: { htmlPreview: !!v } }))}
-        {permItem("在线编辑文件", m.editFiles, (v) => patch({ memberPerms: { editFiles: !!v } }))}
+        {permItem(t("ui.settings.perms.compress_zip"), m.compressZip, (v) => patch({ memberPerms: { compressZip: !!v } }))}
+        {permItem(t("ui.settings.perms.extract_zip"), m.extractZip, (v) => patch({ memberPerms: { extractZip: !!v } }))}
+        {permItem(t("ui.settings.perms.download_url"), m.downloadUrl, (v) => patch({ memberPerms: { downloadUrl: !!v } }))}
+        {permItem(t("ui.settings.perms.html_preview"), m.htmlPreview, (v) => patch({ memberPerms: { htmlPreview: !!v } }))}
+        {permItem(t("ui.settings.perms.edit_files"), m.editFiles, (v) => patch({ memberPerms: { editFiles: !!v } }))}
       </div>
 
       <Separator className="mb-4" />
 
       {/* 管理与账户 */}
-      <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">管理与账户</h4>
+      <h4 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t("ui.settings.perms.manage_account_title")}</h4>
       <div className="mb-4 grid gap-px sm:grid-cols-2">
-        {permItem("管理访客可见性", m.manageGuestVisibility, (v) => patch({ memberPerms: { manageGuestVisibility: !!v } }))}
-        {permItem("修改密码", m.changePassword, (v) => patch({ memberPerms: { changePassword: !!v } }))}
+        {permItem(t("ui.settings.perms.manage_guest_visibility"), m.manageGuestVisibility, (v) => patch({ memberPerms: { manageGuestVisibility: !!v } }))}
+        {permItem(t("ui.settings.perms.change_password"), m.changePassword, (v) => patch({ memberPerms: { changePassword: !!v } }))}
       </div>
 
       <Separator className="mb-5" />
 
       {/* ===== 访客权限 ===== */}
-      <h3 className="mb-4 text-sm font-medium">访客权限</h3>
+      <h3 className="mb-4 text-sm font-medium">{t("ui.settings.perms.guest_perms_title")}</h3>
       <div className="mb-4 grid gap-px sm:grid-cols-2">
-        {permItem("浏览目录", g.browse, (v) => patch({ guestPerms: { browse: !!v } }))}
-        {permItem("下载文件", g.downloadFile, (v) => patch({ guestPerms: { downloadFile: !!v } }))}
-        {permItem("下载文件夹", g.downloadFolder, (v) => patch({ guestPerms: { downloadFolder: !!v } }))}
-        {permItem("允许预览", g.preview, (v) => patch({ guestPerms: { preview: !!v } }))}
-        {permItem("压缩为 Zip", g.compressZip, (v) => patch({ guestPerms: { compressZip: !!v } }))}
-        {permItem("解压 Zip", g.extractZip, (v) => patch({ guestPerms: { extractZip: !!v } }))}
-        {permItem("HTML 全屏预览", g.htmlPreview, (v) => patch({ guestPerms: { htmlPreview: !!v } }))}
-        {permItem("在线编辑文件", g.editFiles, (v) => patch({ guestPerms: { editFiles: !!v } }))}
+        {permItem(t("ui.settings.perms.browse"), g.browse, (v) => patch({ guestPerms: { browse: !!v } }))}
+        {permItem(t("ui.settings.perms.download_file"), g.downloadFile, (v) => patch({ guestPerms: { downloadFile: !!v } }))}
+        {permItem(t("ui.settings.perms.download_folder"), g.downloadFolder, (v) => patch({ guestPerms: { downloadFolder: !!v } }))}
+        {permItem(t("ui.settings.perms.preview"), g.preview, (v) => patch({ guestPerms: { preview: !!v } }))}
+        {permItem(t("ui.settings.perms.compress_zip"), g.compressZip, (v) => patch({ guestPerms: { compressZip: !!v } }))}
+        {permItem(t("ui.settings.perms.extract_zip"), g.extractZip, (v) => patch({ guestPerms: { extractZip: !!v } }))}
+        {permItem(t("ui.settings.perms.html_preview"), g.htmlPreview, (v) => patch({ guestPerms: { htmlPreview: !!v } }))}
+        {permItem(t("ui.settings.perms.edit_files"), g.editFiles, (v) => patch({ guestPerms: { editFiles: !!v } }))}
       </div>
 
       {/* 隐藏文件夹 */}
       <Separator className="mb-3" />
       <div>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-medium">对访客隐藏的文件夹</p>
+          <p className="text-sm font-medium">{t("ui.settings.perms.hidden_paths_title")}</p>
           <Button size="xs" variant="outline" onClick={() => setPickHidden(true)}>
-            <Icon name="folder-tree" data-icon="inline-start" /> 选择目录
+            <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.settings.perms.pick_dir")}
           </Button>
         </div>
         {config.guestHiddenPaths.length === 0 ? (
-          <p className="text-xs text-muted-foreground">暂无。用上面的「选择目录」挑选，或在文件列表中右键文件夹设为隐藏</p>
+          <p className="text-xs text-muted-foreground">{t("ui.settings.perms.hidden_paths_empty")}</p>
         ) : (
           <div className="grid gap-1.5">
             {config.guestHiddenPaths.map((p) => (
@@ -823,7 +835,7 @@ function PermsSection() {
                   <Icon name="eye-off" className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate">/{p}</span>
                 </span>
-                <Button size="xs" variant="ghost" className="shrink-0" onClick={() => unhide(p)}>恢复可见</Button>
+                <Button size="xs" variant="ghost" className="shrink-0" onClick={() => unhide(p)}>{t("ui.settings.perms.unhide_confirm_action")}</Button>
               </div>
             ))}
           </div>
@@ -846,6 +858,7 @@ function permItem(label: string, checked: boolean, onChange: (v: boolean) => voi
 
 /* ==================== 安全 ==================== */
 function SecuritySection() {
+  const t = useT()
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [status, setStatus] = React.useState<ServerStatus | null>(null)
   const [ratePerMin, setRatePerMin] = React.useState("")
@@ -871,97 +884,95 @@ function SecuritySection() {
     } catch (e) { toast.error((e as Error).message) }
   }
 
-  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   const trustProxy = status?.trustProxy
   const ipMode = trustProxy === undefined
-    ? "未知"
+    ? t("ui.common.unknown")
     : trustProxy === false
-      ? "直连（不信任代理头）"
-      : `信任代理头 ${Array.isArray(trustProxy) ? trustProxy.join(", ") : String(trustProxy)}`
+      ? t("ui.settings.security.ip_mode_direct")
+      : t("ui.settings.security.ip_mode_trust", { value: Array.isArray(trustProxy) ? trustProxy.join(", ") : String(trustProxy) })
 
   return (
     <div className="grid gap-5">
       {/* 接口限流 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-5">
-        <h3 className="mb-1 text-sm font-medium">接口限流</h3>
+        <h3 className="mb-1 text-sm font-medium">{t("ui.settings.security.rate_limit_title")}</h3>
         <p className="mb-4 text-xs text-muted-foreground">
-          限制单个 IP 每分钟可执行的打包、解压、搜索、查看详情、链接下载次数，防止被刷满 CPU 与磁盘。普通浏览目录与单文件下载不受影响。
+          {t("ui.settings.security.rate_limit_desc")}
         </p>
         <div className="mb-4 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
-          <span className="text-sm font-medium">开启限流</span>
+          <span className="text-sm font-medium">{t("ui.settings.security.rate_limit_enable")}</span>
           <Switch checked={config.rateLimitEnabled} onCheckedChange={(v) => patch({ rateLimitEnabled: !!v })} />
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex items-center gap-2">
-            <span className="w-24 shrink-0 text-sm text-muted-foreground">每分钟上限</span>
+            <span className="w-24 shrink-0 text-sm text-muted-foreground">{t("ui.settings.security.rate_limit_per_min")}</span>
             <Input className="w-24 text-right" inputMode="numeric" value={ratePerMin} onChange={(e) => setRatePerMin(e.target.value)} />
-            <span className="text-xs text-muted-foreground">次</span>
+            <span className="text-xs text-muted-foreground">{t("ui.settings.security.unit_times")}</span>
           </div>
-          <Button size="sm" onClick={() => patch({ rateLimitPerMin: Number(ratePerMin) }, "限流设置已更新")}>保存</Button>
+          <Button size="sm" onClick={() => patch({ rateLimitPerMin: Number(ratePerMin) }, t("ui.settings.security.rate_limit_updated"))}>{t("ui.common.save")}</Button>
         </div>
       </div>
 
       {/* 解压保护 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-5">
-        <h3 className="mb-1 text-sm font-medium">解压保护</h3>
+        <h3 className="mb-1 text-sm font-medium">{t("ui.settings.security.extract_protection_title")}</h3>
         <p className="mb-4 text-xs text-muted-foreground">
-          限制 ZIP 解压后的总大小；超出时会中止解压并清理已写出的内容，避免用小压缩包占满磁盘。
+          {t("ui.settings.security.extract_protection_desc")}
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex items-center gap-2">
-            <span className="w-24 shrink-0 text-sm text-muted-foreground">解压总量最大</span>
+            <span className="w-24 shrink-0 text-sm text-muted-foreground">{t("ui.settings.security.extract_max_total")}</span>
             <Input className="w-24 text-right" inputMode="numeric" value={extractTotal} onChange={(e) => setExtractTotal(e.target.value)} />
             <span className="text-xs text-muted-foreground">MB</span>
           </div>
-          <Button size="sm" onClick={() => patch({ extractMaxTotalMB: Number(extractTotal) }, "解压上限已更新")}>保存</Button>
+          <Button size="sm" onClick={() => patch({ extractMaxTotalMB: Number(extractTotal) }, t("ui.settings.security.extract_limit_updated"))}>{t("ui.common.save")}</Button>
         </div>
       </div>
 
       {/* 其他开关 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-5">
-        <h3 className="mb-4 text-sm font-medium">其他安全开关</h3>
+        <h3 className="mb-4 text-sm font-medium">{t("ui.settings.security.other_switches_title")}</h3>
         <div className="grid gap-2">
           <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium">允许复制只读映射目录的内容</p>
-              <p className="text-xs text-muted-foreground">关闭时，外部映射目录（只读虚拟文件夹）的内容不能复制或压缩进网盘目录</p>
+              <p className="text-sm font-medium">{t("ui.settings.security.soft_dir_allow_copy_out")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.security.soft_dir_allow_copy_out_hint")}</p>
             </div>
             <Switch checked={config.softDirAllowCopyOut} onCheckedChange={(v) => patch({ softDirAllowCopyOut: !!v })} />
           </div>
           <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium">作业进度仅创建者可见</p>
-              <p className="text-xs text-muted-foreground">关闭后，团队成员之间可以互相查看压缩 / 解压 / 链接下载任务的文件名与进度</p>
+              <p className="text-sm font-medium">{t("ui.settings.security.job_status_owner_only")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.security.job_status_owner_only_hint")}</p>
             </div>
             <Switch checked={config.jobStatusOwnerOnly} onCheckedChange={(v) => patch({ jobStatusOwnerOnly: !!v })} />
           </div>
           <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium">链接下载允许访问内网地址</p>
-              <p className="text-xs text-muted-foreground">关闭时禁止用链接下载工具抓取内网 / 回环 / 云元数据地址（防 SSRF）</p>
+              <p className="text-sm font-medium">{t("ui.settings.security.download_url_allow_private")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.security.download_url_allow_private_hint")}</p>
             </div>
             <Switch checked={config.downloadUrlAllowPrivate} onCheckedChange={(v) => patch({ downloadUrlAllowPrivate: !!v })} />
           </div>
           <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 px-3 py-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium">写操作校验请求来源</p>
-              <p className="text-xs text-muted-foreground">拒绝来自其他站点的写请求（校验 Origin / Sec-Fetch-Site）。若反向代理改写了 Host 头造成误拦，可在此关闭</p>
+              <p className="text-sm font-medium">{t("ui.settings.security.csrf_origin_check")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.security.csrf_origin_check_hint")}</p>
             </div>
             <Switch checked={config.csrfOriginCheck} onCheckedChange={(v) => patch({ csrfOriginCheck: !!v })} />
           </div>
         </div>
       </div>
       <div className="edge-highlight rounded-xl border border-border bg-card p-5">
-        <h3 className="mb-3 text-sm font-medium">客户端 IP 解析</h3>
+        <h3 className="mb-3 text-sm font-medium">{t("ui.settings.security.client_ip_title")}</h3>
         <div className="flex items-center gap-2">
           <Badge variant={trustProxy === undefined || trustProxy === false ? "secondary" : "default"} className="shrink-0 text-[10px]">{ipMode}</Badge>
-          <span className="text-xs text-muted-foreground">用于日志记录与按 IP 限速</span>
+          <span className="text-xs text-muted-foreground">{t("ui.settings.security.client_ip_badge_hint")}</span>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          由服务端 .env 中的 <code className="font-mono">TRUST_PROXY</code> 决定，修改后需重启服务。
-          只通过隧道 / 反向代理访问时设为 <code className="font-mono">loopback</code>，日志与限流才会使用真实客户端 IP；
-          若服务同时能被直接访问，请保持关闭（默认），否则客户端可伪造该标头绕过限速。
+          {t("ui.settings.security.trust_proxy_desc_a")}<code className="font-mono">TRUST_PROXY</code>{t("ui.settings.security.trust_proxy_desc_b")}<code className="font-mono">loopback</code>{t("ui.settings.security.trust_proxy_desc_c")}
         </p>
       </div>
     </div>
@@ -970,6 +981,7 @@ function SecuritySection() {
 
 /* ==================== 公网 ==================== */
 function TunnelSection() {
+  const t = useT()
   const [config, setConfig] = React.useState<{ enabled: boolean; mode: string; customHost: string } | null>(null)
   const [status, setStatus] = React.useState<TunnelStatus | null>(null)
   const [busy, setBusy] = React.useState(false)
@@ -990,7 +1002,7 @@ function TunnelSection() {
         setStatus(d.status)
       }).catch((e) => toast.error((e as Error).message))
   }, [])
-  React.useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [load])
+  React.useEffect(() => { load(); const timer = setInterval(load, 5000); return () => clearInterval(timer) }, [load])
 
   const apply = async (next: { enabled: boolean; mode: string; customHost: string }) => {
     setBusy(true)
@@ -1000,12 +1012,12 @@ function TunnelSection() {
       setStatus(d.status)
       if (next.enabled) {
         if (d.status.running) {
-          toast.success(d.status.url ? "隧道已连接" : "隧道已启动，等待连接…")
+          toast.success(d.status.url ? t("ui.settings.tunnel.connected") : t("ui.settings.tunnel.starting"))
         } else {
-          toast.warning("隧道未能启动，请查看下方日志")
+          toast.warning(t("ui.settings.tunnel.start_failed"))
         }
       } else {
-        toast.success("已关闭")
+        toast.success(t("ui.settings.tunnel.disabled_toast"))
       }
     }
     catch (e) { toast.error((e as Error).message) }
@@ -1021,40 +1033,40 @@ function TunnelSection() {
     if (cur.enabled) apply(next)
   }, [])
 
-  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       {/* 配置区：行内 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-4">
-        <h3 className="mb-3 text-sm font-medium">SSH 反向隧道</h3>
-        <p className="mb-4 text-xs text-muted-foreground">通过 ssh -R 将本服务暴露到公网</p>
+        <h3 className="mb-3 text-sm font-medium">{t("ui.settings.tunnel.title")}</h3>
+        <p className="mb-4 text-xs text-muted-foreground">{t("ui.settings.tunnel.desc")}</p>
         <div className="grid gap-4">
           <div className="flex items-center justify-between">
-            <span className="text-sm">启用公网访问</span>
+            <span className="text-sm">{t("ui.settings.tunnel.enable_label")}</span>
             <Switch checked={config.enabled} disabled={busy} onCheckedChange={(v) => apply({ ...config, enabled: !!v })} />
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">隧道服务</span>
+            <span className="text-sm">{t("ui.settings.tunnel.service_label")}</span>
             <Select value={config.mode} onValueChange={handleModeChange}>
-              <SelectTrigger className="w-40"><SelectValue>{(v) => (v === "localhostrun" ? "localhost.run" : v === "serveo" ? "serveo.net" : v === "custom" ? "自定义 SSH" : "pinggy.io")}</SelectValue></SelectTrigger>
+              <SelectTrigger className="w-40"><SelectValue>{(v) => (v === "localhostrun" ? "localhost.run" : v === "serveo" ? "serveo.net" : v === "custom" ? t("ui.settings.tunnel.mode_custom_ssh") : "pinggy.io")}</SelectValue></SelectTrigger>
               <SelectContent>
-                <SelectItem value="pinggy">pinggy.io（推荐）</SelectItem>
+                <SelectItem value="pinggy">{t("ui.settings.tunnel.mode_pinggy")}</SelectItem>
                 <SelectItem value="localhostrun">localhost.run</SelectItem>
                 <SelectItem value="serveo">serveo.net</SelectItem>
-                <SelectItem value="custom">自定义 SSH</SelectItem>
+                <SelectItem value="custom">{t("ui.settings.tunnel.mode_custom_ssh")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           {config.mode === "custom" && (
             <div className="grid gap-2">
-              <Label htmlFor="custom-host">SSH 目标（user@host 或 user@host:端口）</Label>
+              <Label htmlFor="custom-host">{t("ui.settings.tunnel.custom_host_label")}</Label>
               <Input id="custom-host" placeholder="user@example.com:22" value={config.customHost} onChange={(e) => setConfig({ ...config, customHost: e.target.value })} />
-              <p className="text-xs text-muted-foreground">需要本机已配置免密 SSH 密钥</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.tunnel.custom_host_hint")}</p>
             </div>
           )}
           {config.enabled && (
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => apply(config)}><Icon name="rotate-cw" /> 应用并重连</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => apply(config)}><Icon name="rotate-cw" /> {t("ui.settings.tunnel.apply_reconnect")}</Button>
           )}
         </div>
       </div>
@@ -1062,15 +1074,15 @@ function TunnelSection() {
       {/* 状态区：输出 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-medium">
-          运行状态
-          <Badge variant={status?.running ? "default" : "secondary"}>{status?.running ? "运行中" : "未运行"}</Badge>
+          {t("ui.settings.tunnel.runtime_status")}
+          <Badge variant={status?.running ? "default" : "secondary"}>{status?.running ? t("ui.settings.tunnel.running") : t("ui.settings.tunnel.not_running")}</Badge>
         </h3>
         {status?.url && (
-          <div className="mb-3"><Label>公网地址</Label><Input readOnly value={status.url} className="mt-1 h-7 font-mono text-xs" onFocus={(e) => e.target.select()} /></div>
+          <div className="mb-3"><Label>{t("ui.settings.tunnel.public_url")}</Label><Input readOnly value={status.url} className="mt-1 h-7 font-mono text-xs" onFocus={(e) => e.target.select()} /></div>
         )}
-        <p className="mb-2 text-xs text-muted-foreground">{status?.restarts ? `已自动重连 ${status.restarts} 次` : "隧道日志"}</p>
+        <p className="mb-2 text-xs text-muted-foreground">{status?.restarts ? t("ui.settings.tunnel.reconnect_count", { count: status.restarts }) : t("ui.settings.tunnel.log_placeholder")}</p>
         <ScrollArea className="h-56 rounded-md border border-border bg-muted/30 p-2">
-          <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">{status?.output?.length ? status.output.join("\n") : "（暂无输出）"}</pre>
+          <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">{status?.output?.length ? status.output.join("\n") : t("ui.settings.tunnel.no_output")}</pre>
         </ScrollArea>
       </div>
     </div>

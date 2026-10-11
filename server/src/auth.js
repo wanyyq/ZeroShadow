@@ -58,7 +58,7 @@ export function csrfGuard(req, res, next) {
 
   // 第一道：必须带自定义头（表单/简单请求无法携带）
   if (req.headers["x-requested-with"] !== "XMLHttpRequest") {
-    return res.status(403).json({ error: "请求校验失败" })
+    return res.status(403).json({ error: "请求校验失败", errorKey: "api.auth.csrf_failed" })
   }
 
   // 第二道：现代浏览器会附带来源信息，若存在则必须指回本站。
@@ -66,7 +66,7 @@ export function csrfGuard(req, res, next) {
   if (getConfig().csrfOriginCheck !== false) {
     const fetchSite = req.headers["sec-fetch-site"]
     if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
-      return res.status(403).json({ error: "请求校验失败" })
+      return res.status(403).json({ error: "请求校验失败", errorKey: "api.auth.csrf_failed" })
     }
     const origin = req.headers.origin
     if (origin) {
@@ -78,7 +78,7 @@ export function csrfGuard(req, res, next) {
         originHost = null
       }
       if (!originHost || originHost !== host) {
-        return res.status(403).json({ error: "请求校验失败" })
+        return res.status(403).json({ error: "请求校验失败", errorKey: "api.auth.csrf_failed" })
       }
     }
   }
@@ -89,8 +89,10 @@ export function csrfGuard(req, res, next) {
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!roles.includes(req.auth.role)) {
-      if (req.auth.role === "guest") return res.status(401).json({ error: "请先登录" })
-      return res.status(403).json({ error: "没有权限执行此操作" })
+      if (req.auth.role === "guest") {
+        return res.status(401).json({ error: "请先登录", errorKey: "api.auth.login_required" })
+      }
+      return res.status(403).json({ error: "没有权限执行此操作", errorKey: "api.auth.forbidden" })
     }
     next()
   }
@@ -100,8 +102,10 @@ export function requirePerm(perm) {
   return (req, res, next) => {
     const perms = req.perms || effectivePerms(req.auth.role, req.group)
     if (!perms[perm]) {
-      if (req.auth.role === "guest") return res.status(401).json({ error: "请先登录" })
-      return res.status(403).json({ error: "没有权限执行此操作" })
+      if (req.auth.role === "guest") {
+        return res.status(401).json({ error: "请先登录", errorKey: "api.auth.login_required" })
+      }
+      return res.status(403).json({ error: "没有权限执行此操作", errorKey: "api.auth.forbidden" })
     }
     next()
   }

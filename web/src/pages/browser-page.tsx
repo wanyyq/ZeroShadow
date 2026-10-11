@@ -29,13 +29,12 @@ import { useOperations } from "@/state/operations"
 import { cn } from "@/lib/utils"
 import { CONFLICT_CANCELLED, detectConflicts } from "@/lib/conflict"
 import type { ConflictResolution } from "@/lib/conflict"
-
-const ROLE_LABEL: Record<string, string> = { superadmin: "超级管理员", member: "团队成员", guest: "访客" }
+import { translate, useT } from "@/lib/i18n"
 
 type DialogKind = "newFolder" | "rename" | "delete" | "details" | null
 
-function noPermToast() { toast.warning("此功能您没权限") }
-function noPermSoftToast() { toast.warning("外部映射目录仅支持只读操作") }
+function noPermToast() { toast.warning(translate("ui.common.no_permission")) }
+function noPermSoftToast() { toast.warning(translate("ui.browser.soft_readonly_only")) }
 
 /**
  * 复制纯文本并给出反馈。
@@ -46,12 +45,12 @@ function noPermSoftToast() { toast.warning("外部映射目录仅支持只读操
 function copyText(text: string, okMsg: string) {
   const clipboard = navigator.clipboard
   if (!clipboard?.writeText) {
-    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    toast.error(translate("ui.common.copy_unsupported"))
     return
   }
   void clipboard.writeText(text).then(
     () => toast.success(okMsg),
-    () => toast.error("复制失败，请手动选择文本")
+    () => toast.error(translate("ui.common.copy_failed"))
   )
 }
 
@@ -87,6 +86,14 @@ export function BrowserPage() {
   const clipboard = useClipboard()
   const uploads = useUploads()
   const operations = useOperations()
+  const t = useT()
+
+  /** 底部状态栏里的角色标签（role 是代码值，只用来查键） */
+  const roleLabel = (role: string) => {
+    if (role === "superadmin") return t("ui.browser.role.superadmin")
+    if (role === "member") return t("ui.browser.role.member")
+    return t("ui.browser.role.guest")
+  }
 
   const [entries, setEntries] = React.useState<Entry[]>([])
   const [results, setResults] = React.useState<SearchResult[]>([])
@@ -187,12 +194,12 @@ export function BrowserPage() {
   const displayName = (entry: Entry) => entry.shortcut?.displayName || entry.name
   const handleShortcut = (entry: Entry) => {
     if (!entry.shortcut) {
-      toast.error("快捷方式数据损坏")
+      toast.error(t("ui.browser.shortcut_corrupt"))
       return false
     }
     const { targetType, targetUrl } = entry.shortcut
     if (!targetUrl) {
-      toast.error("快捷方式目标为空")
+      toast.error(t("ui.browser.shortcut_target_empty"))
       return false
     }
     if (targetType === "path" || targetType === "soft_path") {
@@ -202,7 +209,7 @@ export function BrowserPage() {
         navigate(`/preview?path=${encodeURIComponent(targetUrl)}`)
       } else {
         triggerDownload(downloadUrl(targetUrl)).catch(() => {
-          toast.error("目标文件不存在或无权访问")
+          toast.error(t("ui.browser.target_missing_or_denied"))
         })
       }
     } else {
@@ -275,15 +282,19 @@ export function BrowserPage() {
       triggerDownload(downloadUrl(joinPath(path, targets[0].name))).catch(() => {})
     } else if (targets.length) {
       if (!me.perms.downloadFolder) return noPermToast()
-      triggerDownload(zipUrl(targets.map((t) => joinPath(path, t.name)))).catch(() => {})
+      triggerDownload(zipUrl(targets.map((tgt) => joinPath(path, tgt.name)))).catch(() => {})
     }
   }
 
   const doClipboard = (mode: "copy" | "cut", targets: Entry[]) => {
     if (!me.perms[mode === "copy" ? "copy" : "move"]) return noPermToast()
     if (mode === "cut" && anySoftReadOnly(targets)) return noPermSoftToast()
-    clipboard.set(mode, targets.map((t) => ({ path: joinPath(path, t.name), name: t.name, type: t.type })))
-    toast.info(`已${mode === "copy" ? "复制" : "剪切"} ${targets.length} 项`)
+    clipboard.set(mode, targets.map((tgt) => ({ path: joinPath(path, tgt.name), name: tgt.name, type: tgt.type })))
+    toast.info(
+      mode === "copy"
+        ? t("ui.browser.copied_count", { n: targets.length })
+        : t("ui.browser.cut_count", { n: targets.length })
+    )
   }
 
   const pastingRef = React.useRef(false)
@@ -339,7 +350,7 @@ export function BrowserPage() {
       if (promises.length === 0) { release(); return }
       try {
         await Promise.all(promises)
-        toast.success(clipboard.mode === "copy" ? "复制完成" : "移动完成")
+        toast.success(clipboard.mode === "copy" ? t("ui.browser.copy_done") : t("ui.browser.move_done"))
         if (clipboard.mode === "cut") clipboard.clear()
       } catch (err) {
         toast.error((err as Error).message)
@@ -356,13 +367,13 @@ export function BrowserPage() {
     if (!me.perms.manageGuestVisibility) return noPermToast()
     try {
       await api.post("/fs/guest-visibility", { path: joinPath(path, entry.name), hidden })
-      toast.success(hidden ? "已对访客隐藏" : "已对访客可见"); refresh()
+      toast.success(hidden ? t("ui.browser.hidden_to_guest") : t("ui.browser.visible_to_guest")); refresh()
     } catch (err) { toast.error((err as Error).message) }
   }
 
   const doCompress = (targets: Entry[]) => {
     if (!me.perms.compressZip) return noPermToast()
-    operations.startCompress(targets.map((t) => joinPath(path, t.name)))
+    operations.startCompress(targets.map((tgt) => joinPath(path, tgt.name)))
   }
 
   const doExtract = (entry: Entry) => {
@@ -524,7 +535,7 @@ export function BrowserPage() {
     // 否则拖进去会静默上传到 path（而 path 在搜索模式下是空的/上一次的目录），
     // 用户完全不知道文件去了哪里。
     if (query) {
-      toast.warning("搜索结果里不能上传，请先点「清除」回到目录浏览")
+      toast.warning(t("ui.browser.upload_blocked_in_search"))
       return
     }
     if (sorted.length > 0 && sorted.every((en) => en.softReadOnly)) return noPermSoftToast()
@@ -629,17 +640,17 @@ export function BrowserPage() {
     const items: React.ReactNode[] = []
 
     if (entry.type === "dir" && single) {
-      items.push(<ContextMenuItem key="open" onClick={() => openEntry(entry)}><Icon name="folder-open" /> 打开</ContextMenuItem>)
+      items.push(<ContextMenuItem key="open" onClick={() => openEntry(entry)}><Icon name="folder-open" /> {t("ui.common.open")}</ContextMenuItem>)
     }
     items.push(
       <ContextMenuItem key="download" disabled={single && entry.type === "file" ? !me.perms.downloadFile : !me.perms.downloadFolder} onClick={() => { doDownload(targets) }}>
-        <Icon name="download" /> 下载{!single || entry.type === "dir" ? " (Zip)" : ""}
+        <Icon name="download" /> {t("ui.common.download")}{!single || entry.type === "dir" ? " (Zip)" : ""}
       </ContextMenuItem>
     )
     if (single && entry.type === "file" && previewType(entry.name)) {
       items.push(
         <ContextMenuItem key="preview" disabled={!me.perms.preview} onClick={() => { if (!me.perms.preview) noPermToast(); else handleOpenFile(entry) }}>
-          <Icon name="eye" /> 预览
+          <Icon name="eye" /> {t("ui.common.preview")}
         </ContextMenuItem>
       )
     }
@@ -647,49 +658,49 @@ export function BrowserPage() {
     if (single && entry.type === "file" && (entryExt === "html" || entryExt === "htm")) {
       items.push(
         <ContextMenuItem key="htmlpreview" disabled={!me.perms.htmlPreview} onClick={() => { if (!me.perms.htmlPreview) noPermToast(); else doHtmlPreview(entry) }}>
-          <Icon name="globe" /> HTML 预览
+          <Icon name="globe" /> {t("ui.browser.html_preview")}
         </ContextMenuItem>
       )
     }
     if (single && entry.type === "file" && EDITABLE.includes(entryExt)) {
       items.push(
         <ContextMenuItem key="edit" disabled={!me.perms.editFiles || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
-          <Icon name="pencil-line" /> 在线编辑
+          <Icon name="pencil-line" /> {t("ui.browser.edit_online")}
         </ContextMenuItem>
       )
     }
     if (single && entry.type === "file" && entry.name.toLowerCase().endsWith(".zip")) {
       items.push(
         <ContextMenuItem key="extract" disabled={!me.perms.extractZip || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
-          <Icon name="folder-open" /> 解压到当前目录
+          <Icon name="folder-open" /> {t("ui.browser.extract_here")}
         </ContextMenuItem>
       )
     }
     if (single && entry.type === "dir") {
       items.push(
         <ContextMenuItem key="compressDir" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress([entry]) }}>
-          <Icon name="folder-archive" /> 压缩为 Zip
+          <Icon name="folder-archive" /> {t("ui.browser.compress_zip")}
         </ContextMenuItem>
       )
     }
     if (!single) {
       items.push(
         <ContextMenuItem key="compress" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress(targets) }}>
-          <Icon name="folder-archive" /> 压缩所选为 Zip
+          <Icon name="folder-archive" /> {t("ui.browser.compress_selected_zip")}
         </ContextMenuItem>
       )
     }
     if (single && entry.type === "shortcut") {
       items.push(
         <ContextMenuItem key="editShortcut" disabled={entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else { setShortcutEntry(entry); setShortcutOpen(true) } }}>
-          <Icon name="pencil-line" /> 编辑快捷方式
+          <Icon name="pencil-line" /> {t("ui.browser.edit_shortcut")}
         </ContextMenuItem>
       )
     }
     if (single && entry.type !== "shortcut") {
       items.push(
         <ContextMenuItem key="createShortcut" onClick={() => { setShortcutEntry(entry); setShortcutOpen(true) }}>
-          <Icon name="link" /> 创建快捷方式
+          <Icon name="link" /> {t("ui.browser.create_shortcut")}
         </ContextMenuItem>
       )
     }
@@ -697,25 +708,25 @@ export function BrowserPage() {
     if (entry.type === "file" && single) {
       items.push(
         <ContextMenuItem key="openFile" onClick={() => handleOpenFile(entry)}>
-          <Icon name="external-link" /> 打开
+          <Icon name="external-link" /> {t("ui.common.open")}
         </ContextMenuItem>
       )
     }
     items.push(
       <ContextMenuSub key="copyAs">
         <ContextMenuSubTrigger>
-          <Icon name="clipboard-copy" /> 复制…
+          <Icon name="clipboard-copy" /> {t("ui.browser.copy_submenu")}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
-          <ContextMenuItem onClick={() => copyText(targets.map((t) => displayName(t)).join("\n"), "已复制名称")}>
-            复制名称
+          <ContextMenuItem onClick={() => copyText(targets.map((tgt) => displayName(tgt)).join("\n"), t("ui.browser.copied_name"))}>
+            {t("ui.common.copy_name")}
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => copyText(targets.map((t) => joinPath(path, t.name)).join("\n"), "已复制相对路径")}>
-            复制相对路径
+          <ContextMenuItem onClick={() => copyText(targets.map((tgt) => joinPath(path, tgt.name)).join("\n"), t("ui.browser.copied_relative_path"))}>
+            {t("ui.browser.copy_relative_path")}
           </ContextMenuItem>
           {single && entry.type === "file" && (
-            <ContextMenuItem onClick={() => copyText(new URL(downloadUrl(joinPath(path, entry.name)), window.location.origin).href, "已复制下载链接")}>
-              复制下载链接
+            <ContextMenuItem onClick={() => copyText(new URL(downloadUrl(joinPath(path, entry.name)), window.location.origin).href, t("ui.browser.copied_download_link"))}>
+              {t("ui.browser.copy_download_link")}
             </ContextMenuItem>
           )}
         </ContextMenuSubContent>
@@ -724,30 +735,30 @@ export function BrowserPage() {
     items.push(<ContextMenuSeparator key="s1" />)
     items.push(
       <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
-        <Icon name="copy" /> 复制
+        <Icon name="copy" /> {t("ui.common.copy")}
         <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
       </ContextMenuItem>
     )
     items.push(
       <ContextMenuItem key="cut" disabled={!me.perms.move || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.move) noPermToast(); else doClipboard("cut", targets) }}>
-        <Icon name="scissors" /> 剪切
+        <Icon name="scissors" /> {t("ui.browser.cut")}
         <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
       </ContextMenuItem>
     )
     if (me.perms.copy) {
-      items.push(<ContextMenuItem key="copyto" onClick={() => { setSelected(new Set(targets.map((t) => t.name))); setPicker("copy") }}><Icon name="copy-plus" /> 复制到…</ContextMenuItem>)
+      items.push(<ContextMenuItem key="copyto" onClick={() => { setSelected(new Set(targets.map((tgt) => tgt.name))); setPicker("copy") }}><Icon name="copy-plus" /> {t("ui.browser.copy_to")}</ContextMenuItem>)
     } else {
-      items.push(<ContextMenuItem key="copyto-d" disabled onClick={noPermToast}><Icon name="copy-plus" /> 复制到…</ContextMenuItem>)
+      items.push(<ContextMenuItem key="copyto-d" disabled onClick={noPermToast}><Icon name="copy-plus" /> {t("ui.browser.copy_to")}</ContextMenuItem>)
     }
     if (me.perms.move && !anySoftReadOnly(targets)) {
-      items.push(<ContextMenuItem key="moveto" onClick={() => { setSelected(new Set(targets.map((t) => t.name))); setPicker("move") }}><Icon name="folder-input" /> 移动到…</ContextMenuItem>)
+      items.push(<ContextMenuItem key="moveto" onClick={() => { setSelected(new Set(targets.map((tgt) => tgt.name))); setPicker("move") }}><Icon name="folder-input" /> {t("ui.browser.move_to")}</ContextMenuItem>)
     } else {
-      items.push(<ContextMenuItem key="moveto-d" disabled onClick={anySoftReadOnly(targets) ? noPermSoftToast : noPermToast}><Icon name="folder-input" /> 移动到…</ContextMenuItem>)
+      items.push(<ContextMenuItem key="moveto-d" disabled onClick={anySoftReadOnly(targets) ? noPermSoftToast : noPermToast}><Icon name="folder-input" /> {t("ui.browser.move_to")}</ContextMenuItem>)
     }
     if (single) {
       items.push(
         <ContextMenuItem key="rename" disabled={!me.perms.rename || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.rename) noPermToast(); else openDialog("rename", entry) }}>
-          <Icon name="pencil-line" /> 重命名
+          <Icon name="pencil-line" /> {t("ui.common.rename")}
           <ContextMenuShortcut>F2</ContextMenuShortcut>
         </ContextMenuItem>
       )
@@ -756,21 +767,21 @@ export function BrowserPage() {
       items.push(<ContextMenuSeparator key="s2" />)
       items.push(
         <ContextMenuItem key="hide" disabled={!me.perms.manageGuestVisibility} onClick={() => { if (!me.perms.manageGuestVisibility) noPermToast(); else doVisibility(entry, !entry.hiddenFromGuest) }}>
-          <Icon name={entry.hiddenFromGuest ? "eye" : "eye-off"} /> {entry.hiddenFromGuest ? "对访客可见" : "对访客隐藏"}
+          <Icon name={entry.hiddenFromGuest ? "eye" : "eye-off"} /> {entry.hiddenFromGuest ? t("ui.browser.make_visible_to_guest") : t("ui.browser.hide_from_guest")}
         </ContextMenuItem>
       )
     }
     if (single) {
       items.push(
         <ContextMenuItem key="details" disabled={!me.perms.details} onClick={() => { if (!me.perms.details) noPermToast(); else openDialog("details", entry) }}>
-          <Icon name="info" /> 详细信息
+          <Icon name="info" /> {t("ui.browser.details")}
         </ContextMenuItem>
       )
     }
     items.push(<ContextMenuSeparator key="s3" />)
     items.push(
-      <ContextMenuItem key="delete" variant="destructive" disabled={!me.perms.delete || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.delete) noPermToast(); else { setSelected(new Set(targets.map((t) => t.name))); openDialog("delete", entry) } }}>
-        <Icon name="trash-2" /> 删除
+      <ContextMenuItem key="delete" variant="destructive" disabled={!me.perms.delete || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.delete) noPermToast(); else { setSelected(new Set(targets.map((tgt) => tgt.name))); openDialog("delete", entry) } }}>
+        <Icon name="trash-2" /> {t("ui.common.delete")}
         <ContextMenuShortcut>Delete</ContextMenuShortcut>
       </ContextMenuItem>
     )
@@ -783,16 +794,16 @@ export function BrowserPage() {
     const canPaste = !!clipboard.mode && clipboard.items.length > 0 && !isCurrentSoft
     items.push(
       <ContextMenuItem key="upload" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else fileInputRef.current?.click() }}>
-        <Icon name="upload" /> 上传文件
+        <Icon name="upload" /> {t("ui.browser.upload_files")}
       </ContextMenuItem>,
       <ContextMenuItem key="uploadFolder" disabled={!canUpload || !me.perms.uploadFolders} onClick={() => { if (!canUpload) noPermToast(); else folderInputRef.current?.click() }}>
-        <Icon name="folder-up" /> 上传文件夹
+        <Icon name="folder-up" /> {t("ui.browser.upload_folder")}
       </ContextMenuItem>,
       <ContextMenuItem key="mkdir" disabled={!canMkdir} onClick={() => { if (!canMkdir) noPermToast(); else openDialog("newFolder") }}>
-        <Icon name="folder-plus" /> 新建文件夹
+        <Icon name="folder-plus" /> {t("ui.browser.new_folder")}
       </ContextMenuItem>,
       <ContextMenuItem key="paste" disabled={!canPaste} onClick={() => { if (!canPaste) noPermToast(); else void doPaste() }}>
-        <Icon name="clipboard-paste" /> 粘贴{clipboard.items.length ? ` ${clipboard.items.length} 项` : ""}
+        <Icon name="clipboard-paste" /> {clipboard.items.length ? t("ui.browser.paste_n_items", { n: clipboard.items.length }) : t("ui.browser.paste")}
         <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
       </ContextMenuItem>
     )
@@ -802,61 +813,61 @@ export function BrowserPage() {
         setSelected(new Set(sorted.map((e) => e.name)))
         lastAnchorRef.current = sorted.length ? sorted[sorted.length - 1].name : null
       }}>
-        <Icon name="square-check-big" /> 全选
+        <Icon name="square-check-big" /> {t("ui.common.select_all")}
         <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
       </ContextMenuItem>,
       <ContextMenuItem key="invert" disabled={!sorted.length} onClick={() => setSelected((prev) => new Set(sorted.filter((e) => !prev.has(e.name)).map((e) => e.name)))}>
-        <Icon name="square-dashed" /> 反选
+        <Icon name="square-dashed" /> {t("ui.common.invert_selection")}
       </ContextMenuItem>,
       <ContextMenuItem key="clearSel" disabled={!selected.size} onClick={() => setSelected(new Set())}>
-        <Icon name="x" /> 取消选择
+        <Icon name="x" /> {t("ui.common.deselect")}
       </ContextMenuItem>
     )
     items.push(<ContextMenuSeparator key="s2" />)
     items.push(
       <ContextMenuItem key="refresh" onClick={refresh}>
-        <Icon name="refresh-cw" /> 刷新
+        <Icon name="refresh-cw" /> {t("ui.common.refresh")}
       </ContextMenuItem>,
       <ContextMenuSub key="sort">
         <ContextMenuSubTrigger>
-          <Icon name="arrow-up-down" /> 排序方式
+          <Icon name="arrow-up-down" /> {t("ui.browser.sort_menu")}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
-          <ContextMenuItem onClick={() => settings.update({ sortBy: "name" })}>按名称</ContextMenuItem>
-          <ContextMenuItem onClick={() => settings.update({ sortBy: "size" })}>按大小</ContextMenuItem>
-          <ContextMenuItem onClick={() => settings.update({ sortBy: "mtime" })}>按修改时间</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ sortBy: "name" })}>{t("ui.browser.sort_by_name")}</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ sortBy: "size" })}>{t("ui.browser.sort_by_size")}</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ sortBy: "mtime" })}>{t("ui.browser.sort_by_mtime")}</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => settings.update({ sortDir: settings.sortDir === "asc" ? "desc" : "asc" })}>
-            {settings.sortDir === "asc" ? "改为降序" : "改为升序"}
+            {settings.sortDir === "asc" ? t("ui.browser.sort_desc") : t("ui.browser.sort_asc")}
           </ContextMenuItem>
           <ContextMenuItem onClick={() => settings.update({ foldersFirst: !settings.foldersFirst })}>
-            {settings.foldersFirst ? "停用文件夹置顶" : "启用文件夹置顶"}
+            {settings.foldersFirst ? t("ui.browser.folders_first_off") : t("ui.browser.folders_first_on")}
           </ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>,
       <ContextMenuSub key="view">
         <ContextMenuSubTrigger>
-          <Icon name="layout-grid" /> 视图
+          <Icon name="layout-grid" /> {t("ui.browser.view")}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
-          <ContextMenuItem onClick={() => settings.update({ view: "list" })}>列表</ContextMenuItem>
-          <ContextMenuItem onClick={() => settings.update({ view: "grid" })}>网格</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ view: "list" })}>{t("ui.browser.view_list")}</ContextMenuItem>
+          <ContextMenuItem onClick={() => settings.update({ view: "grid" })}>{t("ui.browser.view_grid")}</ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
     )
     items.push(<ContextMenuSeparator key="s3" />)
     items.push(
       <ContextMenuItem key="zipHere" disabled={!me.perms.downloadFolder || !path} onClick={() => { if (!me.perms.downloadFolder) noPermToast(); else triggerDownload(zipUrl([path])).catch(() => {}) }}>
-        <Icon name="folder-archive" /> 打包下载当前目录
+        <Icon name="folder-archive" /> {t("ui.browser.zip_current_dir")}
       </ContextMenuItem>,
       <ContextMenuItem key="shortcut" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else { setShortcutEntry(null); setShortcutOpen(true) } }}>
-        <Icon name="link" /> 创建快捷方式
+        <Icon name="link" /> {t("ui.browser.create_shortcut")}
       </ContextMenuItem>,
-      <ContextMenuItem key="copyPath" onClick={() => copyText(path ? `/${path}` : "/", "已复制当前路径")}>
-        <Icon name="clipboard-copy" /> 复制当前路径
+      <ContextMenuItem key="copyPath" onClick={() => copyText(path ? `/${path}` : "/", t("ui.browser.copied_current_path"))}>
+        <Icon name="clipboard-copy" /> {t("ui.browser.copy_current_path")}
       </ContextMenuItem>,
       <ContextMenuItem key="details" onClick={() => { setDialogEntry(null); setDialog("details") }}>
-        <Icon name="info" /> 此目录详情
+        <Icon name="info" /> {t("ui.browser.current_dir_details")}
       </ContextMenuItem>
     )
     return items
@@ -876,7 +887,7 @@ export function BrowserPage() {
           {kind.label}{entry.type === "file" ? ` · ${formatBytes(entry.size)}` : ""}
         </p>
         <p className="text-[10px] text-muted-foreground">{formatDate(entry.mtime)}</p>
-        {entry.hiddenFromGuest && me.role !== "guest" && <p className="text-[10px] text-muted-foreground">对访客隐藏</p>}
+        {entry.hiddenFromGuest && me.role !== "guest" && <p className="text-[10px] text-muted-foreground">{t("ui.browser.hide_from_guest")}</p>}
       </div>
     )
   }
@@ -924,7 +935,7 @@ export function BrowserPage() {
               <div className="min-w-0 flex-1"><span className="block truncate text-sm">{displayName(entry)}</span></div>
               {entry.hiddenFromGuest && me.role !== "guest" && <Icon name="eye-off" className="hidden size-3 shrink-0 text-muted-foreground sm:block" />}
               <span className="hidden w-18 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
-                {entry.type === "dir" ? "文件夹" : formatBytes(entry.size)}
+                {entry.type === "dir" ? t("ui.common.folder") : formatBytes(entry.size)}
               </span>
               <span className="hidden w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums lg:block">
                 {formatDate(entry.mtime)}
@@ -988,20 +999,20 @@ export function BrowserPage() {
           {/* 工具栏 */}
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
             <Button size="sm" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else fileInputRef.current?.click() }}>
-              <Icon name="upload" /> 上传
+              <Icon name="upload" /> {t("ui.common.upload")}
             </Button>
             <Button size="sm" variant="outline" disabled={!canUpload || !me.perms.uploadFolders} onClick={() => { if (!canUpload) noPermToast(); else folderInputRef.current?.click() }}>
-              <Icon name="folder-up" /> 上传文件夹
+              <Icon name="folder-up" /> {t("ui.browser.upload_folder")}
             </Button>
             <Button size="sm" variant="outline" disabled={!canMkdir} onClick={() => { if (!canMkdir) noPermToast(); else openDialog("newFolder") }}>
-              <Icon name="folder-plus" /> 新建文件夹
+              <Icon name="folder-plus" /> {t("ui.browser.new_folder")}
             </Button>
             {/* 桌面端搜索框 */}
             <div className="relative ml-2 hidden sm:block">
               <Icon name="search" className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={searchText}
-                placeholder="搜索文件…"
+                placeholder={t("ui.browser.search_placeholder")}
                 className="h-8 w-44 rounded-md border border-input bg-background pl-8 text-sm shadow-sm transition-all focus:w-56 hover:border-ring"
                 onChange={(e) => setSearchText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") submitSearch() }}
@@ -1009,23 +1020,23 @@ export function BrowserPage() {
             </div>
             {clipboard.mode && clipboard.items.length > 0 && !isCurrentSoft && (
               <Button size="sm" variant="secondary" onClick={doPaste}>
-                <Icon name="clipboard-paste" /> 粘贴 {clipboard.items.length} 项
+                <Icon name="clipboard-paste" /> {t("ui.browser.paste_n_items", { n: clipboard.items.length })}
               </Button>
             )}
             <div className="ml-auto flex items-center gap-1">
-              <Button size="icon-sm" variant="ghost" aria-label="刷新" onClick={refresh}><Icon name="refresh-cw" /></Button>
+              <Button size="icon-sm" variant="ghost" aria-label={t("ui.common.refresh")} onClick={refresh}><Icon name="refresh-cw" /></Button>
               <DropdownMenu>
-                <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="排序" />}><Icon name="arrow-up-down" /></DropdownMenuTrigger>
+                <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={t("ui.browser.sort_label")} />}><Icon name="arrow-up-down" /></DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {(["name", "size", "mtime"] as const).map((key) => (
                     <DropdownMenuItem key={key} onClick={() => settings.update(settings.sortBy === key ? { sortDir: settings.sortDir === "asc" ? "desc" : "asc" } : { sortBy: key, sortDir: "asc" })}>
                       <Icon name={settings.sortBy === key ? (settings.sortDir === "asc" ? "arrow-up" : "arrow-down") : "minus"} />
-                      {{ name: "按名称", size: "按大小", mtime: "按修改时间" }[key]}
+                      {t({ name: "ui.browser.sort_by_name", size: "ui.browser.sort_by_size", mtime: "ui.browser.sort_by_mtime" }[key])}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button size="icon-sm" variant="ghost" aria-label="切换视图" onClick={() => settings.update({ view: settings.view === "list" ? "grid" : "list" })}>
+              <Button size="icon-sm" variant="ghost" aria-label={t("ui.browser.toggle_view")} onClick={() => settings.update({ view: settings.view === "list" ? "grid" : "list" })}>
                 <Icon name={settings.view === "list" ? "layout-grid" : "list"} />
               </Button>
             </div>
@@ -1035,7 +1046,7 @@ export function BrowserPage() {
           {!query && (
             <div className="mb-3 flex flex-wrap items-center gap-1 text-sm">
               <button className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onClick={() => goto("")}>
-                <Icon name="house" className="size-3.5" /> 根目录
+                <Icon name="house" className="size-3.5" /> {t("ui.browser.root_dir")}
               </button>
               {crumbs.map((seg, i) => (
                 <React.Fragment key={`${seg}-${i}`}>
@@ -1053,7 +1064,7 @@ export function BrowserPage() {
           {query && (
             <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
               <Icon name="search" className="size-4" /> “{query}”（{results.length}）
-              <Button size="xs" variant="ghost" onClick={() => setParams({})}><Icon name="x" /> 清除</Button>
+              <Button size="xs" variant="ghost" onClick={() => setParams({})}><Icon name="x" /> {t("ui.common.clear")}</Button>
             </div>
           )}
 
@@ -1072,13 +1083,13 @@ export function BrowserPage() {
               >
             {dragOver && (
               <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/80">
-                <div className="flex items-center gap-2 text-sm font-medium"><Icon name="upload" className="size-5" /> 松开以上传到当前文件夹</div>
+                <div className="flex items-center gap-2 text-sm font-medium"><Icon name="upload" className="size-5" /> {t("ui.browser.drop_to_upload")}</div>
               </div>
             )}
             {loading ? (
               <div className="flex flex-1 items-center justify-center"><Spinner className="size-5" /></div>
             ) : query ? (
-              results.length === 0 ? (<EmptyState icon="search-x" title="未找到" desc="换个关键词试试" />) : (
+              results.length === 0 ? (<EmptyState icon="search-x" title={t("ui.browser.search_empty_title")} desc={t("ui.browser.search_empty_desc")} />) : (
                 <div className="flex-1 overflow-auto p-2">
                   {results.map((r) => (
                     <div key={r.path} className="flex cursor-default items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted/70"
@@ -1094,21 +1105,21 @@ export function BrowserPage() {
                       <Icon name={fileKind(r.name, r.type, r.softReadOnly).icon} className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{r.name}</p>
-                        <button className="block max-w-full truncate text-xs text-muted-foreground hover:underline" onClick={() => goto(r.parent)}>/{r.parent || "根目录"}</button>
+                        <button className="block max-w-full truncate text-xs text-muted-foreground hover:underline" onClick={() => goto(r.parent)}>/{r.parent || t("ui.browser.root_dir")}</button>
                       </div>
-                      <span className="w-18 shrink-0 text-right text-xs text-muted-foreground">{r.type === "dir" ? "文件夹" : formatBytes(r.size)}</span>
+                      <span className="w-18 shrink-0 text-right text-xs text-muted-foreground">{r.type === "dir" ? t("ui.common.folder") : formatBytes(r.size)}</span>
                     </div>
                   ))}
                 </div>
               )
             ) : sorted.length === 0 ? (
-              <EmptyState icon="folder-open" title="此文件夹为空" desc={canUpload || canMkdir ? "上传文件或新建文件夹开始使用" : "暂无可见内容"} />
+              <EmptyState icon="folder-open" title={t("ui.browser.empty_folder_title")} desc={canUpload || canMkdir ? t("ui.browser.empty_folder_desc_upload") : t("ui.browser.empty_folder_desc_none")} />
             ) : settings.view === "list" ? (
               <div className="flex flex-1 flex-col overflow-hidden p-2">
                 <div className="mb-1 flex items-center gap-3 border-b border-border px-2 pb-1.5 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1">名称</span>
-                  <span className="hidden w-18 shrink-0 text-right sm:block">大小</span>
-                  <span className="hidden w-32 shrink-0 text-right lg:block">修改时间</span>
+                  <span className="min-w-0 flex-1">{t("ui.common.name")}</span>
+                  <span className="hidden w-18 shrink-0 text-right sm:block">{t("ui.common.size")}</span>
+                  <span className="hidden w-32 shrink-0 text-right lg:block">{t("ui.browser.mtime")}</span>
                 </div>
                 <div className="flex-1 overflow-auto">{sorted.map(renderRow)}</div>
               </div>
@@ -1127,7 +1138,7 @@ export function BrowserPage() {
       {/* 底部信息 */}
       <div className="border-t border-border/30 px-3 py-2 sm:px-5">
         <div className="mx-auto w-full max-w-4xl text-center text-[11px] leading-relaxed text-muted-foreground">
-          当前为“{ROLE_LABEL[me.role]}”模式{me.role !== "superadmin" ? "，其他功能需要管理员模式" : ""}
+          {t("ui.browser.current_mode", { role: roleLabel(me.role) })}{me.role !== "superadmin" ? t("ui.browser.admin_mode_hint") : ""}
           <span className="mx-1.5 text-border">|</span>
           {/* 兼容模式是独立的静态页（public/robustness/index.html），不参与前端构建，
               所以这里用原生 <a> + 新标签页打开，而不是 react-router 的 <Link>。 */}
@@ -1136,9 +1147,9 @@ export function BrowserPage() {
             target="_blank"
             rel="noopener noreferrer"
             className="underline underline-offset-2 transition-colors hover:text-foreground"
-            title="面向 IE11 / 旧版浏览器：仅登录与基本文件操作"
+            title={t("ui.browser.compat_hint")}
           >
-            无法渲染？使用兼容模式
+            {t("ui.browser.compat_link")}
           </a>
         </div>
       </div>
@@ -1159,7 +1170,7 @@ export function BrowserPage() {
         path={path} onDone={refresh}
       />
       <DetailsDialog open={dialog === "details"} onOpenChange={(o) => !o && setDialog(null)} entryPath={dialog === "details" ? (dialogEntry ? joinPath(path, dialogEntry.name) : path) : null} />
-      <DestPickerDialog open={picker !== null} onOpenChange={(o) => !o && setPicker(null)} title={picker === "copy" ? "复制到…" : "移动到…"}
+      <DestPickerDialog open={picker !== null} onOpenChange={(o) => !o && setPicker(null)} title={picker === "copy" ? t("ui.browser.copy_to") : t("ui.browser.move_to")}
         sourcePaths={selectedEntries.map((e) => joinPath(path, e.name))} mode={picker || "copy"} onDone={refresh}
       />
       <ConflictDialog

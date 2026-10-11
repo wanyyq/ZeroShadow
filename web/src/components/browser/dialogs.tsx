@@ -19,7 +19,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Icon } from "@/components/icon"
 import { api, downloadUrl } from "@/lib/api"
 import { fileKind, formatBytes, formatDate, joinPath, previewType } from "@/lib/format"
-import type { Entry, EntryDetails, EntryStat } from "@/lib/types"
+import { translate, useT } from "@/lib/i18n"
+import type { DetailPair, Entry, EntryDetails, EntryStat } from "@/lib/types"
 import { toast } from "sonner"
 import { detectConflicts } from "@/lib/conflict"
 import { CONFLICT_CANCELLED, isCaseInsensitive } from "@/lib/conflict"
@@ -37,19 +38,20 @@ export function NewFolderDialog({
   path: string
   onDone: () => void
 }) {
-  const [name, setName] = React.useState("新建文件夹")
+  const t = useT()
+  const [name, setName] = React.useState(() => t("ui.dialogs.new_folder_title"))
   const [busy, setBusy] = React.useState(false)
 
   React.useEffect(() => {
-    if (open) setName("新建文件夹")
-  }, [open])
+    if (open) setName(t("ui.dialogs.new_folder_title"))
+  }, [open, t])
 
   const submit = async () => {
     if (!name.trim() || busy) return
     setBusy(true)
     try {
       await api.post("/fs/mkdir", { path, name: name.trim() })
-      toast.success("文件夹已创建")
+      toast.success(t("ui.dialogs.folder_created"))
       onOpenChange(false)
       onDone()
     } catch (err) {
@@ -63,10 +65,10 @@ export function NewFolderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>新建文件夹</DialogTitle>
+          <DialogTitle>{t("ui.dialogs.new_folder_title")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor="folder-name">名称</Label>
+          <Label htmlFor="folder-name">{t("ui.common.name")}</Label>
           <Input
             id="folder-name"
             value={name}
@@ -76,9 +78,9 @@ export function NewFolderDialog({
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("ui.common.cancel")}</Button>
           <Button onClick={submit} disabled={busy || !name.trim()}>
-            {busy && <Icon name="loader-2" className="animate-spin" />} 创建
+            {busy && <Icon name="loader-2" className="animate-spin" />} {t("ui.dialogs.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -99,6 +101,7 @@ export function RenameDialog({
   path: string
   onDone: () => void
 }) {
+  const t = useT()
   const [name, setName] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [conflictOpen, setConflictOpen] = React.useState(false)
@@ -132,7 +135,7 @@ export function RenameDialog({
       const conflicts = detectConflicts([newName], new Set(existingNames))
       if (conflicts.length === 0) {
         await api.post("/fs/rename", { path: joinPath(path, entry.name), newName })
-        toast.success("已重命名")
+        toast.success(t("ui.dialogs.renamed"))
         onOpenChange(false)
         setBusy(false)
         onDone()
@@ -156,12 +159,12 @@ export function RenameDialog({
             }
             if (item.action === "overwrite") {
               await api.post("/fs/rename", { path: joinPath(path, entry.name), newName, overwrite: true })
-              toast.success("已重命名（覆盖）")
+              toast.success(t("ui.dialogs.renamed_overwrite"))
               onOpenChange(false)
               onDone()
             } else if (item.action === "merge") {
               await api.post("/fs/rename", { path: joinPath(path, entry.name), newName, merge: true })
-              toast.success("已重命名（合并）")
+              toast.success(t("ui.dialogs.renamed_merge"))
               onOpenChange(false)
               onDone()
             } else if (item.action === "rename" && item.resolvedName) {
@@ -170,7 +173,7 @@ export function RenameDialog({
                 resolved = resolved + ".zeropath"
               }
               await api.post("/fs/rename", { path: joinPath(path, entry.name), newName: resolved })
-              toast.success("已重命名")
+              toast.success(t("ui.dialogs.renamed"))
               onOpenChange(false)
               onDone()
             }
@@ -191,10 +194,10 @@ export function RenameDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>重命名</DialogTitle>
+          <DialogTitle>{t("ui.common.rename")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-2">
-          <Label htmlFor="rename-input">新名称</Label>
+          <Label htmlFor="rename-input">{t("ui.dialogs.rename_new_name")}</Label>
           <Input
             id="rename-input"
             value={name}
@@ -204,9 +207,9 @@ export function RenameDialog({
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("ui.common.cancel")}</Button>
           <Button onClick={submit} disabled={busy || !name.trim()}>
-            {busy && <Icon name="loader-2" className="animate-spin" />} 确定
+            {busy && <Icon name="loader-2" className="animate-spin" />} {t("ui.common.ok")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -236,6 +239,7 @@ export function DeleteDialog({
   path: string
   onDone: () => void
 }) {
+  const t = useT()
   const [busy, setBusy] = React.useState(false)
 
   const submit = async () => {
@@ -252,18 +256,28 @@ export function DeleteDialog({
         // 回收站可用、但这些条目没能入站：服务端已经**保留原文件**并跳过删除。
         // 必须明确报错，否则用户会以为删掉了，而文件其实还在（旧实现是把它们
         // 直接彻底删除，静默销毁数据）。
-        toast.error(`${r.failed.length} 项未能删除（原文件仍保留）`, {
-          description: r.failed.map((f) => `${f.path}：${f.error}`).join("\n"),
+        toast.error(t("ui.dialogs.delete_failed_count", { count: r.failed.length }), {
+          description: r.failed
+            .map((f) => t("ui.dialogs.item_error", { path: f.path, error: f.error }))
+            .join("\n"),
         })
       } else if (r.permanentlyDeleted && r.permanentlyDeleted.length) {
         // 回收站没兜住（目录不可用等）：必须明确告知，不能让用户以为还能还原
-        toast.warning(`已删除 ${names.length} 项，其中 ${r.permanentlyDeleted.length} 项未进入回收站`, {
-          description: `以下项目已被彻底删除，无法还原：${r.permanentlyDeleted.join("、")}`,
-        })
+        toast.warning(
+          t("ui.dialogs.delete_partial_trashed", {
+            count: names.length,
+            notTrashed: r.permanentlyDeleted.length,
+          }),
+          {
+            description: t("ui.dialogs.delete_permanent_hint", {
+              names: r.permanentlyDeleted.join(t("ui.dialogs.list_separator")),
+            }),
+          }
+        )
       } else if (r.trashed > 0) {
-        toast.success(`已将 ${r.trashed} 项移入回收站`)
+        toast.success(t("ui.dialogs.delete_trashed_count", { count: r.trashed }))
       } else {
-        toast.success(`已删除 ${names.length} 项`)
+        toast.success(t("ui.dialogs.delete_count", { count: names.length }))
       }
       onOpenChange(false)
       onDone()
@@ -278,15 +292,20 @@ export function DeleteDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>确认删除</AlertDialogTitle>
+          <AlertDialogTitle>{t("ui.dialogs.delete_confirm_title")}</AlertDialogTitle>
           <AlertDialogDescription>
-            将把 {names.length === 1 ? `“${names[0]}”` : `选中的 ${names.length} 项`}
-            移入<strong>回收站</strong>，可在「设置 → 回收站」里还原（管理员操作）。
-            超过保留期或被清空后将无法恢复。
+            {t("ui.dialogs.delete_confirm_lead", {
+              target:
+                names.length === 1
+                  ? t("ui.dialogs.delete_confirm_named_target", { name: names[0] })
+                  : t("ui.dialogs.delete_confirm_multi_target", { count: names.length }),
+            })}
+            <strong>{t("ui.dialogs.recycle_bin")}</strong>
+            {t("ui.dialogs.delete_confirm_hint")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive/10 text-destructive hover:bg-destructive/20"
             onClick={(e) => {
@@ -294,7 +313,7 @@ export function DeleteDialog({
               submit()
             }}
           >
-            {busy && <Icon name="loader-2" className="animate-spin" />} 删除
+            {busy && <Icon name="loader-2" className="animate-spin" />} {t("ui.common.delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -306,12 +325,12 @@ export function DeleteDialog({
 function copyLine(text: string, label: string) {
   const clipboard = navigator.clipboard
   if (!clipboard?.writeText) {
-    toast.error("当前环境不支持自动复制，请手动选择后复制")
+    toast.error(translate("ui.common.copy_unsupported"))
     return
   }
   void clipboard.writeText(text).then(
-    () => toast.success(`已复制${label}`),
-    () => toast.error("复制失败，请手动选择文本")
+    () => toast.success(translate("ui.dialogs.copied_label", { label })),
+    () => toast.error(translate("ui.common.copy_failed"))
   )
 }
 
@@ -325,6 +344,7 @@ function DetailRow({
   value: React.ReactNode
   copy?: string
 }) {
+  const t = useT()
   return (
     <div className="grid grid-cols-[7.5rem_1fr] items-start gap-2">
       <span className="pt-0.5 text-muted-foreground">{label}</span>
@@ -335,7 +355,7 @@ function DetailRow({
             size="icon-xs"
             variant="ghost"
             className="shrink-0 text-muted-foreground"
-            title="复制"
+            title={t("ui.common.copy")}
             onClick={() => copyLine(copy, label)}
           >
             <Icon name="copy" />
@@ -346,13 +366,40 @@ function DetailRow({
   )
 }
 
-/** 把 [标签, 值] 数组渲染成若干行（EXIF / 文档属性 / 媒体信息共用） */
-function DetailPairs({ pairs }: { pairs: [string, string][] }) {
+/**
+ * 服务端给的命名键 → 当前语言文案，查不到就用它同时给出的**中文原文**兜底。
+ *
+ * 服务端不持有字典（它只在数据里多带一个键），所以任何键缺失都必须退回原文，
+ * 否则界面会直接显示成一串 `meta.exif.make`。
+ */
+function localized(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  key: string | null | undefined,
+  fallback: string,
+  vars?: Record<string, string | number>
+): string {
+  if (!key) return fallback
+  const text = t(key, vars)
+  return text === key ? fallback : text
+}
+
+/** 把「字段名 / 值」列表渲染成若干行（EXIF / 文档属性 / 媒体信息共用） */
+function DetailPairs({ pairs }: { pairs: DetailPair[] }) {
+  const t = useT()
   return (
     <>
-      {pairs.map(([label, value]) => (
-        <DetailRow key={label} label={label} value={value} copy={value} />
-      ))}
+      {pairs.map((pair, i) => {
+        const value = localized(t, pair.valueKey, pair.value, pair.valueParams)
+        const text = `${value}${pair.unitKey ? " " + t(pair.unitKey) : ""}`
+        return (
+          <DetailRow
+            key={`${pair.key}-${i}`}
+            label={localized(t, pair.key, pair.label)}
+            value={text}
+            copy={text}
+          />
+        )
+      })}
     </>
   )
 }
@@ -366,6 +413,7 @@ export function DetailsDialog({
   onOpenChange: (open: boolean) => void
   entryPath: string | null
 }) {
+  const t = useT()
   const [stat, setStat] = React.useState<EntryStat | null>(null)
   const [details, setDetails] = React.useState<EntryDetails | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -408,40 +456,52 @@ export function DetailsDialog({
 
   const rows: [string, React.ReactNode][] = stat
     ? [
-        ["名称", stat.name],
-        ["类型", stat.type === "dir" ? "文件夹" : fileKind(stat.name, "file").label],
-        ["位置", `/${stat.path.split("/").slice(0, -1).join("/")}`],
-        ["大小", `${formatBytes(stat.size)}${stat.partial ? "（部分统计）" : ""}`],
+        [t("ui.common.name"), stat.name],
+        [
+          t("ui.common.type"),
+          stat.type === "dir" ? t("ui.common.folder") : fileKind(stat.name, "file").label,
+        ],
+        [t("ui.common.position"), `/${stat.path.split("/").slice(0, -1).join("/")}`],
+        [
+          t("ui.common.size"),
+          `${formatBytes(stat.size)}${stat.partial ? t("ui.dialogs.size_partial") : ""}`,
+        ],
         ...(stat.type === "dir"
-          ? ([["包含", `${stat.files ?? 0} 个文件，${stat.dirs ?? 0} 个文件夹`]] as [
-              string,
-              React.ReactNode,
-            ][])
+          ? ([
+              [
+                t("ui.dialogs.contains"),
+                t("ui.dialogs.contains_summary", {
+                  files: stat.files ?? 0,
+                  dirs: stat.dirs ?? 0,
+                }),
+              ],
+            ] as [string, React.ReactNode][])
           : []),
-        ["修改时间", formatDate(stat.mtime)],
-        ["创建时间", formatDate(stat.created)],
+        [t("ui.dialogs.mtime"), formatDate(stat.mtime)],
+        [t("ui.dialogs.created"), formatDate(stat.created)],
         ...(details
           ? ([
-              ["访问时间", formatDate(details.timestamps.atime)],
-              ["状态变更时间", formatDate(details.timestamps.ctime)],
+              [t("ui.dialogs.accessed"), formatDate(details.timestamps.atime)],
+              [t("ui.dialogs.ctime"), formatDate(details.timestamps.ctime)],
             ] as [string, React.ReactNode][])
           : []),
         [
-          "访客可见性",
+          t("ui.dialogs.guest_visibility"),
           stat.hiddenFromGuest ? (
             <Badge variant="secondary">
-              <Icon name="eye-off" className="size-3" /> 对访客隐藏
+              <Icon name="eye-off" className="size-3" /> {t("ui.dialogs.hidden_from_guest")}
             </Badge>
           ) : (
-            "可见"
+            t("ui.dialogs.visible")
           ),
         ],
         ...(details?.softReadOnly
           ? ([
               [
-                "存储位置",
+                t("ui.dialogs.storage_location"),
                 <Badge variant="secondary" key="soft">
-                  <Icon name="folder-lock" className="size-3" /> 外部映射目录（只读）
+                  <Icon name="folder-lock" className="size-3" />{" "}
+                  {t("ui.dialogs.external_mapped_readonly")}
                 </Badge>,
               ],
             ] as [string, React.ReactNode][])
@@ -451,20 +511,38 @@ export function DetailsDialog({
 
   const im = details?.image
   const tx = details?.text
+  /** 签名识别结果：优先用命名键，查不到回落到服务端给的中文原文 */
+  const magicText = details?.magic
+    ? localized(t, details.magic.labelKey, details.magic.label, details.magic.labelParams)
+    : ""
+  const line = (label: string, value: string | number) =>
+    t("ui.dialogs.summary_line", { label, value })
   const summary = () =>
     [
-      `名称：${stat?.name ?? ""}`,
-      `路径：/${stat?.path ?? ""}`,
-      `大小：${stat ? formatBytes(stat.size) : ""}`,
-      `修改时间：${stat ? formatDate(stat.mtime) : ""}`,
-      details?.magic ? `内容识别：${details.magic.label}${details.magic.mime ? ` (${details.magic.mime})` : ""}` : "",
-      details?.magic?.signature ? `签名：${details.magic.signature}` : "",
-      details?.hashes ? `MD5：${details.hashes.md5}` : "",
-      details?.hashes ? `SHA-1：${details.hashes.sha1}` : "",
-      details?.hashes ? `SHA-256：${details.hashes.sha256}` : "",
-      im ? `尺寸：${im.width} × ${im.height}` : "",
-      tx?.encodingLabel ? `文本编码：${tx.encodingLabel}${tx.bom ? "（带 BOM）" : ""}` : "",
-      tx?.lines !== undefined ? `行数：${tx.lines}` : "",
+      line(t("ui.common.name"), stat?.name ?? ""),
+      line(t("ui.common.path"), `/${stat?.path ?? ""}`),
+      line(t("ui.common.size"), stat ? formatBytes(stat.size) : ""),
+      line(t("ui.dialogs.mtime"), stat ? formatDate(stat.mtime) : ""),
+      details?.magic
+        ? line(
+            t("ui.dialogs.details_section_magic"),
+            `${magicText}${details.magic.mime ? ` (${details.magic.mime})` : ""}`
+          )
+        : "",
+      details?.magic?.signature
+        ? line(t("ui.dialogs.signature"), details.magic.signature)
+        : "",
+      details?.hashes ? line("MD5", details.hashes.md5) : "",
+      details?.hashes ? line("SHA-1", details.hashes.sha1) : "",
+      details?.hashes ? line("SHA-256", details.hashes.sha256) : "",
+      im ? line(t("ui.dialogs.dimensions"), `${im.width} × ${im.height}`) : "",
+      tx?.encodingLabel
+        ? line(
+            t("ui.dialogs.text_encoding"),
+            `${tx.encodingLabel}${tx.bom ? t("ui.dialogs.with_bom") : ""}`
+          )
+        : "",
+      tx?.lines !== undefined ? line(t("ui.dialogs.line_count"), tx.lines) : "",
     ]
       .filter(Boolean)
       .join("\n")
@@ -481,7 +559,7 @@ export function DetailsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>详细信息</DialogTitle>
+          <DialogTitle>{t("ui.dialogs.details_title")}</DialogTitle>
         </DialogHeader>
         {loading ? (
           <div className="grid gap-2">
@@ -497,7 +575,7 @@ export function DetailsDialog({
                 被裁掉且没有滚动条 */}
             <div className="grid gap-5 text-sm">
               {section(
-                "基本信息",
+                t("ui.dialogs.details_section_basic"),
                 rows.map(([label, value]) => (
                   <DetailRow key={label} label={label} value={value} />
                 ))
@@ -509,32 +587,44 @@ export function DetailsDialog({
                   {/* 扩展名可能与真实内容不符（把 .zip 改成 .png 之类），
                       这里显示的是按文件内容认出来的结果 */}
                   {section(
-                    "内容识别",
+                    t("ui.dialogs.details_section_magic"),
                     details?.magic ? (
                       <>
-                        <DetailRow label="识别结果" value={details.magic.label} copy={details.magic.label} />
+                        <DetailRow
+                          label={t("ui.dialogs.detected_result")}
+                          value={magicText}
+                          copy={magicText}
+                        />
                         {details.magic.mime ? (
-                          <DetailRow label="MIME 类型" value={details.magic.mime} copy={details.magic.mime} />
+                          <DetailRow
+                            label={t("ui.dialogs.mime_type")}
+                            value={details.magic.mime}
+                            copy={details.magic.mime}
+                          />
                         ) : null}
                         {details.magic.signature ? (
                           <DetailRow
-                            label="文件签名"
+                            label={t("ui.dialogs.file_signature")}
                             value={<code className="font-mono text-xs">{details.magic.signature}</code>}
                             copy={details.magic.signature}
                           />
                         ) : null}
                       </>
                     ) : detailError ? (
-                      <div className="text-muted-foreground">读取失败：{detailError}</div>
+                      <div className="text-muted-foreground">
+                        {t("ui.dialogs.read_failed", { error: detailError })}
+                      </div>
                     ) : (
-                      <div className="text-muted-foreground">正在读取文件内容…</div>
+                      <div className="text-muted-foreground">
+                        {t("ui.dialogs.reading_content")}
+                      </div>
                     )
                   )}
                 </>
               ) : null}
 
               {section(
-                "校验和",
+                t("ui.dialogs.details_section_checksum"),
                 <>
                   {details?.hashes ? (
                     <>
@@ -548,32 +638,57 @@ export function DetailsDialog({
                       ))}
                       {details.contentVersion ? (
                         <DetailRow
-                          label="内容版本"
+                          label={t("ui.dialogs.content_version")}
                           value={<code className="font-mono text-xs">{details.contentVersion}</code>}
                           copy={details.contentVersion}
                         />
                       ) : null}
                     </>
                   ) : details?.hashNote ? (
-                    <div className="text-muted-foreground">{details.hashNote}</div>
+                    <div className="text-muted-foreground">
+                      {localized(t, details.hashNoteKey, details.hashNote, details.hashNoteParams ?? undefined)}
+                    </div>
                   ) : detailError ? (
                     <div className="text-muted-foreground">{detailError}</div>
                   ) : (
-                    <div className="text-muted-foreground">正在计算…</div>
+                    <div className="text-muted-foreground">{t("ui.dialogs.computing")}</div>
                   )}
                 </>
               )}
 
               {section(
-                "图像",
+                t("ui.dialogs.details_section_image"),
                 im ? (
                   <>
-                    <DetailRow label="尺寸" value={`${im.width} × ${im.height} 像素`} copy={`${im.width}x${im.height}`} />
-                    {im.megapixels !== undefined ? <DetailRow label="像素量" value={`${im.megapixels} MP`} /> : null}
-                    {im.aspect ? <DetailRow label="宽高比" value={im.aspect} /> : null}
-                    {im.bitDepth !== undefined ? <DetailRow label="位深" value={`${im.bitDepth} bit`} /> : null}
-                    {im.colorType ? <DetailRow label="色彩模式" value={im.colorType} /> : null}
-                    {im.interlaced ? <DetailRow label="交错扫描" value="是" /> : null}
+                    <DetailRow
+                      label={t("ui.dialogs.dimensions")}
+                      value={t("ui.dialogs.dimensions_px", { width: im.width, height: im.height })}
+                      copy={`${im.width}x${im.height}`}
+                    />
+                    {im.megapixels !== undefined ? (
+                      <DetailRow
+                        label={t("ui.dialogs.megapixels")}
+                        value={`${im.megapixels} ${t("meta.unit.megapixel")}`}
+                      />
+                    ) : null}
+                    {im.aspect ? (
+                      <DetailRow label={t("ui.dialogs.aspect_ratio")} value={im.aspect} />
+                    ) : null}
+                    {im.bitDepth !== undefined ? (
+                      <DetailRow
+                        label={t("ui.dialogs.bit_depth")}
+                        value={`${im.bitDepth} ${t("meta.unit.bit")}`}
+                      />
+                    ) : null}
+                    {im.colorType ? (
+                      <DetailRow
+                        label={t("ui.dialogs.color_mode")}
+                        value={localized(t, im.colorTypeKey, im.colorType)}
+                      />
+                    ) : null}
+                    {im.interlaced ? (
+                      <DetailRow label={t("ui.dialogs.interlaced")} value={t("ui.common.yes")} />
+                    ) : null}
                     {details?.exif ? <DetailPairs pairs={details.exif} /> : null}
                   </>
                 ) : details?.exif ? (
@@ -581,24 +696,36 @@ export function DetailsDialog({
                 ) : null
               )}
 
-              {section("文档属性", details?.doc ? <DetailPairs pairs={details.doc} /> : null)}
-              {section("媒体信息", details?.media ? <DetailPairs pairs={details.media} /> : null)}
+              {section(
+                t("ui.dialogs.details_section_doc"),
+                details?.doc ? <DetailPairs pairs={details.doc} /> : null
+              )}
+              {section(
+                t("ui.dialogs.details_section_media"),
+                details?.media ? <DetailPairs pairs={details.media} /> : null
+              )}
 
               {section(
-                "文本信息",
+                t("ui.dialogs.details_section_text"),
                 tx?.truncated ? (
-                  <div className="text-muted-foreground">文件较大，未统计编码与行数</div>
+                  <div className="text-muted-foreground">{t("ui.dialogs.text_too_large")}</div>
                 ) : tx?.encodingLabel ? (
                   <>
                     <DetailRow
-                      label="编码"
-                      value={`${tx.encodingLabel}${tx.encodingConfident === false ? "（推测）" : ""}`}
+                      label={t("ui.dialogs.encoding")}
+                      value={`${tx.encodingLabel}${tx.encodingConfident === false ? t("ui.dialogs.encoding_guess") : ""}`}
                       copy={tx.encodingLabel}
                     />
-                    <DetailRow label="BOM" value={tx.bom ? "有" : "无"} />
-                    <DetailRow label="换行风格" value={tx.eolLabel || tx.eol || "-"} />
-                    <DetailRow label="行数" value={String(tx.lines ?? "-")} />
-                    <DetailRow label="字符数" value={String(tx.chars ?? "-")} />
+                    <DetailRow
+                      label="BOM"
+                      value={tx.bom ? t("ui.dialogs.bom_present") : t("ui.dialogs.bom_absent")}
+                    />
+                    <DetailRow
+                      label={t("ui.dialogs.eol_style")}
+                      value={localized(t, tx.eolKey, tx.eolLabel || tx.eol || "-")}
+                    />
+                    <DetailRow label={t("ui.dialogs.line_count")} value={String(tx.lines ?? "-")} />
+                    <DetailRow label={t("ui.dialogs.char_count")} value={String(tx.chars ?? "-")} />
                   </>
                 ) : null
               )}
@@ -610,9 +737,9 @@ export function DetailsDialog({
             variant="outline"
             size="sm"
             disabled={!stat}
-            onClick={() => copyLine(summary(), "全部信息")}
+            onClick={() => copyLine(summary(), t("ui.dialogs.all_info"))}
           >
-            <Icon name="clipboard-copy" /> 复制全部信息
+            <Icon name="clipboard-copy" /> {t("ui.dialogs.copy_all_info")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -633,6 +760,7 @@ export function PreviewDialog({
   name: string
   isHtml?: boolean
 }) {
+  const t = useT()
   const kind = previewType(name)
   const url = entryPath !== null ? downloadUrl(entryPath, true) : ""
   const [text, setText] = React.useState<string | null>(null)
@@ -645,13 +773,17 @@ export function PreviewDialog({
     if (open && kind === "text" && entryPath !== null) {
       fetch(url, { credentials: "same-origin" })
         .then(async (r) => {
-          if (!r.ok) throw new Error("加载失败")
+          if (!r.ok) throw new Error(t("ui.dialogs.load_failed"))
           const value = await r.text()
-          setText(value.length > 200000 ? `${value.slice(0, 200000)}\n… (内容过长已截断)` : value)
+          setText(
+            value.length > 200000
+              ? `${value.slice(0, 200000)}\n${t("ui.dialogs.preview_truncated")}`
+              : value
+          )
         })
-        .catch(() => setText("无法加载预览"))
+        .catch(() => setText(t("ui.dialogs.preview_load_failed")))
     }
-  }, [open, kind, url, entryPath])
+  }, [open, kind, url, entryPath, t])
 
   const handleWheel = (e: React.WheelEvent) => {
     if (kind !== "image") return
@@ -711,7 +843,7 @@ export function PreviewDialog({
             {isHtmlFile && <iframe src={url} title={name} className="h-full w-full" sandbox="allow-scripts" />}
             {kind === "text" && (
               <ScrollArea className="h-full w-full bg-muted/30">
-                <pre className="p-4 font-mono text-xs whitespace-pre-wrap">{text ?? "加载中…"}</pre>
+                <pre className="p-4 font-mono text-xs whitespace-pre-wrap">{text ?? t("ui.common.loading")}</pre>
               </ScrollArea>
             )}
           </div>
@@ -734,6 +866,7 @@ export function EditorDialog({
   name: string
   onDone: () => void
 }) {
+  const t = useT()
   const [content, setContent] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [dirty, setDirty] = React.useState(false)
@@ -743,17 +876,17 @@ export function EditorDialog({
       setContent("")
       setDirty(false)
       fetch(downloadUrl(entryPath, true), { credentials: "same-origin" })
-        .then(async (r) => { if (r.ok) setContent(await r.text()); else toast.error("加载失败") })
-        .catch(() => toast.error("加载失败"))
+        .then(async (r) => { if (r.ok) setContent(await r.text()); else toast.error(t("ui.dialogs.load_failed")) })
+        .catch(() => toast.error(t("ui.dialogs.load_failed")))
     }
-  }, [open, entryPath])
+  }, [open, entryPath, t])
 
   const save = async () => {
     if (!entryPath || saving) return
     setSaving(true)
     try {
       await api.post("/fs/save-file", { path: entryPath, content })
-      toast.success("已保存")
+      toast.success(t("ui.common.saved"))
       setDirty(false)
       onDone()
     } catch (err) { toast.error((err as Error).message) }
@@ -769,9 +902,9 @@ export function EditorDialog({
   }, [open, content, entryPath])
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o && dirty && !confirm("有未保存的更改，确定关闭？")) return; onOpenChange(o); if (!o) setDirty(false) }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o && dirty && !confirm(t("ui.dialogs.unsaved_confirm"))) return; onOpenChange(o); if (!o) setDirty(false) }}>
       <DialogContent className="h-[90vh] w-[90vw] max-w-none p-0" showCloseButton={false}>
-        <DialogTitle className="sr-only">编辑 {name}</DialogTitle>
+        <DialogTitle className="sr-only">{t("ui.dialogs.edit_title", { name })}</DialogTitle>
         <div className="flex h-full flex-col">
           <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
             <div className="flex items-center gap-2">
@@ -780,7 +913,7 @@ export function EditorDialog({
             </div>
             <div className="flex items-center gap-1">
               <Button size="sm" variant="outline" disabled={!dirty || saving} onClick={save}>
-                {saving && <Icon name="loader-2" className="animate-spin" />} 保存
+                {saving && <Icon name="loader-2" className="animate-spin" />} {t("ui.common.save")}
               </Button>
               <Button size="icon-xs" variant="ghost" onClick={() => onOpenChange(false)}><Icon name="x" /></Button>
             </div>
@@ -790,7 +923,7 @@ export function EditorDialog({
             onChange={(e) => { setContent(e.target.value); setDirty(true) }}
             className="flex-1 resize-none border-none bg-muted/20 p-4 font-mono text-xs leading-relaxed whitespace-pre outline-none"
             spellCheck={false}
-            placeholder="加载中…"
+            placeholder={t("ui.common.loading")}
           />
         </div>
       </DialogContent>

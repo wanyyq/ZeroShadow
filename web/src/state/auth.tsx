@@ -3,6 +3,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { api, setOnPermissionDenied } from "@/lib/api"
 import { setCaseInsensitive } from "@/lib/conflict"
+import { useT } from "@/lib/i18n"
 import type { Me } from "@/lib/types"
 
 const GUEST: Me = {
@@ -46,6 +47,7 @@ interface AuthState {
 const AuthContext = React.createContext<AuthState | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const t = useT()
   const [me, setMe] = React.useState<Me>(GUEST)
   const [ready, setReady] = React.useState(false)
 
@@ -69,11 +71,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     setOnPermissionDenied(() => {
-      toast.warning("此功能您没权限")
+      toast.warning(t("ui.common.no_permission"))
       refresh()
     })
     return () => setOnPermissionDenied(null)
-  }, [refresh])
+  }, [refresh, t])
 
   React.useEffect(() => {
     const interval = setInterval(refresh, 30000)

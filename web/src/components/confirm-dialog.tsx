@@ -2,6 +2,7 @@
 import * as React from "react"
 import { getErrorMessage } from "@/lib/api"
 import { Icon } from "@/components/icon"
+import { useT } from "@/lib/i18n"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,6 +47,7 @@ type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>
 const ConfirmContext = React.createContext<ConfirmFn | null>(null)
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
+  const t = useT()
   const [pending, setPending] = React.useState<ConfirmOptions | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [failure, setFailure] = React.useState("")
@@ -106,7 +108,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
           ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy} onClick={() => settle(false)}>
-              {pending?.cancelText || "取消"}
+              {pending?.cancelText || t("ui.common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               className={pending?.destructive === false ? undefined : "bg-destructive/10 text-destructive hover:bg-destructive/20"}
@@ -114,7 +116,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               onClick={(e) => { e.preventDefault(); void handleConfirm() }}
             >
               {busy && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />}
-              {pending?.confirmText || "确定"}
+              {pending?.confirmText || t("ui.common.ok")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

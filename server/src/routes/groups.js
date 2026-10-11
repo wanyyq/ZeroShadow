@@ -3,6 +3,7 @@ import { requireRole } from "../auth.js"
 import { findById, listMembers } from "../users.js"
 import { addMembers, getGroup, groupsForUser, leaderHasCap, listGroups, updateGroup } from "../groups.js"
 import { info } from "../logger.js"
+import { httpError } from "../http.js"
 
 // ============================================================================
 //  routes/groups.js - 组长自助管理（受超管为小组勾选的 leaderCaps 约束）
@@ -18,12 +19,6 @@ router.use(requireRole("superadmin", "member"))
 
 function actor(req) {
   return { user: req.auth.username || "guest", role: req.auth.role, ip: req.ip }
-}
-
-function httpError(status, message) {
-  const err = new Error(message)
-  err.status = status
-  return err
 }
 
 function isLeader(req, group) {
@@ -72,10 +67,14 @@ router.get("/", (req, res) => {
 router.get("/:id/members", (req, res, next) => {
   try {
     const group = getGroup(String(req.params.id))
-    if (!group) throw httpError(404, "小组不存在")
+    if (!group) throw httpError(404, "小组不存在", { errorKey: "api.groups.not_found" })
     const isSuper = req.auth.role === "superadmin"
-    if (!isSuper && !isLeader(req, group)) throw httpError(403, "没有权限")
-    if (!isSuper && !group.leaderCaps.viewMembers) throw httpError(403, "组长未获授权查看成员")
+    if (!isSuper && !isLeader(req, group)) {
+      throw httpError(403, "没有权限", { errorKey: "api.groups.no_permission" })
+    }
+    if (!isSuper && !group.leaderCaps.viewMembers) {
+      throw httpError(403, "组长未获授权查看成员", { errorKey: "api.groups.view_members_denied" })
+    }
     res.json({ members: group.members.map(publicMember).filter(Boolean) })
   } catch (err) {
     next(err)
@@ -85,16 +84,18 @@ router.get("/:id/members", (req, res, next) => {
 router.post("/:id/members", async (req, res, next) => {
   try {
     const group = getGroup(String(req.params.id))
-    if (!group) throw httpError(404, "小组不存在")
+    if (!group) throw httpError(404, "小组不存在", { errorKey: "api.groups.not_found" })
     const isSuper = req.auth.role === "superadmin"
     if (!isSuper && !(isLeader(req, group) && group.leaderCaps.manageMembers)) {
-      throw httpError(403, "没有权限管理该小组成员")
+      throw httpError(403, "没有权限管理该小组成员", { errorKey: "api.groups.manage_members_denied" })
     }
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []
     const action = req.body?.action === "remove" ? "remove" : "add"
     if (action === "add") {
       for (const id of ids) {
-        if (!findById(id)) throw httpError(400, "包含不存在的成员")
+        if (!findById(id)) {
+          throw httpError(400, "包含不存在的成员", { errorKey: "api.groups.member_not_found" })
+        }
       }
     }
     const updated = await addMembers(group.id, ids, action)
@@ -108,16 +109,18 @@ router.post("/:id/members", async (req, res, next) => {
 router.patch("/:id", async (req, res, next) => {
   try {
     const group = getGroup(String(req.params.id))
-    if (!group) throw httpError(404, "小组不存在")
+    if (!group) throw httpError(404, "小组不存在", { errorKey: "api.groups.not_found" })
     const isSuper = req.auth.role === "superadmin"
     if (!isSuper && !(isLeader(req, group) && group.leaderCaps.manageMembers)) {
-      throw httpError(403, "没有权限调整该小组可见范围")
+      throw httpError(403, "没有权限调整该小组可见范围", { errorKey: "api.groups.visibility_denied" })
     }
     // 组长只能改可见范围；名称/颜色/权限等仍归超管
     const patch = {}
     if (req.body?.whitelist !== undefined) patch.whitelist = req.body.whitelist
     if (req.body?.blacklist !== undefined) patch.blacklist = req.body.blacklist
-    if (!Object.keys(patch).length) throw httpError(400, "没有可更新的字段")
+    if (!Object.keys(patch).length) {
+      throw httpError(400, "没有可更新的字段", { errorKey: "api.groups.no_fields_to_update" })
+    }
     const updated = await updateGroup(group.id, patch)
     info("group_update", { msg: `${updated.name} 可见范围调整`, ...actor(req) })
     res.json({ group: serialize(req, updated) })

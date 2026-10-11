@@ -1,6 +1,7 @@
 import dns from "node:dns/promises"
 import net from "node:net"
 import { getConfig } from "./config.js"
+import { httpError } from "./http.js"
 
 // ============================================================================
 //  netguard.js - 出站请求目标的地址校验（防 SSRF）
@@ -57,10 +58,10 @@ export function privateAccessAllowed() {
   }
 }
 
-function badRequest(message) {
-  const err = new Error(message)
-  err.status = 400
-  return err
+// 这些提示会直接显示在「链接下载器」界面里，所以除中文原文外还带上 errorKey
+// （见 http.js）：界面按当前语言渲染，中文原文依旧是 error 字段的兜底。
+function badRequest(message, extra = undefined) {
+  return httpError(400, message, extra)
 }
 
 // ---------------------------------------------------------------- IPv4 -----
@@ -216,20 +217,24 @@ export function isHostAllowed(hostname) {
  */
 export async function resolveDownloadTarget(rawUrl) {
   const text = String(rawUrl || "").trim()
-  if (!text) throw badRequest("请输入下载链接")
-  if (text.length > MAX_URL_LENGTH) throw badRequest("下载链接过长")
+  if (!text) throw badRequest("请输入下载链接", { errorKey: "api.net.url_required" })
+  if (text.length > MAX_URL_LENGTH) throw badRequest("下载链接过长", { errorKey: "api.net.url_too_long" })
 
   let url
   try {
     url = new URL(text)
   } catch {
-    throw badRequest("URL 格式无效")
+    throw badRequest("URL 格式无效", { errorKey: "api.net.url_invalid" })
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw badRequest("仅支持 http/https 链接")
-  if (url.username || url.password) throw badRequest("下载链接不能包含用户名或密码")
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw badRequest("仅支持 http/https 链接", { errorKey: "api.net.scheme_not_allowed" })
+  }
+  if (url.username || url.password) {
+    throw badRequest("下载链接不能包含用户名或密码", { errorKey: "api.net.credentials_not_allowed" })
+  }
 
   const hostname = url.hostname.replace(/^\[/, "").replace(/\]$/, "")
-  if (!hostname) throw badRequest("URL 缺少主机名")
+  if (!hostname) throw badRequest("URL 缺少主机名", { errorKey: "api.net.hostname_required" })
 
   const allowlisted = isHostAllowed(hostname)
   let addresses
@@ -240,16 +245,21 @@ export async function resolveDownloadTarget(rawUrl) {
     try {
       resolved = await dns.lookup(hostname, { all: true, verbatim: true })
     } catch {
-      throw badRequest("无法解析该域名")
+      throw badRequest("无法解析该域名", { errorKey: "api.net.dns_lookup_failed" })
     }
     addresses = [...new Set(resolved.map((entry) => entry.address).filter(Boolean))]
-    if (!addresses.length) throw badRequest("无法解析该域名")
+    if (!addresses.length) throw badRequest("无法解析该域名", { errorKey: "api.net.dns_lookup_failed" })
   }
 
   if (!allowlisted) {
     for (const address of addresses) {
       const reason = addressBlockReason(address)
-      if (reason) throw badRequest(`不允许下载${reason}（${address}）`)
+      if (reason) {
+        throw badRequest(`不允许下载${reason}（${address}）`, {
+          errorKey: "api.net.blocked_address",
+          errorParams: { reason, address },
+        })
+      }
     }
   }
 

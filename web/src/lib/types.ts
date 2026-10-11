@@ -182,37 +182,78 @@ export interface EntryStat {
   partial?: boolean
 }
 
+/**
+ * 服务端元数据里的一行「字段名 / 值」。
+ *
+ * 键的用法（服务端不持有字典，只多带一个键，见 fileinfo.js）：
+ * - `key`     字段名的命名键，前端 `t(key)` 查不到译文就回落到 `label`；
+ * - `label`   字段名的**中文原文**兜底，保证任何语言下都不会显示成 `meta.exif.make`；
+ * - `value`   值的文本，**不含单位**；
+ * - `unitKey` 可选，单位文案的键：前端按 `${value} ${t(unitKey)}` 拼接；
+ * - `valueKey` / `valueParams` 可选，值本身是服务端枚举文案时（如方向「正常」、
+ *   时长「3:05（185 秒）」）用它查字典，查不到同样回落到 `value`。
+ */
+export interface DetailPair {
+  key: string
+  label: string
+  value: string
+  unitKey?: string
+  valueKey?: string
+  valueParams?: Record<string, string | number>
+}
+
 /** /fs/details：需要读文件才能拿到的扩展元数据（签名 / 哈希 / EXIF / 作者 …） */
 export interface EntryDetails {
   path: string
   size: number
   softReadOnly: boolean
-  /** [标签, 值]，顺序由服务端决定，前端只负责显示 */
-  magic: { label: string; mime: string | null; kind: string; signature: string } | null
+  magic: {
+    /** 识别结果的中文原文（兜底） */
+    label: string
+    /** 识别结果的命名键，查不到译文就用 label */
+    labelKey?: string
+    /** labelKey 的插值参数（如 ISO BMFF 的品牌名、RIFF 的子类型） */
+    labelParams?: Record<string, string | number>
+    mime: string | null
+    kind: string
+    signature: string
+  } | null
   hashes: { md5: string; sha1: string; sha256: string } | null
+  /** 跳过校验和的原因（中文原文兜底） */
   hashNote: string | null
+  /** 原因文案的命名键，查不到译文就用 hashNote */
+  hashNoteKey?: string | null
+  hashNoteParams?: Record<string, string | number> | null
   contentVersion: string | null
   image:
     | {
         width: number
         height: number
         bitDepth?: number
+        /** 色彩模式的中文原文（兜底） */
         colorType?: string
+        /** 色彩模式的命名键，查不到译文就用 colorType */
+        colorTypeKey?: string
         interlaced?: boolean
         megapixels?: number
         aspect?: string
       }
     | null
-  exif: [string, string][] | null
-  doc: [string, string][] | null
-  media: [string, string][] | null
+  /** 顺序由服务端决定，前端只负责显示 */
+  exif: DetailPair[] | null
+  doc: DetailPair[] | null
+  media: DetailPair[] | null
   text: {
     encoding?: string
+    /** 编码名本身就是 ASCII（如 UTF-8），不需要翻译 */
     encodingLabel?: string
     encodingConfident?: boolean
     bom?: boolean
     eol?: string
+    /** 换行风格的中文原文（兜底） */
     eolLabel?: string
+    /** 换行风格的命名键，查不到译文就用 eolLabel */
+    eolKey?: string
     lines?: number
     chars?: number
     truncated?: boolean

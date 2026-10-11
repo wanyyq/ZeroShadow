@@ -14,10 +14,12 @@ import { api, fetchMetrics } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import type { LogRow, LogStats, MetricsResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
 
 function Sparkline({ data, max = 100, color = "#5b8def", height = 36 }: { data: number[]; max?: number; color?: string; height?: number }) {
+  const t = useT()
   const width = 240
-  if (data.length < 2) return <div className="flex h-9 items-center text-xs text-muted-foreground">数据不足</div>
+  if (data.length < 2) return <div className="flex h-9 items-center text-xs text-muted-foreground">{t("ui.settings.logs.insufficient_data")}</div>
   const step = width / (data.length - 1)
   const points = data.map((v, i) => {
     const y = height - Math.max(0, Math.min(1, max ? v / max : 1)) * (height - 4) - 2
@@ -41,6 +43,7 @@ function Metric({ label, value, sub }: { label: string; value: string; sub?: str
 }
 
 export function LogsMetricsSection() {
+  const t = useT()
   const [metrics, setMetrics] = React.useState<MetricsResponse | null>(null)
   const [logs, setLogs] = React.useState<LogRow[]>([])
   const [stats, setStats] = React.useState<LogStats | null>(null)
@@ -55,8 +58,8 @@ export function LogsMetricsSection() {
   }, [])
   React.useEffect(() => {
     loadMetrics()
-    const t = setInterval(loadMetrics, 10000)
-    return () => clearInterval(t)
+    const timer = setInterval(loadMetrics, 10000)
+    return () => clearInterval(timer)
   }, [loadMetrics])
 
   const loadLogs = React.useCallback(() => {
@@ -82,30 +85,29 @@ export function LogsMetricsSection() {
       {/* 系统指标 */}
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>系统指标</CardTitle>
+          <CardTitle>{t("ui.settings.logs.system_metrics")}</CardTitle>
           <CardDescription>
-            每分钟采样；内存保留最近 {metrics?.config.memMinutes ?? 15} 分钟，
-            落盘文件按「指标落盘保留」清理（可在「数据与保留」里调整）
+            {t("ui.settings.logs.system_metrics_description", { n: metrics?.config.memMinutes ?? 15 })}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="edge-highlight grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
             <Metric label="CPU" value={latest ? `${latest.cpu}%` : "—"} />
-            <Metric label="内存" value={latest ? `${latest.memUsedPct}%` : "—"} sub={latest ? `${latest.rssMB}MB / ${latest.totalMB}MB` : ""} />
-            <Metric label="磁盘" value={latest?.diskFreeMB != null ? `可用 ${latest.diskFreeMB}MB` : "—"} sub={latest?.diskTotalMB != null ? `共 ${latest.diskTotalMB}MB` : ""} />
-            <Metric label="文件" value={latest ? `${latest.files} 文件` : "—"} sub={latest ? `${latest.dirs} 文件夹 · ${formatBytes(latest.bytes)}` : ""} />
+            <Metric label={t("ui.settings.logs.metric_memory")} value={latest ? `${latest.memUsedPct}%` : "—"} sub={latest ? `${latest.rssMB}MB / ${latest.totalMB}MB` : ""} />
+            <Metric label={t("ui.settings.logs.metric_disk")} value={latest?.diskFreeMB != null ? t("ui.settings.logs.disk_free", { n: latest.diskFreeMB }) : "—"} sub={latest?.diskTotalMB != null ? t("ui.settings.logs.disk_total", { n: latest.diskTotalMB }) : ""} />
+            <Metric label={t("ui.settings.logs.metric_files")} value={latest ? t("ui.settings.logs.files_count", { n: latest.files }) : "—"} sub={latest ? t("ui.settings.logs.dirs_and_size", { dirs: latest.dirs, size: formatBytes(latest.bytes) }) : ""} />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-lg border border-border p-3">
               <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">CPU 使用率</span>
+                <span className="text-muted-foreground">{t("ui.settings.logs.cpu_usage")}</span>
                 <span className="font-medium">{latest ? `${latest.cpu}%` : "—"}</span>
               </div>
               <Sparkline data={cpuSeries} max={100} color="#e0894c" />
             </div>
             <div className="rounded-lg border border-border p-3">
               <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">内存使用率</span>
+                <span className="text-muted-foreground">{t("ui.settings.logs.memory_usage")}</span>
                 <span className="font-medium">{latest ? `${latest.memUsedPct}%` : "—"}</span>
               </div>
               <Sparkline data={memSeries} max={100} color="#5b8def" />
@@ -117,8 +119,8 @@ export function LogsMetricsSection() {
       {/* 请求指标 */}
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>请求指标</CardTitle>
-          <CardDescription>近 {metrics?.config.memMinutes ?? 15} 分钟窗口统计</CardDescription>
+          <CardTitle>{t("ui.settings.logs.request_metrics")}</CardTitle>
+          <CardDescription>{t("ui.settings.logs.request_metrics_description", { n: metrics?.config.memMinutes ?? 15 })}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="edge-highlight grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-5">
@@ -126,22 +128,22 @@ export function LogsMetricsSection() {
             <Metric label="2xx" value={req ? String(req.lastMinute.s2) : "—"} />
             <Metric label="4xx" value={req ? String(req.lastMinute.s4) : "—"} />
             <Metric label="5xx" value={req ? String(req.lastMinute.s5) : "—"} />
-            <Metric label="慢请求" value={req ? String(req.lastMinute.slow) : "—"} />
+            <Metric label={t("ui.settings.logs.slow_requests")} value={req ? String(req.lastMinute.slow) : "—"} />
           </div>
           <div>
-            <p className="mb-2 text-xs text-muted-foreground">慢请求（最近 {req?.slow.length ?? 0} 条）</p>
+            <p className="mb-2 text-xs text-muted-foreground">{t("ui.settings.logs.slow_requests_recent", { n: req?.slow.length ?? 0 })}</p>
             <ScrollArea className="h-40 rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-16">方法</TableHead>
-                    <TableHead>路径</TableHead>
-                    <TableHead className="w-16">状态</TableHead>
-                    <TableHead className="w-20">耗时</TableHead>
+                    <TableHead className="w-16">{t("ui.settings.logs.col_method")}</TableHead>
+                    <TableHead>{t("ui.common.path")}</TableHead>
+                    <TableHead className="w-16">{t("ui.common.status")}</TableHead>
+                    <TableHead className="w-20">{t("ui.settings.logs.col_duration")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(!req || req.slow.length === 0) && <TableRow><TableCell colSpan={4} className="py-4 text-center text-xs text-muted-foreground">暂无慢请求</TableCell></TableRow>}
+                  {(!req || req.slow.length === 0) && <TableRow><TableCell colSpan={4} className="py-4 text-center text-xs text-muted-foreground">{t("ui.settings.logs.no_slow_requests")}</TableCell></TableRow>}
                   {req?.slow.map((s, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-mono text-xs">{s.method}</TableCell>
@@ -162,19 +164,19 @@ export function LogsMetricsSection() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>操作日志</CardTitle>
-              <CardDescription>登录、权限变更、文件操作与系统事件</CardDescription>
+              <CardTitle>{t("ui.settings.logs.audit_title")}</CardTitle>
+              <CardDescription>{t("ui.settings.logs.audit_description")}</CardDescription>
             </div>
-            <Button size="sm" variant="destructive" onClick={() => setConfirmClear(true)}><Icon name="trash-2" /> 清空</Button>
+            <Button size="sm" variant="destructive" onClick={() => setConfirmClear(true)}><Icon name="trash-2" /> {t("ui.settings.logs.clear")}</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
           {stats && (
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">共 {stats.total}</Badge>
-              <Badge variant="outline">信息 {stats.byLevel.info || 0}</Badge>
-              <Badge variant="outline" className="text-amber-600 dark:text-amber-400">警告 {stats.byLevel.warn || 0}</Badge>
-              <Badge variant="outline" className="text-destructive">错误 {stats.byLevel.error || 0}</Badge>
+              <Badge variant="secondary">{t("ui.settings.logs.total_count", { n: stats.total })}</Badge>
+              <Badge variant="outline">{t("ui.settings.logs.level_info_count", { n: stats.byLevel.info || 0 })}</Badge>
+              <Badge variant="outline" className="text-amber-600 dark:text-amber-400">{t("ui.settings.logs.level_warn_count", { n: stats.byLevel.warn || 0 })}</Badge>
+              <Badge variant="outline" className="text-destructive">{t("ui.settings.logs.level_error_count", { n: stats.byLevel.error || 0 })}</Badge>
               {stats.topEvents.slice(0, 4).map((e) => (
                 <Badge key={e.event} variant="outline" className="text-[10px]">{e.event} · {e.count}</Badge>
               ))}
@@ -182,41 +184,41 @@ export function LogsMetricsSection() {
           )}
           <div className="flex flex-wrap items-center gap-2">
             <Select value={level} onValueChange={(v) => setLevel(v || "all")}>
-              <SelectTrigger className="w-28" size="sm"><SelectValue>{(v) => (v === "info" ? "信息" : v === "warn" ? "警告" : v === "error" ? "错误" : "全部级别")}</SelectValue></SelectTrigger>
+              <SelectTrigger className="w-28" size="sm"><SelectValue>{(v) => (v === "info" ? t("ui.settings.logs.level_info") : v === "warn" ? t("ui.settings.logs.level_warn") : v === "error" ? t("ui.settings.logs.level_error") : t("ui.settings.logs.level_all"))}</SelectValue></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部级别</SelectItem>
-                <SelectItem value="info">信息</SelectItem>
-                <SelectItem value="warn">警告</SelectItem>
-                <SelectItem value="error">错误</SelectItem>
+                <SelectItem value="all">{t("ui.settings.logs.level_all")}</SelectItem>
+                <SelectItem value="info">{t("ui.settings.logs.level_info")}</SelectItem>
+                <SelectItem value="warn">{t("ui.settings.logs.level_warn")}</SelectItem>
+                <SelectItem value="error">{t("ui.settings.logs.level_error")}</SelectItem>
               </SelectContent>
             </Select>
             <Select value={days} onValueChange={(v) => setDays(v || "5")}>
-              <SelectTrigger className="w-24" size="sm"><SelectValue render={(_p, s) => <>{s.value} 天</>}>{days} 天</SelectValue></SelectTrigger>
+              <SelectTrigger className="w-24" size="sm"><SelectValue render={(_p, s) => <>{t("ui.settings.logs.unit_days", { n: s.value })}</>}>{t("ui.settings.logs.unit_days", { n: days })}</SelectValue></SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">1 天</SelectItem>
-                <SelectItem value="5">5 天</SelectItem>
-                <SelectItem value="30">30 天</SelectItem>
+                <SelectItem value="1">{t("ui.settings.logs.unit_days", { n: 1 })}</SelectItem>
+                <SelectItem value="5">{t("ui.settings.logs.unit_days", { n: 5 })}</SelectItem>
+                <SelectItem value="30">{t("ui.settings.logs.unit_days", { n: 30 })}</SelectItem>
               </SelectContent>
             </Select>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Switch checked={auditOnly} onCheckedChange={(v) => setAuditOnly(!!v)} /> 仅审计事件
+              <Switch checked={auditOnly} onCheckedChange={(v) => setAuditOnly(!!v)} /> {t("ui.settings.logs.audit_only")}
             </label>
-            <Input placeholder="搜索事件/用户/IP…" className="h-8 w-48 text-sm" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadLogs()} />
-            <Button size="sm" variant="ghost" onClick={loadLogs}><Icon name="refresh-cw" /> 刷新</Button>
+            <Input placeholder={t("ui.settings.logs.search_placeholder")} className="h-8 w-48 text-sm" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadLogs()} />
+            <Button size="sm" variant="ghost" onClick={loadLogs}><Icon name="refresh-cw" /> {t("ui.common.refresh")}</Button>
           </div>
           <ScrollArea className="h-96 rounded-md border border-border">
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-40">时间</TableHead>
-                  <TableHead className="w-28">事件</TableHead>
-                  <TableHead className="w-24">用户</TableHead>
+                  <TableHead className="w-40">{t("ui.common.time")}</TableHead>
+                  <TableHead className="w-28">{t("ui.settings.logs.col_event")}</TableHead>
+                  <TableHead className="w-24">{t("ui.settings.logs.col_user")}</TableHead>
                   <TableHead className="w-32">IP</TableHead>
-                  <TableHead>详情</TableHead>
+                  <TableHead>{t("ui.settings.logs.col_detail")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {logs.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">暂无日志</TableCell></TableRow>}
+                {logs.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">{t("ui.settings.logs.no_logs")}</TableCell></TableRow>}
                 {logs.map((row, i) => (
                   <TableRow key={i}>
                     <TableCell className="font-mono text-xs whitespace-nowrap">{row.t.replace("T", " ").slice(0, 19)}</TableCell>
@@ -237,10 +239,10 @@ export function LogsMetricsSection() {
 
       <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>清空全部日志？</AlertDialogTitle><AlertDialogDescription>该操作不可撤销。</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>{t("ui.settings.logs.clear_confirm_title")}</AlertDialogTitle><AlertDialogDescription>{t("ui.settings.logs.clear_confirm_description")}</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={async (e) => { e.preventDefault(); try { await api.del("/admin/logs"); toast.success("日志已清空"); loadLogs(); setConfirmClear(false) } catch (err) { toast.error((err as Error).message) } }}>清空</AlertDialogAction>
+            <AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={async (e) => { e.preventDefault(); try { await api.del("/admin/logs"); toast.success(t("ui.settings.logs.cleared")); loadLogs(); setConfirmClear(false) } catch (err) { toast.error((err as Error).message) } }}>{t("ui.settings.logs.clear")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

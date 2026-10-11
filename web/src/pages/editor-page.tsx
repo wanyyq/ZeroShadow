@@ -19,6 +19,7 @@ import { Icon } from "@/components/icon"
 import { fetchFileText, isVersionConflict, saveFileText } from "@/lib/api"
 import type { FileTextResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { currentLang, useT } from "@/lib/i18n"
 
 /**
  * 在线文本编辑器。
@@ -46,6 +47,7 @@ interface Match {
 }
 
 export default function EditorPage() {
+  const t = useT()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const entryPath = params.get("path") || ""
@@ -104,12 +106,12 @@ export default function EditorPage() {
         setStaleSince(null)
         forceOverwriteRef.current = false
         if (!d.encodingConfident) {
-          toast.warning(`编码识别为 ${d.encoding}，如果显示乱码请在工具栏手动切换编码`)
+          toast.warning(t("ui.editor.encoding_guess_warning", { encoding: d.encoding }))
         }
       })
       .catch((err) => setLoadError((err as Error).message))
       .finally(() => setLoading(false))
-  }, [entryPath])
+  }, [entryPath, t])
 
   React.useEffect(() => { load() }, [load])
 
@@ -131,23 +133,26 @@ export default function EditorPage() {
         setEncoding(d.encoding)
         setEol(d.eol)
       }).catch(() => {})
-      toast.success(`已保存（${(r.bytes / 1024).toFixed(1)} KB · ${encoding}${r.eol !== "lf" ? " · " + EOL_LABEL[r.eol] : ""}）`)
+      toast.success(t("ui.editor.saved_toast", {
+        size: (r.bytes / 1024).toFixed(1),
+        encoding,
+        eol: r.eol !== "lf" ? " · " + EOL_LABEL[r.eol] : "",
+      }))
     } catch (err) {
       if (isVersionConflict(err)) {
         // 关键：**不覆盖**。客户端手里的内容基于旧版本，直接写会抹掉对方的改动。
-        const at = new Date().toLocaleString("zh-CN")
+        // 时间戳跟随当前界面语言，而不是写死 zh-CN：英文界面下冒出中文格式的日期很突兀
+        const at = new Date().toLocaleString(currentLang())
         setStaleSince(at)
-        toast.error("保存被阻止：文件已被其他人修改", {
+        toast.error(t("ui.editor.conflict_title"), {
           duration: 20000,
-          description:
-            "为避免覆盖对方的改动，本次保存没有执行。请先「重新加载」查看最新内容并手动合并；" +
-            "如果你确认要以当前内容覆盖服务端版本，也可以选择「强制覆盖」。",
+          description: t("ui.editor.conflict_description"),
           action: {
-            label: "重新加载",
+            label: t("ui.common.reload"),
             onClick: () => load(encoding),
           },
           cancel: {
-            label: "强制覆盖",
+            label: t("ui.editor.force_overwrite"),
             onClick: () => {
               forceOverwriteRef.current = true
               saveRef.current()
@@ -161,7 +166,7 @@ export default function EditorPage() {
     } finally {
       setSaving(false)
     }
-  }, [entryPath, saving, file, content, encoding, eol, load])
+  }, [entryPath, saving, file, content, encoding, eol, load, t])
 
   // 每次渲染后把最新的 save 放进 ref，供冲突提示里的「强制覆盖」调用。
   // 放在 effect 里而不是渲染期：React 19 的 lint 禁止在渲染期间写 ref。
@@ -255,7 +260,7 @@ export default function EditorPage() {
       try {
         next = content.replace(new RegExp(needle, caseSensitive ? "g" : "gi"), replacement)
       } catch {
-        toast.error("正则表达式无效")
+        toast.error(t("ui.editor.invalid_regex"))
         return
       }
     } else {
@@ -265,7 +270,7 @@ export default function EditorPage() {
         .reduce((acc, m) => acc.slice(0, m.start) + replacement + acc.slice(m.end), content)
     }
     setContent(next)
-    toast.success(`已替换 ${matches.length} 处`)
+    toast.success(t("ui.editor.replaced_count", { count: matches.length }))
     setMatchInfo({ count: 0, index: 0 })
   }
 
@@ -356,21 +361,21 @@ export default function EditorPage() {
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border px-3 py-2">
         <Icon name="pencil-line" className="size-4 shrink-0 text-muted-foreground" />
         <span className="max-w-56 truncate text-sm font-medium" title={file?.name || entryPath}>
-          {file?.name || entryPath.split("/").pop() || "编辑器"}
+          {file?.name || entryPath.split("/").pop() || t("ui.editor.untitled")}
         </span>
-        {dirty && <Badge variant="secondary" className="text-[10px]">未保存</Badge>}
-        {file?.softReadOnly && <Badge variant="outline" className="text-[10px]">只读目录</Badge>}
+        {dirty && <Badge variant="secondary" className="text-[10px]">{t("ui.common.unsaved")}</Badge>}
+        {file?.softReadOnly && <Badge variant="outline" className="text-[10px]">{t("ui.editor.readonly_dir")}</Badge>}
         {/* 版本冲突后持续可见：避免用户以为"保存成功"了 */}
         {staleSince && (
-          <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive" title={`检测到冲突的时间：${staleSince}`}>
-            已被他人修改
+          <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive" title={t("ui.editor.conflict_detected_at", { time: staleSince })}>
+            {t("ui.editor.modified_by_others")}
           </Badge>
         )}
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {/* 编码 */}
           <Select value={encoding} onValueChange={(v) => changeEncoding(v || "utf8")}>
-            <SelectTrigger size="sm" className="h-8 w-[13.5rem] text-xs" title="文件编码（改动会重新读取文件）">
+            <SelectTrigger size="sm" className="h-8 w-[13.5rem] text-xs" title={t("ui.editor.encoding_title")}>
               <SelectValue render={(_p, s) => <>{file?.encodings.find((x) => x.id === s.value)?.label || s.value}</>}>
                 {encoding}
               </SelectValue>
@@ -384,53 +389,53 @@ export default function EditorPage() {
 
           {/* 换行符 */}
           <Select value={eol} onValueChange={(v) => setEol(v || "lf")}>
-            <SelectTrigger size="sm" className="h-8 w-24 text-xs" title="换行符（保存时写回）">
+            <SelectTrigger size="sm" className="h-8 w-24 text-xs" title={t("ui.editor.eol_title")}>
               <SelectValue render={(_p, s) => <>{EOL_LABEL[s.value || "lf"]}</>}>{EOL_LABEL[eol]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="crlf">CRLF (Windows)</SelectItem>
-              <SelectItem value="lf">LF (Unix)</SelectItem>
-              <SelectItem value="cr">CR (旧 Mac)</SelectItem>
+              <SelectItem value="crlf">{t("ui.editor.eol_crlf")}</SelectItem>
+              <SelectItem value="lf">{t("ui.editor.eol_lf")}</SelectItem>
+              <SelectItem value="cr">{t("ui.editor.eol_cr")}</SelectItem>
             </SelectContent>
           </Select>
 
           <Button
-            size="icon-xs" variant={bar === "find" ? "secondary" : "ghost"} title="查找 (Ctrl+F)"
+            size="icon-xs" variant={bar === "find" ? "secondary" : "ghost"} title={t("ui.editor.find_title")}
             aria-pressed={bar === "find"} onClick={() => setBar(bar === "find" ? "none" : "find")}
           >
             <Icon name="search" />
           </Button>
           <Button
-            size="icon-xs" variant={bar === "replace" ? "secondary" : "ghost"} title="替换 (Ctrl+H)"
+            size="icon-xs" variant={bar === "replace" ? "secondary" : "ghost"} title={t("ui.editor.replace_title")}
             aria-pressed={bar === "replace"} onClick={() => setBar(bar === "replace" ? "none" : "replace")}
           >
             <Icon name="replace" />
           </Button>
           <Button
-            size="icon-xs" variant={wrap ? "secondary" : "ghost"} title="自动换行（开启后隐藏行号）"
+            size="icon-xs" variant={wrap ? "secondary" : "ghost"} title={t("ui.editor.wrap_title")}
             aria-pressed={wrap} onClick={() => setWrap(!wrap)}
           >
             <Icon name="wrap-text" />
           </Button>
           <Button
-            size="icon-xs" variant={showLineNumbers ? "secondary" : "ghost"} title="显示行号"
+            size="icon-xs" variant={showLineNumbers ? "secondary" : "ghost"} title={t("ui.editor.line_numbers_title")}
             aria-pressed={showLineNumbers} onClick={() => setShowLineNumbers(!showLineNumbers)}
           >
             <Icon name="list-ordered" />
           </Button>
-          <Button size="icon-xs" variant="ghost" title="减小字号" disabled={fontSize <= FONT_MIN} onClick={() => setFontSize((s) => Math.max(FONT_MIN, s - 1))}>
+          <Button size="icon-xs" variant="ghost" title={t("ui.editor.font_decrease")} disabled={fontSize <= FONT_MIN} onClick={() => setFontSize((s) => Math.max(FONT_MIN, s - 1))}>
             <Icon name="minus" />
           </Button>
           <span className="w-6 text-center text-xs tabular-nums text-muted-foreground">{fontSize}</span>
-          <Button size="icon-xs" variant="ghost" title="增大字号" disabled={fontSize >= FONT_MAX} onClick={() => setFontSize((s) => Math.min(FONT_MAX, s + 1))}>
+          <Button size="icon-xs" variant="ghost" title={t("ui.editor.font_increase")} disabled={fontSize >= FONT_MAX} onClick={() => setFontSize((s) => Math.min(FONT_MAX, s + 1))}>
             <Icon name="plus" />
           </Button>
 
-          <Button size="sm" disabled={!dirty || saving || !!file?.softReadOnly} onClick={save} title="保存 (Ctrl+S)">
+          <Button size="sm" disabled={!dirty || saving || !!file?.softReadOnly} onClick={save} title={t("ui.editor.save_title")}>
             {saving ? <Icon name="loader-2" className="animate-spin" data-icon="inline-start" /> : null}
-            保存
+            {t("ui.common.save")}
           </Button>
-          <Button size="icon-sm" variant="ghost" onClick={requestClose} title="关闭 (Esc)"><Icon name="x" /></Button>
+          <Button size="icon-sm" variant="ghost" onClick={requestClose} title={t("ui.editor.close_title")}><Icon name="x" /></Button>
         </div>
       </div>
 
@@ -440,49 +445,49 @@ export default function EditorPage() {
           <Input
             autoFocus value={needle} onChange={(e) => setNeedle(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); findNext(e.shiftKey ? -1 : 1) } }}
-            placeholder={useRegex ? "正则表达式…" : "查找内容…"}
+            placeholder={useRegex ? t("ui.editor.regex_placeholder") : t("ui.editor.find_placeholder")}
             className="h-8 w-56 font-mono text-xs"
           />
           <span className="w-16 text-center text-xs tabular-nums text-muted-foreground">
-            {matches.length ? `${matchInfo.index + 1}/${matches.length}` : "无匹配"}
+            {matches.length ? `${matchInfo.index + 1}/${matches.length}` : t("ui.editor.no_matches")}
           </span>
-          <Button size="icon-xs" variant="ghost" title="上一个 (Shift+F3)" disabled={!matches.length} onClick={() => findNext(-1)}>
+          <Button size="icon-xs" variant="ghost" title={t("ui.editor.prev_match_title")} disabled={!matches.length} onClick={() => findNext(-1)}>
             <Icon name="chevron-up" />
           </Button>
-          <Button size="icon-xs" variant="ghost" title="下一个 (F3)" disabled={!matches.length} onClick={() => findNext(1)}>
+          <Button size="icon-xs" variant="ghost" title={t("ui.editor.next_match_title")} disabled={!matches.length} onClick={() => findNext(1)}>
             <Icon name="chevron-down" />
           </Button>
           <Button
             size="xs" variant={caseSensitive ? "secondary" : "ghost"} aria-pressed={caseSensitive}
             onClick={() => setCaseSensitive(!caseSensitive)}
           >
-            区分大小写
+            {t("ui.editor.case_sensitive")}
           </Button>
           <Button
             size="xs" variant={useRegex ? "secondary" : "ghost"} aria-pressed={useRegex}
             onClick={() => setUseRegex(!useRegex)}
           >
-            正则
+            {t("ui.editor.regex_toggle")}
           </Button>
 
           {bar === "replace" && (
             <>
               <Input
                 value={replacement} onChange={(e) => setReplacement(e.target.value)}
-                placeholder="替换为…" className="h-8 w-48 font-mono text-xs"
+                placeholder={t("ui.editor.replace_placeholder")} className="h-8 w-48 font-mono text-xs"
               />
-              <Button size="xs" variant="outline" disabled={!matches.length} onClick={replaceCurrent}>替换</Button>
-              <Button size="xs" variant="outline" disabled={!matches.length} onClick={replaceAll}>全部替换</Button>
+              <Button size="xs" variant="outline" disabled={!matches.length} onClick={replaceCurrent}>{t("ui.editor.replace")}</Button>
+              <Button size="xs" variant="outline" disabled={!matches.length} onClick={replaceAll}>{t("ui.editor.replace_all")}</Button>
             </>
           )}
 
           <div className="ml-auto flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">跳转到行</span>
+            <span className="text-xs text-muted-foreground">{t("ui.editor.go_to_line")}</span>
             <Input
               value={gotoLine}
               onChange={(e) => setGotoLine(e.target.value.replace(/[^\d]/g, ""))}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); jumpToLine() } }}
-              placeholder="行号" inputMode="numeric" className="h-8 w-20 text-xs"
+              placeholder={t("ui.editor.line_number_placeholder")} inputMode="numeric" className="h-8 w-20 text-xs"
             />
           </div>
         </div>
@@ -491,16 +496,16 @@ export default function EditorPage() {
       {/* 正文 */}
       {loading ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Icon name="loader-2" className="size-4 animate-spin" /> 正在读取文件…
+          <Icon name="loader-2" className="size-4 animate-spin" /> {t("ui.editor.reading_file")}
         </div>
       ) : loadError ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <Icon name="file-warning" className="size-10 text-muted-foreground" />
-          <p className="text-sm font-medium">无法打开这个文件</p>
+          <p className="text-sm font-medium">{t("ui.editor.cannot_open")}</p>
           <p className="max-w-md text-xs text-muted-foreground">{loadError}</p>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => load()}>重试</Button>
-            <Button size="sm" variant="ghost" onClick={() => navigate(-1)}>返回</Button>
+            <Button size="sm" variant="outline" onClick={() => load()}>{t("ui.common.retry")}</Button>
+            <Button size="sm" variant="ghost" onClick={() => navigate(-1)}>{t("ui.common.back")}</Button>
           </div>
         </div>
       ) : (
@@ -528,7 +533,7 @@ export default function EditorPage() {
             onScroll={(e) => { if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop }}
             spellCheck={false}
             readOnly={!!file?.softReadOnly}
-            placeholder="（空文件）"
+            placeholder={t("ui.editor.empty_file_placeholder")}
             className={cn(
               "min-h-0 flex-1 resize-none bg-transparent px-3 py-3 font-mono outline-none",
               wrap ? "whitespace-pre-wrap break-words" : "overflow-auto whitespace-pre"
@@ -540,35 +545,35 @@ export default function EditorPage() {
 
       {/* 状态栏 */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-muted/20 px-3 py-1.5 text-[11px] text-muted-foreground">
-        <span>行 {cursor.line}，列 {cursor.col}</span>
-        {cursor.selected > 0 && <span>已选 {cursor.selected}</span>}
-        <span>共 {lineCount} 行</span>
-        <span>{content.length} 字符</span>
+        <span>{t("ui.editor.cursor_position", { line: cursor.line, col: cursor.col })}</span>
+        {cursor.selected > 0 && <span>{t("ui.editor.selected_count", { count: cursor.selected })}</span>}
+        <span>{t("ui.editor.total_lines", { n: lineCount })}</span>
+        <span>{t("ui.editor.char_count", { n: content.length })}</span>
         <span>{encoding}</span>
         <span>{EOL_LABEL[eol]}</span>
         {sizeText && <span>{sizeText}</span>}
         {file && file.size > BIG_FILE_BYTES && (
-          <span className="text-amber-600 dark:text-amber-500">文件较大，编辑可能有卡顿</span>
+          <span className="text-amber-600 dark:text-amber-500">{t("ui.editor.big_file_hint")}</span>
         )}
-        <span className="ml-auto">Ctrl+S 保存 · Ctrl+F 查找 · Ctrl+H 替换 · F3 下一个</span>
+        <span className="ml-auto">{t("ui.editor.shortcuts_hint")}</span>
       </div>
 
       {/* 未保存确认 */}
       <AlertDialog open={confirmLeave} onOpenChange={setConfirmLeave}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>有未保存的更改</AlertDialogTitle>
+            <AlertDialogTitle>{t("ui.editor.unsaved_changes_title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              离开会丢失这些改动。确定要放弃吗？
+              {t("ui.editor.unsaved_changes_desc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
+            <AlertDialogCancel>{t("ui.editor.keep_editing")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive/10 text-destructive hover:bg-destructive/20"
               onClick={() => { setConfirmLeave(false); navigate(-1) }}
             >
-              放弃并离开
+              {t("ui.editor.discard_and_leave")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -578,14 +583,14 @@ export default function EditorPage() {
       <AlertDialog open={pendingEncoding !== null} onOpenChange={(o) => !o && setPendingEncoding(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>切换编码会重新读取文件</AlertDialogTitle>
+            <AlertDialogTitle>{t("ui.editor.encoding_switch_title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              换编码需要用原始字节重新解码，当前未保存的改动会丢失。要继续吗？
+              {t("ui.editor.encoding_switch_desc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmEncodingSwitch}>继续切换</AlertDialogAction>
+            <AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmEncodingSwitch}>{t("ui.editor.encoding_switch_confirm")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

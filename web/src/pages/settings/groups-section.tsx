@@ -25,60 +25,61 @@ import { createGroup, deleteGroup, fetchAdminGroups, updateGroup } from "@/lib/a
 import { useGroups } from "@/state/groups"
 import type { Group, Member } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { translate, useT } from "@/lib/i18n"
 
 // 权限按语义分组；键名与顺序对齐 server/src/config.js 的 MEMBER_PERM_KEYS。
 // fileWrite 是写操作总开关（服务端 effectivePerms 用 `fw && p.x` 合成），
 // 所以它关闭时下列写类子开关在界面上同步置灰，避免「看着开着其实不生效」。
 const WRITE_PERM_KEYS = ["upload", "uploadFolders", "mkdir", "copy", "move", "rename", "delete"]
 
-const PERM_GROUPS: { title: string; hint?: string; items: [string, string][] }[] = [
+const PERM_GROUPS: { titleKey: string; hintKey?: string; items: [string, string][] }[] = [
   {
-    title: "文件操作",
-    hint: "「文件操作总开关」关闭时，本组写类权限全部失效。",
+    titleKey: "ui.settings.groups.perm_group_file_ops",
+    hintKey: "ui.settings.groups.perm_group_file_ops_hint",
     items: [
-      ["fileWrite", "文件操作总开关"],
-      ["upload", "上传文件"],
-      ["uploadFolders", "上传文件夹"],
-      ["mkdir", "新建文件夹"],
-      ["copy", "复制"],
-      ["move", "移动"],
-      ["rename", "重命名"],
-      ["delete", "删除"],
+      ["fileWrite", "ui.settings.groups.perm_file_write"],
+      ["upload", "ui.settings.groups.perm_upload"],
+      ["uploadFolders", "ui.settings.groups.perm_upload_folders"],
+      ["mkdir", "ui.settings.groups.perm_mkdir"],
+      ["copy", "ui.common.copy"],
+      ["move", "ui.settings.groups.perm_move"],
+      ["rename", "ui.common.rename"],
+      ["delete", "ui.common.delete"],
     ],
   },
   {
-    title: "浏览、下载与预览",
+    titleKey: "ui.settings.groups.perm_group_browse_download",
     items: [
-      ["browse", "浏览目录"],
-      ["downloadFile", "下载文件"],
-      ["downloadFolder", "下载文件夹（打包）"],
-      ["preview", "允许预览"],
+      ["browse", "ui.settings.groups.perm_browse"],
+      ["downloadFile", "ui.settings.groups.perm_download_file"],
+      ["downloadFolder", "ui.settings.groups.perm_download_folder"],
+      ["preview", "ui.settings.groups.perm_preview"],
     ],
   },
   {
-    title: "高级功能",
+    titleKey: "ui.settings.groups.perm_group_advanced",
     items: [
-      ["compressZip", "压缩 Zip"],
-      ["extractZip", "解压 Zip"],
-      ["downloadUrl", "多线程下载器"],
-      ["htmlPreview", "HTML 全屏预览"],
-      ["editFiles", "在线编辑"],
+      ["compressZip", "ui.settings.groups.perm_compress_zip"],
+      ["extractZip", "ui.settings.groups.perm_extract_zip"],
+      ["downloadUrl", "ui.settings.groups.perm_download_url"],
+      ["htmlPreview", "ui.settings.groups.perm_html_preview"],
+      ["editFiles", "ui.settings.groups.perm_edit_files"],
     ],
   },
   {
-    title: "管理与账户",
+    titleKey: "ui.settings.groups.perm_group_admin_account",
     items: [
-      ["manageGuestVisibility", "管理访客可见性"],
-      ["changePassword", "修改密码"],
+      ["manageGuestVisibility", "ui.settings.groups.perm_manage_guest_visibility"],
+      ["changePassword", "ui.settings.groups.perm_change_password"],
     ],
   },
 ]
 
 const CAP_ITEMS: [string, string][] = [
-  ["viewMembers", "查看本组成员名单"],
-  ["manageTodo", "创建 / 编辑本组待办"],
-  ["editMemberAvatar", "修改本组成员头像"],
-  ["manageMembers", "管理本组成员与可见范围"],
+  ["viewMembers", "ui.settings.groups.leader_caps_view_members"],
+  ["manageTodo", "ui.settings.groups.leader_caps_manage_todo"],
+  ["editMemberAvatar", "ui.settings.groups.leader_caps_edit_member_avatar"],
+  ["manageMembers", "ui.settings.groups.leader_caps_manage_members"],
 ]
 
 interface GroupsData {
@@ -90,11 +91,12 @@ interface GroupsData {
 function copyText(text: string, okMsg: string) {
   void navigator.clipboard?.writeText(text).then(
     () => toast.success(okMsg),
-    () => toast.error("复制失败，请手动选择文本")
+    () => toast.error(translate("ui.common.copy_failed"))
   )
 }
 
 export function GroupsSection() {
+  const t = useT()
   const [data, setData] = React.useState<GroupsData | null>(null)
   const [editing, setEditing] = React.useState<Group | null>(null)
   const [creating, setCreating] = React.useState(false)
@@ -115,7 +117,7 @@ export function GroupsSection() {
     if (!confirmDelete) return
     try {
       await deleteGroup(confirmDelete.id)
-      toast.success("小组已删除")
+      toast.success(t("ui.settings.groups.deleted"))
       setConfirmDelete(null)
       load()
     } catch (e) {
@@ -123,18 +125,18 @@ export function GroupsSection() {
     }
   }
 
-  if (!data) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+  if (!data) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   return (
     <Card className="edge-highlight">
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <CardTitle>小组管理</CardTitle>
-            <CardDescription>成员可属于多个小组；顶栏切换小组后，文件可见范围、权限与待办随之收窄</CardDescription>
+            <CardTitle>{t("ui.settings.groups.title")}</CardTitle>
+            <CardDescription>{t("ui.settings.groups.description")}</CardDescription>
           </div>
           <Button size="sm" onClick={() => setCreating(true)}>
-            <Icon name="plus" data-icon="inline-start" /> 新建小组
+            <Icon name="plus" data-icon="inline-start" /> {t("ui.settings.groups.create")}
           </Button>
         </div>
       </CardHeader>
@@ -145,8 +147,8 @@ export function GroupsSection() {
               <EmptyMedia variant="icon">
                 <Icon name="layers" />
               </EmptyMedia>
-              <EmptyTitle>还没有小组</EmptyTitle>
-              <EmptyDescription>点击右上角「新建小组」，为不同团队划分可见范围与权限</EmptyDescription>
+              <EmptyTitle>{t("ui.settings.groups.empty_title")}</EmptyTitle>
+              <EmptyDescription>{t("ui.settings.groups.empty_description")}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -176,12 +178,12 @@ export function GroupsSection() {
       <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除小组「{confirmDelete?.name}」？</AlertDialogTitle>
-            <AlertDialogDescription>小组成员关系与可见范围将一并删除，该小组的待办会转为全体可见。</AlertDialogDescription>
+            <AlertDialogTitle>{t("ui.settings.groups.delete_confirm_title", { name: confirmDelete?.name ?? "" })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("ui.settings.groups.delete_confirm_description")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={(e) => { e.preventDefault(); doDelete() }}>删除</AlertDialogAction>
+            <AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={(e) => { e.preventDefault(); doDelete() }}>{t("ui.common.delete")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -196,6 +198,7 @@ function GroupCard({ group, members, onEdit, onDelete }: {
   onEdit: () => void
   onDelete: () => void
 }) {
+  const t = useT()
   const names = members.filter((m) => group.members.includes(m.id)).map((m) => m.username)
 
   return (
@@ -206,50 +209,50 @@ function GroupCard({ group, members, onEdit, onDelete }: {
         <span className="size-2.5 shrink-0 rounded-full" style={{ background: group.color }} aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate font-medium">{group.name}</span>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label={`${group.name} 的操作`} />}>
+          <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label={t("ui.settings.groups.actions_for", { name: group.name })} />}>
             <Icon name="ellipsis-vertical" className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={onEdit}>
-              <Icon name="pencil-line" /> 编辑小组
+              <Icon name="pencil-line" /> {t("ui.settings.groups.edit")}
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={onDelete}>
-              <Icon name="trash-2" /> 删除
+              <Icon name="trash-2" /> {t("ui.common.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><Icon name="users" className="size-3.5" />{group.members.length} 成员</span>
-        <span className="flex items-center gap-1"><Icon name="crown" className="size-3.5" />{group.leaders.length} 组长</span>
+        <span className="flex items-center gap-1"><Icon name="users" className="size-3.5" />{t("ui.settings.groups.member_count", { n: group.members.length })}</span>
+        <span className="flex items-center gap-1"><Icon name="crown" className="size-3.5" />{t("ui.settings.groups.leader_count", { n: group.leaders.length })}</span>
         <span className="flex items-center gap-1">
           <Icon name={group.whitelist.length ? "filter" : "infinity"} className="size-3.5" />
-          {group.whitelist.length ? `白名单 ${group.whitelist.length}` : "可见不限"}
-          {group.blacklist.length > 0 ? ` · 隐藏 ${group.blacklist.length}` : ""}
+          {group.whitelist.length ? t("ui.settings.groups.whitelist_count", { n: group.whitelist.length }) : t("ui.settings.groups.visibility_unlimited")}
+          {group.blacklist.length > 0 ? t("ui.settings.groups.hidden_count", { n: group.blacklist.length }) : ""}
         </span>
       </div>
 
       <p className="line-clamp-1 text-xs text-muted-foreground">
-        {names.length ? names.join("、") : "暂无成员"}
+        {names.length ? names.join(t("ui.settings.groups.name_separator")) : t("ui.settings.groups.no_members")}
       </p>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">
         <ContextMenuItem onClick={onEdit}>
-          <Icon name="pencil-line" /> 编辑小组
+          <Icon name="pencil-line" /> {t("ui.settings.groups.edit")}
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => copyText(group.name, "已复制小组名")}>
-          <Icon name="clipboard-copy" /> 复制小组名
+        <ContextMenuItem onClick={() => copyText(group.name, t("ui.settings.groups.copied_name"))}>
+          <Icon name="clipboard-copy" /> {t("ui.settings.groups.copy_name")}
         </ContextMenuItem>
         {group.members.length > 0 && (
-          <ContextMenuItem onClick={() => copyText(names.join("、"), "已复制成员名单")}>
-            <Icon name="users" /> 复制成员名单
+          <ContextMenuItem onClick={() => copyText(names.join(t("ui.settings.groups.name_separator")), t("ui.settings.groups.copied_members"))}>
+            <Icon name="users" /> {t("ui.settings.groups.copy_members")}
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onClick={onDelete}>
-          <Icon name="trash-2" /> 删除
+          <Icon name="trash-2" /> {t("ui.common.delete")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -266,6 +269,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
+  const t = useT()
   const isNew = !group
   const [tab, setTab] = React.useState("basic")
   const [name, setName] = React.useState(group?.name || "")
@@ -315,7 +319,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
 
   const save = async () => {
     if (!name.trim()) {
-      setNameError("请输入小组名称")
+      setNameError(t("ui.settings.groups.name_required"))
       setTab("basic")
       return
     }
@@ -333,7 +337,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
       }
       if (isNew) await createGroup(payload)
       else await updateGroup(group.id, payload)
-      toast.success(isNew ? "小组已创建" : "小组已保存")
+      toast.success(isNew ? t("ui.settings.groups.created") : t("ui.settings.groups.saved"))
       onSaved()
     } catch (e) {
       toast.error((e as Error).message)
@@ -350,26 +354,26 @@ function GroupEditor({ group, members, onClose, onSaved }: {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{isNew ? "新建小组" : `编辑小组 · ${group.name}`}</DialogTitle>
+          <DialogTitle>{isNew ? t("ui.settings.groups.create") : t("ui.settings.groups.edit_title", { name: group.name })}</DialogTitle>
           <DialogDescription>
-            小组只做「收窄」：可见范围与权限都只能在超管设定的全局范围内收紧，不会放宽。
+            {t("ui.settings.groups.editor_description")}
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full">
-            <TabsTrigger value="basic">基本</TabsTrigger>
+            <TabsTrigger value="basic">{t("ui.settings.groups.tab_basic")}</TabsTrigger>
             <TabsTrigger value="members">
-              成员
+              {t("ui.settings.groups.tab_members")}
               {memberIds.size > 0 && <Badge variant="secondary" className="px-1 text-[10px]">{memberIds.size}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="scope">
-              可见范围
+              {t("ui.settings.groups.tab_scope")}
               {(whiteCount > 0 || blackCount > 0) && (
                 <Badge variant="secondary" className="px-1 text-[10px]">{whiteCount + blackCount}</Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="perms">权限</TabsTrigger>
+            <TabsTrigger value="perms">{t("ui.settings.groups.tab_perms")}</TabsTrigger>
           </TabsList>
 
           {/* 基本信息 */}
@@ -377,37 +381,37 @@ function GroupEditor({ group, members, onClose, onSaved }: {
             <ScrollArea className="h-[46vh] pr-3">
               <FieldGroup className="gap-6 py-1">
                 <Field data-invalid={nameError ? true : undefined}>
-                  <FieldLabel htmlFor="g-name">小组名称</FieldLabel>
+                  <FieldLabel htmlFor="g-name">{t("ui.settings.groups.name_label")}</FieldLabel>
                   <Input
                     id="g-name"
                     value={name}
                     aria-invalid={nameError ? true : undefined}
-                    placeholder="如：设计组"
+                    placeholder={t("ui.settings.groups.name_placeholder")}
                     onChange={(e) => { setName(e.target.value); if (nameError) setNameError(null) }}
                   />
                   {nameError ? (
                     <p role="alert" className="text-sm font-normal text-destructive">{nameError}</p>
                   ) : (
-                    <FieldDescription>最多 40 个字符，支持中英文、数字、空格与 _ . -</FieldDescription>
+                    <FieldDescription>{t("ui.settings.groups.name_hint")}</FieldDescription>
                   )}
                 </Field>
 
                 <Field orientation="horizontal">
-                  <FieldLabel>小组颜色</FieldLabel>
+                  <FieldLabel>{t("ui.settings.groups.color_label")}</FieldLabel>
                   <ColorPicker value={color} onChange={setColor} />
                 </Field>
 
                 <Separator />
 
                 <FieldSet>
-                  <FieldLegend variant="label">组长权限</FieldLegend>
+                  <FieldLegend variant="label">{t("ui.settings.groups.leader_caps")}</FieldLegend>
                   <FieldDescription className="mb-3">
-                    超管可下放给组长；未勾选的能力，组长在该小组内无法使用。
+                    {t("ui.settings.groups.leader_caps_hint")}
                   </FieldDescription>
                   <div className="grid gap-1">
                     {CAP_ITEMS.map(([key, label]) => (
                       <Field key={key} orientation="horizontal" className="rounded-lg bg-muted/40 px-3 py-2">
-                        <FieldLabel htmlFor={`cap-${key}`} className="flex-auto font-normal">{label}</FieldLabel>
+                        <FieldLabel htmlFor={`cap-${key}`} className="flex-auto font-normal">{t(label)}</FieldLabel>
                         <Switch
                           id={`cap-${key}`}
                           checked={!!leaderCaps[key as keyof typeof leaderCaps]}
@@ -430,21 +434,20 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                     <Icon name="search" />
                   </InputGroupAddon>
                   <InputGroupInput
-                    placeholder="搜索成员…"
+                    placeholder={t("ui.settings.groups.search_members_placeholder")}
                     value={memberQuery}
                     onChange={(e) => setMemberQuery(e.target.value)}
                   />
                 </InputGroup>
                 <p className="text-xs text-muted-foreground sm:ml-auto">
-                  已选 <span className="font-medium text-foreground">{memberIds.size}</span> 名成员、
-                  <span className="font-medium text-foreground">{leaderIds.size}</span> 名组长
+                  {t("ui.settings.groups.selected_summary", { members: memberIds.size, leaders: leaderIds.size })}
                 </p>
               </div>
 
               <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border">
                 {filtered.length === 0 ? (
                   <p className="p-6 text-center text-sm text-muted-foreground">
-                    {members.length === 0 ? "还没有成员，请先到「成员」页添加" : "没有匹配的成员"}
+                    {members.length === 0 ? t("ui.settings.groups.no_members_hint") : t("ui.settings.groups.no_matching_members")}
                   </p>
                 ) : (
                   <div className="flex flex-col p-1">
@@ -463,7 +466,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                           <label htmlFor={`m-${m.id}`} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                             <Avatar owner={`u-${m.id}`} name={m.username} size={20} />
                             <span className="truncate text-sm">{m.username}</span>
-                            {m.disabled && <Badge variant="secondary" className="text-[10px]">已禁用</Badge>}
+                            {m.disabled && <Badge variant="secondary" className="text-[10px]">{t("ui.common.disabled")}</Badge>}
                           </label>
                           <Button
                             type="button"
@@ -475,7 +478,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                             onClick={() => toggleLeader(m.id)}
                           >
                             {isLead && <Icon name="crown" data-icon="inline-start" />}
-                            组长
+                            {t("ui.settings.groups.leader_label")}
                           </Button>
                         </div>
                       )
@@ -483,7 +486,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                   </div>
                 )}
               </ScrollArea>
-              <p className="text-xs text-muted-foreground">取消成员资格会同时取消其组长身份。</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.groups.member_hint")}</p>
             </div>
           </TabsContent>
 
@@ -494,44 +497,44 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                 <Field>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <FieldLabel htmlFor="g-white" className="flex items-center gap-2">
-                      白名单
+                      {t("ui.settings.groups.whitelist_label")}
                       {whiteCount > 0
                         ? <Badge variant="secondary" className="px-1 text-[10px]">{whiteCount}</Badge>
-                        : <Badge variant="outline" className="px-1 text-[10px]">不限</Badge>}
+                        : <Badge variant="outline" className="px-1 text-[10px]">{t("ui.settings.groups.unlimited")}</Badge>}
                     </FieldLabel>
                     <Button size="xs" variant="outline" onClick={() => setPicking("white")}>
-                      <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                      <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.settings.groups.pick_from_dir")}
                     </Button>
                   </div>
                   <Textarea
                     id="g-white"
                     className="h-32 resize-none font-mono text-xs"
-                    placeholder={"每行一个目录，相对网盘根目录：\n项目A\n公共资料"}
+                    placeholder={t("ui.settings.groups.whitelist_placeholder")}
                     value={whitelist}
                     onChange={(e) => setWhitelist(e.target.value)}
                   />
-                  <FieldDescription>留空表示不限制；填了则成员只能看到这些目录及其子目录。</FieldDescription>
+                  <FieldDescription>{t("ui.settings.groups.whitelist_hint")}</FieldDescription>
                 </Field>
 
                 <Field>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <FieldLabel htmlFor="g-black" className="flex items-center gap-2">
-                      黑名单
+                      {t("ui.settings.groups.blacklist_label")}
                       {blackCount > 0 && <Badge variant="secondary" className="px-1 text-[10px]">{blackCount}</Badge>}
                     </FieldLabel>
                     <Button size="xs" variant="outline" onClick={() => setPicking("black")}>
-                      <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                      <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.settings.groups.pick_from_dir")}
                     </Button>
                   </div>
                   <Textarea
                     id="g-black"
                     className="h-32 resize-none font-mono text-xs"
-                    placeholder={"每行一个目录：\n机密\n财务报表"}
+                    placeholder={t("ui.settings.groups.blacklist_placeholder")}
                     value={blacklist}
                     onChange={(e) => setBlacklist(e.target.value)}
                   />
                   <FieldDescription>
-                    优先级高于白名单：同时命中时一律隐藏。不可见的目录对成员表现为「不存在」。
+                    {t("ui.settings.groups.blacklist_hint")}
                   </FieldDescription>
                 </Field>
               </FieldGroup>
@@ -543,12 +546,12 @@ function GroupEditor({ group, members, onClose, onSaved }: {
             <ScrollArea className="h-[46vh] pr-3">
               <FieldGroup className="gap-6 py-1">
                 <p className="text-sm text-muted-foreground">
-                  这里的开关只能在「权限」页设定的全局成员权限基础上继续关闭，无法放开全局已关闭的项。
+                  {t("ui.settings.groups.perms_hint")}
                 </p>
                 {PERM_GROUPS.map((permGroup) => (
-                  <FieldSet key={permGroup.title}>
-                    <FieldLegend variant="label">{permGroup.title}</FieldLegend>
-                    {permGroup.hint && <FieldDescription className="mb-3">{permGroup.hint}</FieldDescription>}
+                  <FieldSet key={permGroup.titleKey}>
+                    <FieldLegend variant="label">{t(permGroup.titleKey)}</FieldLegend>
+                    {permGroup.hintKey && <FieldDescription className="mb-3">{t(permGroup.hintKey)}</FieldDescription>}
                     <div className="grid gap-1 sm:grid-cols-2">
                       {permGroup.items.map(([key, label]) => {
                         // 写类子权限受总开关支配：总开关关闭时它们实际不生效，界面上同步置灰
@@ -560,7 +563,7 @@ function GroupEditor({ group, members, onClose, onSaved }: {
                             data-disabled={gated ? true : undefined}
                             className="rounded-md px-3 py-1.5 hover:bg-muted/40"
                           >
-                            <FieldLabel htmlFor={`perm-${key}`} className="flex-auto font-normal">{label}</FieldLabel>
+                            <FieldLabel htmlFor={`perm-${key}`} className="flex-auto font-normal">{t(label)}</FieldLabel>
                             <Switch
                               id={`perm-${key}`}
                               checked={perms[key] !== false}
@@ -579,9 +582,9 @@ function GroupEditor({ group, members, onClose, onSaved }: {
         </Tabs>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={onClose}>{t("ui.common.cancel")}</Button>
           <Button onClick={save} disabled={busy}>
-            {busy && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />} 保存
+            {busy && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />} {t("ui.common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

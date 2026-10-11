@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon"
 import { api } from "@/lib/api"
 import type { Entry } from "@/lib/types"
 import { joinPath, parentOf } from "@/lib/format"
+import { useT } from "@/lib/i18n"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { CONFLICT_CANCELLED, detectConflicts } from "@/lib/conflict"
@@ -27,6 +28,7 @@ export function DestPickerDialog({
   mode: "copy" | "move"
   onDone: () => void
 }) {
+  const t = useT()
   const [current, setCurrent] = React.useState("")
   const [dirs, setDirs] = React.useState<Entry[]>([])
   const [loading, setLoading] = React.useState(false)
@@ -73,7 +75,7 @@ export function DestPickerDialog({
       const conflicts = detectConflicts(sourceNames, existingNames)
       if (conflicts.length === 0) {
         await api.post(`/fs/${mode}`, { sources: sourcePaths, dest: current })
-        toast.success(mode === "copy" ? "复制完成" : "移动完成")
+        toast.success(mode === "copy" ? t("ui.browser.copy_done") : t("ui.browser.move_done"))
         onOpenChange(false)
         onDone()
       } else {
@@ -115,7 +117,7 @@ export function DestPickerDialog({
             }
             if (promises.length === 0) { setBusy(false); onOpenChange(false); return }
             await Promise.all(promises)
-            toast.success(mode === "copy" ? "复制完成" : "移动完成")
+            toast.success(mode === "copy" ? t("ui.browser.copy_done") : t("ui.browser.move_done"))
             setBusy(false)
             onOpenChange(false)
             onDone()
@@ -144,7 +146,7 @@ export function DestPickerDialog({
             className="rounded px-1 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => load("")}
           >
-            根目录
+            {t("ui.browser.root_dir")}
           </button>
           {crumbs.map((seg, i) => (
             <React.Fragment key={`${seg}-${i}`}>
@@ -166,13 +168,13 @@ export function DestPickerDialog({
                 onClick={() => load(parentOf(current))}
               >
                 <Icon name="corner-left-up" className="size-4 text-muted-foreground" />
-                返回上级
+                {t("ui.picker.parent")}
               </button>
             )}
             {loading ? (
-              <p className="px-2 py-4 text-center text-xs text-muted-foreground">加载中…</p>
+              <p className="px-2 py-4 text-center text-xs text-muted-foreground">{t("ui.common.loading")}</p>
             ) : dirs.length === 0 ? (
-              <p className="px-2 py-4 text-center text-xs text-muted-foreground">没有子文件夹</p>
+              <p className="px-2 py-4 text-center text-xs text-muted-foreground">{t("ui.picker.no_subfolders")}</p>
             ) : (
               dirs.map((dir) => {
                 const target = joinPath(current, dir.name)
@@ -196,10 +198,10 @@ export function DestPickerDialog({
           </div>
         </ScrollArea>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("ui.common.cancel")}</Button>
           <Button onClick={submit} disabled={busy || disabled}>
             {busy && <Icon name="loader-2" className="animate-spin" />}
-            {mode === "copy" ? "复制到此处" : "移动到此处"}
+            {mode === "copy" ? t("ui.dest_picker.copy_here") : t("ui.dest_picker.move_here")}
           </Button>
         </DialogFooter>
       </DialogContent>

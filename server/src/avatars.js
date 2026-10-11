@@ -3,6 +3,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { DATA_DIR, restrictFileMode } from "./env.js"
 import { avatarMaxBytes } from "./config.js"
+import { httpError } from "./http.js"
 
 // ============================================================================
 //  avatars.js - 用户头像（统一 128×128 WebP）
@@ -133,31 +134,27 @@ export function avatarPath(owner) {
  */
 export function saveAvatar(owner, buffer) {
   if (!isValidOwner(owner)) {
-    const err = new Error("头像标识无效")
-    err.status = 400
-    throw err
+    throw httpError(400, "头像标识无效", { errorKey: "api.avatars.owner_invalid" })
   }
   const max = avatarMaxBytes()
   if (!buffer || !buffer.length) {
-    const err = new Error("头像内容为空")
-    err.status = 400
-    throw err
+    throw httpError(400, "头像内容为空", { errorKey: "api.avatars.empty_content" })
   }
   if (buffer.length > max) {
-    const err = new Error(`头像体积超出限制（最大 ${Math.round(max / 1024)}KB）`)
-    err.status = 413
-    throw err
+    throw httpError(413, `头像体积超出限制（最大 ${Math.round(max / 1024)}KB）`, {
+      errorKey: "api.avatars.too_large",
+      errorParams: { maxKB: Math.round(max / 1024) },
+    })
   }
   const size = parseWebpSize(buffer)
   if (!size) {
-    const err = new Error("仅支持 WebP 格式头像")
-    err.status = 400
-    throw err
+    throw httpError(400, "仅支持 WebP 格式头像", { errorKey: "api.avatars.webp_only" })
   }
   if (size.width !== AVATAR_SIZE || size.height !== AVATAR_SIZE) {
-    const err = new Error(`头像尺寸必须为 ${AVATAR_SIZE}×${AVATAR_SIZE}（当前 ${size.width}×${size.height}）`)
-    err.status = 400
-    throw err
+    throw httpError(400, `头像尺寸必须为 ${AVATAR_SIZE}×${AVATAR_SIZE}（当前 ${size.width}×${size.height}）`, {
+      errorKey: "api.avatars.size_invalid",
+      errorParams: { size: AVATAR_SIZE, width: size.width, height: size.height },
+    })
   }
   const file = indexPath(owner)
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`

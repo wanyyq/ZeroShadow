@@ -29,16 +29,14 @@ import { SUPER_OWNER } from "@/lib/avatar-cache"
 import { createTodo, deleteTodo, fetchTodos, patchTodo, setTodoDone, fetchLeaderGroups, addGroupMembers, patchLeaderGroup } from "@/lib/api"
 import type { LeaderGroup, Member, Todo, TodosResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { translate, useT } from "@/lib/i18n"
 import { useNavigate } from "react-router-dom"
-
-const SCOPE_LABEL: Record<Todo["scope"], string> = { all: "全体", group: "小组", member: "成员" }
-const PRIORITY_LABEL: Record<Todo["priority"], string> = { high: "高", normal: "中", low: "低" }
 
 /** 复制纯文本并给出反馈 */
 function copyText(text: string, okMsg: string) {
   void navigator.clipboard?.writeText(text).then(
     () => toast.success(okMsg),
-    () => toast.error("复制失败，请手动选择文本")
+    () => toast.error(translate("ui.common.copy_failed"))
   )
 }
 
@@ -85,6 +83,7 @@ function dueState(todo: Todo): "overdue" | "today" | "future" | "none" {
 
 export function TeamPage() {
   const { me, ready } = useAuth()
+  const t = useT()
   const navigate = useNavigate()
   const [data, setData] = React.useState<TodosResponse | null>(null)
   const [status, setStatus] = React.useState("open")
@@ -132,7 +131,7 @@ export function TeamPage() {
     requestAnimationFrame(() => animateListIn(listRef.current))
   }, [status, scope, q])
 
-  if (!ready) return <AppShell><div className="p-8 text-center text-sm text-muted-foreground">加载中…</div></AppShell>
+  if (!ready) return <AppShell><div className="p-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</div></AppShell>
   if (me.role === "guest") {
     return (
       <AppShell>
@@ -140,11 +139,11 @@ export function TeamPage() {
           <Empty className="max-w-sm border">
             <EmptyHeader>
               <EmptyMedia variant="icon"><Icon name="clipboard-list" /></EmptyMedia>
-              <EmptyTitle>登录后可查看团队待办</EmptyTitle>
-              <EmptyDescription>团队待办面向超管、组长与被指派的成员开放</EmptyDescription>
+              <EmptyTitle>{t("ui.team.guest_title")}</EmptyTitle>
+              <EmptyDescription>{t("ui.team.guest_desc")}</EmptyDescription>
             </EmptyHeader>
             <Button onClick={() => navigate("/login")}>
-              <Icon name="log-in" data-icon="inline-start" /> 去登录
+              <Icon name="log-in" data-icon="inline-start" /> {t("ui.team.go_login")}
             </Button>
           </Empty>
         </div>
@@ -160,9 +159,9 @@ export function TeamPage() {
           <Empty className="max-w-sm border">
             <EmptyHeader>
               <EmptyMedia variant="icon"><Icon name="clipboard-list" /></EmptyMedia>
-              <EmptyTitle>团队待办已被关闭</EmptyTitle>
+              <EmptyTitle>{t("ui.team.disabled_title")}</EmptyTitle>
               <EmptyDescription>
-                管理员在「设置 → 权限」里关闭了团队待办功能；重新开启后这里就能继续使用
+                {t("ui.team.disabled_desc")}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -173,7 +172,7 @@ export function TeamPage() {
 
   const canCreate = !!data && (data.canCreateAll || data.leaderGroups.length > 0)
   const todos = data?.todos || []
-  const openCount = todos.filter((t) => !t.done).length
+  const openCount = todos.filter((x) => !x.done).length
 
   const toggleDone = async (todo: Todo) => {
     try {
@@ -188,7 +187,7 @@ export function TeamPage() {
     if (!confirmDelete) return
     try {
       await deleteTodo(confirmDelete.id)
-      toast.success("已删除")
+      toast.success(t("ui.team.deleted"))
       setConfirmDelete(null)
       load()
     } catch (e) {
@@ -203,12 +202,12 @@ export function TeamPage() {
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <h1 className="font-heading text-2xl font-semibold tracking-tight">团队待办</h1>
-              <p className="text-sm text-muted-foreground">超管与组长可下发任务，成员按指派推进</p>
+              <h1 className="font-heading text-2xl font-semibold tracking-tight">{t("ui.team.page_title")}</h1>
+              <p className="text-sm text-muted-foreground">{t("ui.team.page_subtitle")}</p>
             </div>
             {canCreate && (
               <Button size="sm" onClick={() => { setEditing(null); setEditorOpen(true) }}>
-                <Icon name="plus" data-icon="inline-start" /> 新建待办
+                <Icon name="plus" data-icon="inline-start" /> {t("ui.team.new_todo")}
               </Button>
             )}
           </div>
@@ -220,9 +219,9 @@ export function TeamPage() {
               value={[status]}
               onValueChange={(v) => { const next = v[v.length - 1]; if (next) setStatus(next) }}
             >
-              <ToggleGroupItem value="open">进行中</ToggleGroupItem>
-              <ToggleGroupItem value="done">已完成</ToggleGroupItem>
-              <ToggleGroupItem value="all">全部</ToggleGroupItem>
+              <ToggleGroupItem value="open">{t("ui.team.status_open")}</ToggleGroupItem>
+              <ToggleGroupItem value="done">{t("ui.team.status_done")}</ToggleGroupItem>
+              <ToggleGroupItem value="all">{t("ui.common.all")}</ToggleGroupItem>
             </ToggleGroup>
 
             <span className="hidden h-5 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
@@ -232,14 +231,14 @@ export function TeamPage() {
               value={[scope]}
               onValueChange={(v) => { const next = v[v.length - 1]; if (next) setScope(next) }}
             >
-              <ToggleGroupItem value="all">全部范围</ToggleGroupItem>
-              <ToggleGroupItem value="group">小组</ToggleGroupItem>
-              <ToggleGroupItem value="member">成员</ToggleGroupItem>
+              <ToggleGroupItem value="all">{t("ui.team.filter_all_scopes")}</ToggleGroupItem>
+              <ToggleGroupItem value="group">{t("ui.team.scope_group")}</ToggleGroupItem>
+              <ToggleGroupItem value="member">{t("ui.team.scope_member")}</ToggleGroupItem>
             </ToggleGroup>
 
             <InputGroup className="h-8 w-full sm:ml-auto sm:w-48">
               <InputGroupAddon><Icon name="search" /></InputGroupAddon>
-              <InputGroupInput placeholder="搜索待办…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <InputGroupInput placeholder={t("ui.team.search_todos_placeholder")} value={q} onChange={(e) => setQ(e.target.value)} />
             </InputGroup>
           </div>
 
@@ -247,17 +246,17 @@ export function TeamPage() {
           <div className="edge-highlight flex flex-col overflow-hidden rounded-xl border border-border bg-card">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <Icon name="list-checks" className="size-3.5" />
-              <span>共 {todos.length} 条</span>
-              {status !== "done" && <span>· 未完成 {openCount} 条</span>}
+              <span>{t("ui.team.total_count", { n: todos.length })}</span>
+              {status !== "done" && <span>{t("ui.team.open_count", { n: openCount })}</span>}
             </div>
 
             {todos.length === 0 ? (
               <Empty className="border-0">
                 <EmptyHeader>
                   <EmptyMedia variant="icon"><Icon name="clipboard-check" /></EmptyMedia>
-                  <EmptyTitle>暂无待办</EmptyTitle>
+                  <EmptyTitle>{t("ui.team.empty_title")}</EmptyTitle>
                   <EmptyDescription>
-                    {canCreate ? "点击右上角「新建待办」下发第一条任务" : "当前筛选条件下没有待办"}
+                    {canCreate ? t("ui.team.empty_can_create_desc") : t("ui.team.empty_filtered_desc")}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -295,12 +294,12 @@ export function TeamPage() {
       <AlertDialog open={confirmDelete !== null} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这条待办？</AlertDialogTitle>
-            <AlertDialogDescription>删除后不可恢复。</AlertDialogDescription>
+            <AlertDialogTitle>{t("ui.team.delete_confirm_title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("ui.team.delete_confirm_desc")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={(e) => { e.preventDefault(); doDelete() }}>删除</AlertDialogAction>
+            <AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={(e) => { e.preventDefault(); doDelete() }}>{t("ui.common.delete")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -315,8 +314,21 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
   onEdit: () => void
   onDelete: () => void
 }) {
+  const t = useT()
+  // scope / priority 的取值本身是发回服务端的数据，这里只做「值 → 文案」的映射
+  const scopeLabels: Record<Todo["scope"], string> = {
+    all: t("ui.team.scope_all"),
+    group: t("ui.team.scope_group"),
+    member: t("ui.team.scope_member"),
+  }
+  const priorityLabels: Record<Todo["priority"], string> = {
+    high: t("ui.team.priority_high"),
+    normal: t("ui.team.priority_normal"),
+    low: t("ui.team.priority_low"),
+  }
   const ds = dueState(todo)
   const canOperate = todo.canEdit || todo.canComplete || todo.canManage
+  const toggleLabel = todo.done ? t("ui.team.action_mark_undone") : t("ui.team.action_mark_done")
   return (
     <ContextMenu>
       <ContextMenuTrigger render={<div />}>
@@ -325,7 +337,7 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
         className="mt-0.5"
         checked={todo.done}
         onCheckedChange={onToggle}
-        aria-label={todo.done ? "标记为未完成" : "标记为已完成"}
+        aria-label={todo.done ? t("ui.team.mark_undone") : t("ui.team.mark_done")}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start gap-2">
@@ -336,27 +348,27 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
             variant={todo.priority === "high" ? "default" : todo.priority === "low" ? "outline" : "secondary"}
             className="shrink-0 text-[10px]"
           >
-            {PRIORITY_LABEL[todo.priority]}
+            {priorityLabels[todo.priority]}
           </Badge>
           {canOperate && (
             <DropdownMenu>
-              <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label="待办操作" />}>
+              <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" aria-label={t("ui.team.todo_actions")} />}>
                 <Icon name="ellipsis-vertical" className="size-3.5" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {todo.canEdit && (
                   <DropdownMenuItem onClick={onEdit}>
-                    <Icon name="pencil-line" /> 编辑
+                    <Icon name="pencil-line" /> {t("ui.common.edit")}
                   </DropdownMenuItem>
                 )}
                 {todo.canComplete && (
                   <DropdownMenuItem onClick={onToggle}>
-                    <Icon name={todo.done ? "undo-2" : "check"} /> {todo.done ? "标记未完成" : "标记完成"}
+                    <Icon name={todo.done ? "undo-2" : "check"} /> {toggleLabel}
                   </DropdownMenuItem>
                 )}
                 {todo.canManage && (
                   <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                    <Icon name="trash-2" /> 删除
+                    <Icon name="trash-2" /> {t("ui.common.delete")}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -369,7 +381,7 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1">
             <Icon name="layers" className="size-3" />
-            {SCOPE_LABEL[todo.scope]}
+            {scopeLabels[todo.scope]}
             {todo.groupName ? `·${todo.groupName}` : ""}
             {todo.memberName ? `·${todo.memberName}` : ""}
           </span>
@@ -384,7 +396,7 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
             >
               <Icon name="clock" className="size-3" />
               {formatDue(todo.dueAt)}
-              {ds === "overdue" ? "（已逾期）" : ds === "today" ? "（今天）" : ""}
+              {ds === "overdue" ? t("ui.team.due_overdue") : ds === "today" ? t("ui.team.due_today") : ""}
             </span>
           )}
           <span className="flex items-center gap-1">
@@ -393,9 +405,9 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
               name={todo.createdBy}
               size={16}
             />
-            {todo.createdBy || "未知"}
+            {todo.createdBy || t("ui.common.unknown")}
           </span>
-          {todo.done && todo.doneBy && <span>由 {todo.doneBy} 完成</span>}
+          {todo.done && todo.doneBy && <span>{t("ui.team.done_by", { name: todo.doneBy })}</span>}
         </div>
       </div>
         </div>
@@ -403,28 +415,28 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
       <ContextMenuContent className="w-52">
         {todo.canEdit && (
           <ContextMenuItem onClick={onEdit}>
-            <Icon name="pencil-line" /> 编辑
+            <Icon name="pencil-line" /> {t("ui.common.edit")}
           </ContextMenuItem>
         )}
         {todo.canComplete && (
           <ContextMenuItem onClick={onToggle}>
-            <Icon name={todo.done ? "undo-2" : "check"} /> {todo.done ? "标记未完成" : "标记完成"}
+            <Icon name={todo.done ? "undo-2" : "check"} /> {toggleLabel}
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => copyText(todo.title, "已复制标题")}>
-          <Icon name="clipboard-copy" /> 复制标题
+        <ContextMenuItem onClick={() => copyText(todo.title, t("ui.team.copied_title"))}>
+          <Icon name="clipboard-copy" /> {t("ui.team.copy_title")}
         </ContextMenuItem>
         {todo.note && (
-          <ContextMenuItem onClick={() => copyText(todo.note, "已复制备注")}>
-            <Icon name="clipboard-list" /> 复制备注
+          <ContextMenuItem onClick={() => copyText(todo.note, t("ui.team.copied_note"))}>
+            <Icon name="clipboard-list" /> {t("ui.team.copy_note")}
           </ContextMenuItem>
         )}
         {todo.canManage && (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem variant="destructive" onClick={onDelete}>
-              <Icon name="trash-2" /> 删除
+              <Icon name="trash-2" /> {t("ui.common.delete")}
             </ContextMenuItem>
           </>
         )}
@@ -435,6 +447,7 @@ function TodoRow({ todo, onToggle, onEdit, onDelete }: {
 
 /** 「我管理的小组」：一行一个小组，成员与可见范围的管理收进对话框，列表本身保持清爽 */
 function LeaderPanel({ groups, allMembers, onChanged }: { groups: LeaderGroup[]; allMembers: Member[]; onChanged: () => void }) {
+  const t = useT()
   const [managingId, setManagingId] = React.useState<string | null>(null)
   // 存 id 而不是对象：onChanged() 重拉之后这里自动拿到最新的成员与可见范围
   const managing = managingId ? groups.find((g) => g.id === managingId) ?? null : null
@@ -443,10 +456,10 @@ function LeaderPanel({ groups, allMembers, onChanged }: { groups: LeaderGroup[];
     <Card className="gap-0 py-0 edge-highlight">
       <CardHeader className="gap-1 border-b border-border/60 py-4">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-sm">我管理的小组</CardTitle>
+          <CardTitle className="text-sm">{t("ui.team.leader_panel_title")}</CardTitle>
           <Badge variant="secondary" className="text-[10px]">{groups.length}</Badge>
         </div>
-        <CardDescription>作为组长，在这里管理本组成员与可见范围</CardDescription>
+        <CardDescription>{t("ui.team.leader_panel_desc")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col divide-y divide-border/50 p-0">
         {groups.map((g) => (
@@ -455,10 +468,10 @@ function LeaderPanel({ groups, allMembers, onChanged }: { groups: LeaderGroup[];
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="truncate text-sm font-medium">{g.name}</span>
-                <Badge variant="secondary" className="text-[10px]">{g.memberCount} 成员</Badge>
+                <Badge variant="secondary" className="text-[10px]">{t("ui.team.member_count", { n: g.memberCount })}</Badge>
                 <Badge variant="outline" className="text-[10px]">
-                  {g.whitelist.length ? `白名单 ${g.whitelist.length}` : "可见不限"}
-                  {g.blacklist.length ? ` · 隐藏 ${g.blacklist.length}` : ""}
+                  {g.whitelist.length ? t("ui.team.whitelist_count", { n: g.whitelist.length }) : t("ui.team.visibility_unrestricted")}
+                  {g.blacklist.length ? t("ui.team.blacklist_hidden_count", { n: g.blacklist.length }) : ""}
                 </Badge>
               </div>
               {g.canViewMembers && g.members.length > 0 && (
@@ -469,12 +482,12 @@ function LeaderPanel({ groups, allMembers, onChanged }: { groups: LeaderGroup[];
                       {m.username}
                     </span>
                   ))}
-                  {g.members.length > 6 && <span>等 {g.members.length} 人</span>}
+                  {g.members.length > 6 && <span>{t("ui.team.more_members", { n: g.members.length })}</span>}
                 </div>
               )}
             </div>
             <Button size="sm" variant="outline" className="shrink-0" onClick={() => setManagingId(g.id)}>
-              <Icon name="sliders-horizontal" data-icon="inline-start" /> 管理
+              <Icon name="sliders-horizontal" data-icon="inline-start" /> {t("ui.team.manage")}
             </Button>
           </div>
         ))}
@@ -500,6 +513,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
   onClose: () => void
   onChanged: () => void
 }) {
+  const t = useT()
   const [tab, setTab] = React.useState("members")
   const confirm = useConfirm()
   const [query, setQuery] = React.useState("")
@@ -526,9 +540,9 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
     // 移出会连带取消组长身份，属于容易误点且不好恢复的操作，必须二次确认。
     // 动作交给确认框执行：请求失败时框会保持打开并显示原因，不会"看起来成功"。
     await confirm({
-      title: `把「${m.username}」移出「${group.name}」？`,
-      description: "移出后 TA 将看不到本组可见的内容；如果 TA 是本组组长，组长身份也会一并取消。",
-      confirmText: "移出小组",
+      title: t("ui.team.remove_member_title", { name: m.username, group: group.name }),
+      description: t("ui.team.remove_member_desc"),
+      confirmText: t("ui.team.remove_from_group"),
       onConfirm: async () => {
         await addGroupMembers(group.id, [m.id], "remove")
         onChanged()
@@ -542,7 +556,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
         whitelist: white.split("\n").map((l) => l.trim()).filter(Boolean),
         blacklist: black.split("\n").map((l) => l.trim()).filter(Boolean),
       })
-      toast.success("可见范围已保存")
+      toast.success(t("ui.team.visibility_saved"))
       onChanged()
     } catch (e) { toast.error((e as Error).message) } finally { setSaving(false) }
   }
@@ -566,34 +580,34 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
               {group.name}
             </DialogTitle>
             <DialogDescription>
-              {canManage ? "你是本组组长，可以调整成员与可见范围。" : "你只有查看权限；改动需要超管或具备相应能力的组长操作。"}
+              {canManage ? t("ui.team.dialog_leader_desc") : t("ui.team.dialog_viewer_desc")}
             </DialogDescription>
           </DialogHeader>
 
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="w-full">
               <TabsTrigger value="members">
-                成员
+                {t("ui.team.tab_members")}
                 <Badge variant="secondary" className="px-1 text-[10px]">{group.memberCount}</Badge>
               </TabsTrigger>
-              <TabsTrigger value="scope">可见范围</TabsTrigger>
+              <TabsTrigger value="scope">{t("ui.team.tab_visibility")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="members">
               {!group.canViewMembers ? (
                 <p className="py-12 text-center text-sm text-muted-foreground">
-                  组长能力里未开启「查看本组成员名单」
+                  {t("ui.team.no_view_members")}
                 </p>
               ) : (
                 <div className="flex h-[46vh] flex-col gap-3">
                   <InputGroup>
                     <InputGroupAddon><Icon name="search" /></InputGroupAddon>
-                    <InputGroupInput placeholder="搜索成员…" value={query} onChange={(e) => setQuery(e.target.value)} />
+                    <InputGroupInput placeholder={t("ui.team.search_members_placeholder")} value={query} onChange={(e) => setQuery(e.target.value)} />
                   </InputGroup>
                   <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border">
                     {filtered.length === 0 ? (
                       <p className="p-6 text-center text-sm text-muted-foreground">
-                        {allMembers.length === 0 ? "还没有成员" : "没有匹配的成员"}
+                        {allMembers.length === 0 ? t("ui.team.no_members") : t("ui.team.no_matching_members")}
                       </p>
                     ) : (
                       <div className="flex flex-col p-1">
@@ -603,19 +617,19 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                             <div key={m.id} className={cn("flex items-center gap-2.5 rounded-md px-2 py-1.5", joined && "bg-accent/40")}>
                               <Avatar owner={`u-${m.id}`} name={m.username} size={22} />
                               <span className="min-w-0 flex-1 truncate text-sm">{m.username}</span>
-                              {m.disabled && <Badge variant="secondary" className="text-[10px]">已禁用</Badge>}
+                              {m.disabled && <Badge variant="secondary" className="text-[10px]">{t("ui.common.disabled")}</Badge>}
                               {joined ? (
                                 <span className="flex shrink-0 items-center gap-1.5">
-                                  <Badge variant="outline" className="text-[10px]">本组</Badge>
+                                  <Badge variant="outline" className="text-[10px]">{t("ui.team.badge_in_group")}</Badge>
                                   {canManage && (
                                     <Button size="xs" variant="ghost" className="text-destructive" disabled={busyId === m.id} onClick={() => remove(m)}>
-                                      移出
+                                      {t("ui.team.action_remove_member")}
                                     </Button>
                                   )}
                                 </span>
                               ) : canManage ? (
                                 <Button size="xs" variant="outline" className="shrink-0" disabled={busyId === m.id} onClick={() => add(m.id)}>
-                                  <Icon name="plus" data-icon="inline-start" /> 加入
+                                  <Icon name="plus" data-icon="inline-start" /> {t("ui.team.action_add_member")}
                                 </Button>
                               ) : null}
                             </div>
@@ -624,7 +638,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                       </div>
                     )}
                   </ScrollArea>
-                  <p className="text-xs text-muted-foreground">移出小组会同时取消其组长身份。</p>
+                  <p className="text-xs text-muted-foreground">{t("ui.team.remove_hint")}</p>
                 </div>
               )}
             </TabsContent>
@@ -635,14 +649,14 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                   <Field>
                     <div className="flex items-center justify-between gap-2">
                       <FieldLabel htmlFor="lg-white" className="flex items-center gap-2">
-                        可见白名单
+                        {t("ui.team.whitelist_label")}
                         <Badge variant={whiteCount ? "secondary" : "outline"} className="px-1 text-[10px]">
-                          {whiteCount ? whiteCount : "不限"}
+                          {whiteCount ? whiteCount : t("ui.team.unlimited")}
                         </Badge>
                       </FieldLabel>
                       {canManage && (
                         <Button size="xs" variant="ghost" onClick={() => setPicking("white")}>
-                          <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                          <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.team.pick_from_browser")}
                         </Button>
                       )}
                     </div>
@@ -651,24 +665,24 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                       rows={5}
                       disabled={!canManage}
                       className="resize-none font-mono text-xs"
-                      placeholder={"每行一个目录，相对网盘根目录：\n项目A\n公共资料"}
+                      placeholder={t("ui.team.whitelist_placeholder")}
                       value={white}
                       onChange={(e) => setWhite(e.target.value)}
                     />
-                    <FieldDescription>留空表示不限制；填了则组员只能看到这些目录及其子目录。</FieldDescription>
+                    <FieldDescription>{t("ui.team.whitelist_hint")}</FieldDescription>
                   </Field>
 
                   <Field>
                     <div className="flex items-center justify-between gap-2">
                       <FieldLabel htmlFor="lg-black" className="flex items-center gap-2">
-                        隐藏黑名单
+                        {t("ui.team.blacklist_label")}
                         <Badge variant={blackCount ? "secondary" : "outline"} className="px-1 text-[10px]">
-                          {blackCount ? blackCount : "无"}
+                          {blackCount ? blackCount : t("ui.common.none")}
                         </Badge>
                       </FieldLabel>
                       {canManage && (
                         <Button size="xs" variant="ghost" onClick={() => setPicking("black")}>
-                          <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                          <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.team.pick_from_browser")}
                         </Button>
                       )}
                     </div>
@@ -677,17 +691,17 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                       rows={5}
                       disabled={!canManage}
                       className="resize-none font-mono text-xs"
-                      placeholder={"每行一个目录：\n机密\n财务报表"}
+                      placeholder={t("ui.team.blacklist_placeholder")}
                       value={black}
                       onChange={(e) => setBlack(e.target.value)}
                     />
-                    <FieldDescription>优先级高于白名单；不可见的目录对组员表现为「不存在」。</FieldDescription>
+                    <FieldDescription>{t("ui.team.blacklist_hint")}</FieldDescription>
                   </Field>
                 </FieldGroup>
 
                 <div className="mt-auto flex justify-end">
                   <Button size="sm" disabled={saving || !canManage} onClick={saveVisibility}>
-                    {saving && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />} 保存可见范围
+                    {saving && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />} {t("ui.team.save_visibility")}
                   </Button>
                 </div>
               </div>
@@ -695,7 +709,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
           </Tabs>
 
           <DialogFooter>
-            <Button variant="outline" onClick={onClose}>关闭</Button>
+            <Button variant="outline" onClick={onClose}>{t("ui.common.close")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -711,12 +725,13 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
+  const t = useT()
   const [title, setTitle] = React.useState(todo?.title || "")
   const [note, setNote] = React.useState(todo?.note || "")
   const [priority, setPriority] = React.useState<Todo["priority"]>(todo?.priority || "normal")
   const [dueAt, setDueAt] = React.useState(todo?.dueAt ? todo.dueAt.slice(0, 10) : "")
   const [allowAssigneeEdit, setAllowAssigneeEdit] = React.useState(todo?.allowAssigneeEdit || false)
-  const [titleError, setTitleError] = React.useState<string | null>(null)
+  const [titleError, setTitleError] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
 
   // 仅新建时可选择作用域/目标
@@ -728,13 +743,17 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
   const [memberId, setMemberId] = React.useState(todo?.memberId || "")
 
   const isNew = !todo
-  const scopeLabels: Record<Todo["scope"], string> = { all: "全体成员", group: "指定小组", member: "指定成员" }
+  const scopeLabels: Record<Todo["scope"], string> = {
+    all: t("ui.team.scope_option_all"),
+    group: t("ui.team.scope_option_group"),
+    member: t("ui.team.scope_option_member"),
+  }
   const canToggleAllowEdit = isNew || !!todo?.canManage
 
   const save = async () => {
-    if (!title.trim()) { setTitleError("请输入标题"); return }
-    if (isNew && scope === "group" && !groupId) { toast.error("请选择小组"); return }
-    if (isNew && scope === "member" && !memberId) { toast.error("请选择成员"); return }
+    if (!title.trim()) { setTitleError(true); return }
+    if (isNew && scope === "group" && !groupId) { toast.error(t("ui.team.group_required")); return }
+    if (isNew && scope === "member" && !memberId) { toast.error(t("ui.team.member_required")); return }
     setBusy(true)
     try {
       if (isNew) {
@@ -748,7 +767,7 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
           groupId: scope === "group" ? groupId : undefined,
           memberId: scope === "member" ? memberId : undefined,
         })
-        toast.success("已创建")
+        toast.success(t("ui.team.created"))
       } else {
         await patchTodo(todo.id, {
           title: title.trim(),
@@ -757,7 +776,7 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
           dueAt: dueAt || null,
           ...(todo.canManage ? { allowAssigneeEdit } : {}),
         })
-        toast.success("已保存")
+        toast.success(t("ui.common.saved"))
       }
       onSaved()
     } catch (e) {
@@ -771,11 +790,11 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{isNew ? "新建待办" : "编辑待办"}</DialogTitle>
+          <DialogTitle>{isNew ? t("ui.team.new_todo") : t("ui.team.edit_todo")}</DialogTitle>
           <DialogDescription>
             {isNew
-              ? "选择下发范围与优先级，被指派者会看到这条任务。"
-              : "标题、备注、优先级与截止日期都能改；下发范围只有创建者与管理者能改。"}
+              ? t("ui.team.editor_new_desc")
+              : t("ui.team.editor_edit_desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -786,49 +805,49 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
             {/* 内容：标题 + 备注 */}
             <div className="edge-highlight flex flex-col divide-y divide-border/60 rounded-xl border border-border bg-card px-4">
               <div className="flex flex-col gap-2 py-3.5">
-                <FieldLabel htmlFor="todo-title" className="text-sm">标题</FieldLabel>
+                <FieldLabel htmlFor="todo-title" className="text-sm">{t("ui.team.field_title")}</FieldLabel>
                 <Input
                   id="todo-title"
                   value={title}
                   autoFocus
                   aria-invalid={titleError ? true : undefined}
-                  placeholder="要做什么？"
-                  onChange={(e) => { setTitle(e.target.value); if (titleError) setTitleError(null) }}
+                  placeholder={t("ui.team.title_placeholder")}
+                  onChange={(e) => { setTitle(e.target.value); if (titleError) setTitleError(false) }}
                 />
                 {titleError
-                  ? <p role="alert" className="text-xs text-destructive">{titleError}</p>
-                  : <p className="text-xs text-muted-foreground">一句话说清要做什么，会显示在列表第一行。</p>}
+                  ? <p role="alert" className="text-xs text-destructive">{t("ui.team.title_required")}</p>
+                  : <p className="text-xs text-muted-foreground">{t("ui.team.title_hint")}</p>}
               </div>
 
               <div className="flex flex-col gap-2 py-3.5">
-                <FieldLabel htmlFor="todo-note" className="text-sm">备注</FieldLabel>
+                <FieldLabel htmlFor="todo-note" className="text-sm">{t("ui.team.field_note")}</FieldLabel>
                 <Textarea
                   id="todo-note"
                   rows={3}
                   className="resize-y"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="补充说明、验收标准、相关路径…（可选）"
+                  placeholder={t("ui.team.note_placeholder")}
                 />
               </div>
             </div>
 
             {/* 安排 */}
             <div className="edge-highlight flex flex-col divide-y divide-border/60 rounded-xl border border-border bg-card px-4">
-              <FormRow label="优先级" hint="列表里会用徽章标出高低">
+              <FormRow label={t("ui.team.field_priority")} hint={t("ui.team.priority_hint")}>
                 <ToggleGroup
                   size="sm"
                   className="w-fit"
                   value={[priority]}
                   onValueChange={(v) => { const next = v[v.length - 1] as Todo["priority"] | undefined; if (next) setPriority(next) }}
                 >
-                  <ToggleGroupItem value="high">高</ToggleGroupItem>
-                  <ToggleGroupItem value="normal">中</ToggleGroupItem>
-                  <ToggleGroupItem value="low">低</ToggleGroupItem>
+                  <ToggleGroupItem value="high">{t("ui.team.priority_high")}</ToggleGroupItem>
+                  <ToggleGroupItem value="normal">{t("ui.team.priority_normal")}</ToggleGroupItem>
+                  <ToggleGroupItem value="low">{t("ui.team.priority_low")}</ToggleGroupItem>
                 </ToggleGroup>
               </FormRow>
 
-              <FormRow label="截止日期" htmlFor="todo-due" hint="逾期未完成会标红">
+              <FormRow label={t("ui.team.field_due")} htmlFor="todo-due" hint={t("ui.team.due_hint")}>
                 {/* DatePicker 内部的按钮是 w-full，放进横向行里必须改回自适应宽度 */}
                 <DatePicker
                   id="todo-due"
@@ -842,7 +861,7 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
             {/* 下发范围：仅新建时可选 */}
             {isNew && scopeOptions.length > 0 && (
               <div className="edge-highlight flex flex-col divide-y divide-border/60 rounded-xl border border-border bg-card px-4">
-                <FormRow label="下发范围" hint="决定谁能看到这条待办">
+                <FormRow label={t("ui.team.field_scope")} hint={t("ui.team.scope_hint")}>
                   <ToggleGroup
                     size="sm"
                     className="w-fit flex-wrap"
@@ -857,35 +876,35 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
 
                 {scope === "group" && (
                   <div className="flex flex-col gap-2 py-3.5">
-                    <FieldLabel htmlFor="todo-group" className="text-sm">选择小组</FieldLabel>
+                    <FieldLabel htmlFor="todo-group" className="text-sm">{t("ui.team.select_group")}</FieldLabel>
                     <Select value={groupId} onValueChange={(v) => setGroupId(v || "")}>
                       <SelectTrigger id="todo-group">
-                        <SelectValue render={(_p, s) => <>{data.leaderGroups.find((g) => g.id === s.value)?.name || "选择小组"}</>}>
-                          选择小组
+                        <SelectValue render={(_p, s) => <>{data.leaderGroups.find((g) => g.id === s.value)?.name || t("ui.team.select_group")}</>}>
+                          {t("ui.team.select_group")}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {data.leaderGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">该小组的成员都会看到这条待办。</p>
+                    <p className="text-xs text-muted-foreground">{t("ui.team.group_scope_hint")}</p>
                   </div>
                 )}
 
                 {scope === "member" && (
                   <div className="flex flex-col gap-2 py-3.5">
-                    <FieldLabel htmlFor="todo-member" className="text-sm">选择成员</FieldLabel>
+                    <FieldLabel htmlFor="todo-member" className="text-sm">{t("ui.team.select_member")}</FieldLabel>
                     <Select value={memberId} onValueChange={(v) => setMemberId(v || "")}>
                       <SelectTrigger id="todo-member">
-                        <SelectValue render={(_p, s) => <>{data.members.find((m) => m.id === s.value)?.username || "选择成员"}</>}>
-                          选择成员
+                        <SelectValue render={(_p, s) => <>{data.members.find((m) => m.id === s.value)?.username || t("ui.team.select_member")}</>}>
+                          {t("ui.team.select_member")}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {data.members.map((m) => <SelectItem key={m.id} value={m.id}>{m.username}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">只有被指派的成员（和你）能看到这条待办。</p>
+                    <p className="text-xs text-muted-foreground">{t("ui.team.member_scope_hint")}</p>
                   </div>
                 )}
               </div>
@@ -902,10 +921,10 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
               />
               <div className="flex min-w-0 flex-col gap-0.5">
                 <FieldLabel htmlFor="todo-allow-edit" className={cn("text-sm", !canToggleAllowEdit && "opacity-60")}>
-                  允许被指派成员编辑内容
+                  {t("ui.team.allow_assignee_edit")}
                 </FieldLabel>
                 <span className="text-xs text-muted-foreground">
-                  {canToggleAllowEdit ? "开启后，被指派者也能改标题与备注。" : "只有创建者或管理者能改动这一项。"}
+                  {canToggleAllowEdit ? t("ui.team.allow_assignee_edit_on_hint") : t("ui.team.allow_assignee_edit_off_hint")}
                 </span>
               </div>
             </div>
@@ -913,10 +932,10 @@ function TodoEditor({ todo, data, onClose, onSaved }: {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={onClose}>{t("ui.common.cancel")}</Button>
           <Button onClick={save} disabled={busy}>
             {busy && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />}
-            {isNew ? "创建待办" : "保存修改"}
+            {isNew ? t("ui.team.create_todo") : t("ui.team.save_changes")}
           </Button>
         </DialogFooter>
       </DialogContent>

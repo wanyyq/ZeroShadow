@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 const SWATCHES = [
@@ -21,6 +22,7 @@ interface ColorPickerProps {
 }
 
 export function ColorPicker({ value, onChange, className, id }: ColorPickerProps) {
+  const t = useT()
   const [open, setOpen] = React.useState(false)
   const [text, setText] = React.useState(value)
   React.useEffect(() => setText(value), [value])
@@ -38,7 +40,7 @@ export function ColorPicker({ value, onChange, className, id }: ColorPickerProps
         render={
           <button
             type="button"
-            aria-label="选择颜色"
+            aria-label={t("ui.color_picker.select_color")}
             className={cn("size-9 shrink-0 rounded-md border border-border ring-offset-background transition-shadow focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", className)}
             style={{ background: HEX_RE.test(value) ? value : "#6b7280" }}
           />

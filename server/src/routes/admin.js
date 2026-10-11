@@ -6,7 +6,7 @@ import { batchMembers, createMembers, findById, findByUsername, listMembers, per
 import { getStatus } from "../status.js"
 import { applyTunnelConfig, tunnelStatus, validateCustomHost } from "../tunnel.js"
 import { aggregateLogs, clearLogs, info, logsExportName, logsToCsv, logsToJsonl, queryLogs } from "../logger.js"
-import { contentDisposition } from "../http.js"
+import { contentDisposition, httpError } from "../http.js"
 import { samePath, normRel, resolveAny } from "../safety.js"
 import {
   LEADER_CAPS,
@@ -27,12 +27,6 @@ import { getMetrics, readMetricsHistory } from "../metrics.js"
 const router = Router()
 
 router.use(requireRole("superadmin"))
-
-function httpError(status, message) {
-  const err = new Error(message)
-  err.status = status
-  return err
-}
 
 function actor(req) {
   return { user: req.auth.username, role: req.auth.role, ip: req.ip }
@@ -96,7 +90,10 @@ router.patch("/config", async (req, res, next) => {
       if (body[key] !== undefined) {
         const n = Number(body[key])
         if (!Number.isInteger(n) || n < min || n > max) {
-          throw httpError(400, `${key} 需为 ${min}-${max} 之间的整数`)
+          throw httpError(400, `${key} 需为 ${min}-${max} 之间的整数`, {
+            errorKey: "api.admin.numeric_range",
+            errorParams: { key, min, max },
+          })
         }
         updates[key] = n
       }
@@ -104,9 +101,22 @@ router.patch("/config", async (req, res, next) => {
     for (const key of BOOLEAN_KEYS) {
       if (body[key] !== undefined) updates[key] = !!body[key]
     }
+    if (body.defaultLang !== undefined) {
+      // 必须是当前真实可用的语言（内置 zh/en 或 data/lang 里存在的文件），
+      // 否则站点会指向一个不存在的语言，前端只能反复回落到中文
+      const code = String(body.defaultLang || "").trim()
+      if (!availableLangs().some((l) => l.code === code)) {
+        throw httpError(400, "defaultLang 必须是当前可用的语言代码", {
+          errorKey: "api.admin.default_lang_invalid",
+        })
+      }
+      updates.defaultLang = code
+    }
     if (body.defaultVisibility !== undefined) {
       if (typeof body.defaultVisibility !== "object" || body.defaultVisibility === null) {
-        throw httpError(400, "defaultVisibility 参数格式错误")
+        throw httpError(400, "defaultVisibility 参数格式错误", {
+          errorKey: "api.admin.default_visibility_invalid",
+        })
       }
       updates.defaultVisibility = {
         whitelist: cleanVisibilityPathList(body.defaultVisibility.whitelist),
@@ -116,7 +126,7 @@ router.patch("/config", async (req, res, next) => {
     for (const group of ["memberPerms", "guestPerms"]) {
       if (body[group] !== undefined) {
         if (typeof body[group] !== "object" || body[group] === null) {
-          throw httpError(400, "参数格式错误")
+          throw httpError(400, "参数格式错误", { errorKey: "api.admin.invalid_params" })
         }
         updates[group] = {}
         for (const [k, v] of Object.entries(body[group])) {
@@ -164,7 +174,9 @@ router.post("/members", async (req, res, next) => {
   try {
     const users = req.body?.users
     if (!Array.isArray(users) || !users.length || users.length > 200) {
-      throw httpError(400, "参数格式错误（单次最多 200 个）")
+      throw httpError(400, "参数格式错误（单次最多 200 个）", {
+        errorKey: "api.admin.members_create_params_invalid",
+      })
     }
     const results = await createMembers(users)
     const created = results.filter((r) => r.ok).map((r) => r.username)
@@ -181,7 +193,7 @@ router.post("/members/batch", async (req, res, next) => {
   try {
     const { action, ids } = req.body || {}
     if (!["enable", "disable", "delete"].includes(action) || !Array.isArray(ids) || !ids.length) {
-      throw httpError(400, "参数格式错误")
+      throw httpError(400, "参数格式错误", { errorKey: "api.admin.invalid_params" })
     }
     const idList = ids.map(String)
     const count = await batchMembers(action, idList)
@@ -201,8 +213,9 @@ router.post("/members/batch", async (req, res, next) => {
 
 router.post("/members/:id/password", async (req, res, next) => {
   try {
+    // resetPassword() 返回 { key, message }：文案由 users.js 一处拥有
     const error = await resetPassword(String(req.params.id), String(req.body?.password || ""))
-    if (error) throw httpError(400, error)
+    if (error) throw httpError(400, error.message, { errorKey: error.key })
     info("members_reset_password", { msg: req.params.id, ...actor(req) })
     res.json({ ok: true })
   } catch (err) {
@@ -213,14 +226,22 @@ router.post("/members/:id/password", async (req, res, next) => {
 router.patch("/members/:id", async (req, res, next) => {
   try {
     const user = findById(String(req.params.id))
-    if (!user) throw httpError(404, "用户不存在")
+    if (!user) throw httpError(404, "用户不存在", { errorKey: "api.admin.user_not_found" })
     if (req.body?.username) {
       const newName = String(req.body.username).trim()
       const USERNAME_RE = /^[A-Za-z0-9_.-]{2,32}$/
-      if (!USERNAME_RE.test(newName)) throw httpError(400, "用户名需为 2-32 位字母、数字、_ . -")
-      if (newName.toLowerCase() === env.superUser.toLowerCase()) throw httpError(400, "该用户名已被超级管理员占用")
+      if (!USERNAME_RE.test(newName)) {
+        throw httpError(400, "用户名需为 2-32 位字母、数字、_ . -", {
+          errorKey: "api.admin.username_invalid",
+        })
+      }
+      if (newName.toLowerCase() === env.superUser.toLowerCase()) {
+        throw httpError(400, "该用户名已被超级管理员占用", { errorKey: "api.admin.username_reserved" })
+      }
       const existing = findByUsername(newName)
-      if (existing && existing.id !== user.id) throw httpError(400, "用户名已存在")
+      if (existing && existing.id !== user.id) {
+        throw httpError(400, "用户名已存在", { errorKey: "api.admin.username_taken" })
+      }
       user.username = newName
       await persist()
       info("members_rename", { msg: `${req.params.id} → ${newName}`, ...actor(req) })
@@ -263,7 +284,7 @@ router.patch("/groups/:id", async (req, res, next) => {
 router.post("/groups/:id/members", async (req, res, next) => {
   try {
     const ids = req.body?.ids
-    if (!Array.isArray(ids)) throw httpError(400, "参数格式错误")
+    if (!Array.isArray(ids)) throw httpError(400, "参数格式错误", { errorKey: "api.admin.invalid_params" })
     const group = await addMembers(String(req.params.id), ids, req.body?.action === "remove" ? "remove" : "add")
     info("group_update", { msg: `${group.name} 成员调整`, ...actor(req) })
     res.json({ group })
@@ -324,7 +345,7 @@ router.get("/logs/export", async (req, res, next) => {
   try {
     const format = String(req.query.format || "jsonl").toLowerCase()
     if (format !== "jsonl" && format !== "csv") {
-      throw httpError(400, "format 只能是 jsonl 或 csv")
+      throw httpError(400, "format 只能是 jsonl 或 csv", { errorKey: "api.admin.logs_format_invalid" })
     }
     const days = Math.min(Math.max(Number(req.query.days) || 5, 1), 90)
     const auditOnly = req.query.audit === "1" || req.query.audit === "true"
@@ -417,8 +438,10 @@ router.post("/tunnel", async (req, res, next) => {
     const mode = body.mode === "custom" ? "custom" : body.mode === "localhostrun" ? "localhostrun" : body.mode === "pinggy" ? "pinggy" : "serveo"
     const customHost = String(body.customHost || "").trim()
     if (enabled && mode === "custom") {
+      // validateCustomHost() 返回 { key, message }：message 是中文原文（照搬进 error），
+      // key 是命名键。这样文案由 tunnel.js 一处拥有，不需要在这里维护"文案 → 键"的映射表。
       const invalid = validateCustomHost(customHost)
-      if (invalid) throw httpError(400, invalid)
+      if (invalid) throw httpError(400, invalid.message, { errorKey: invalid.key })
     }
     const config = await saveConfig((draft) => {
       draft.tunnel = { enabled, mode, customHost }
@@ -460,15 +483,20 @@ router.post("/trash/restore", async (req, res, next) => {
   try {
     const id = String(req.body?.id || "")
     const meta = getTrash(id)
-    if (!meta) throw httpError(404, "回收站里找不到这个项目")
+    if (!meta) throw httpError(404, "回收站里找不到这个项目", { errorKey: "api.fs.trash_not_found" })
     // 还原到原路径；也可以传 dest 还原到别处（前端暂未用到，但接口留出余地）
     const targetRel = String(req.body?.dest ?? meta.rel)
     const resolved = resolveAny(normRel(targetRel))
-    if (resolved.isSoft) throw httpError(403, "外部映射目录仅支持只读操作")
+    if (resolved.isSoft) {
+      // 与 fs.js 里"只读映射目录"用同一个键：文案只有一份，避免两处各建一个同文案的键
+      throw httpError(403, "外部映射目录仅支持只读操作", { errorKey: "api.fs.soft_read_only" })
+    }
     const result = await restoreTrash(id, resolved, !!req.body?.overwrite)
     if (result && result.conflict) {
       return res.status(409).json({
         error: `「${meta.rel}」的位置上已经有一个同名项目。请先改名或删除它，或者选择覆盖。`,
+        errorKey: "api.admin.trash_restore_conflict",
+        errorParams: { name: meta.rel },
         code: "RESTORE_CONFLICT",
       })
     }
@@ -483,7 +511,7 @@ router.post("/trash/purge", async (req, res, next) => {
   try {
     const id = String(req.body?.id || "")
     const meta = getTrash(id)
-    if (!meta) throw httpError(404, "回收站里找不到这个项目")
+    if (!meta) throw httpError(404, "回收站里找不到这个项目", { errorKey: "api.fs.trash_not_found" })
     await purgeTrash(id)
     info("trash_purge", { msg: meta.rel, ...actor(req) })
     res.json({ ok: true })

@@ -7,6 +7,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Icon } from "@/components/icon"
 import type { ConflictAction, ConflictItem, ConflictResolution } from "@/lib/conflict"
 import { resolveDuplicateName } from "@/lib/conflict"
+import { useT } from "@/lib/i18n"
 
 interface ConflictDialogProps {
   open: boolean
@@ -25,6 +26,7 @@ export function ConflictDialog({
   directoryNames,
   onResolved,
 }: ConflictDialogProps) {
+  const t = useT()
   const dirs = directoryNames ?? new Set<string>()
   const defaultAction = (name: string): ConflictAction => dirs.has(name) ? "merge" : "rename"
 
@@ -91,10 +93,10 @@ export function ConflictDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>同名文件处理</DialogTitle>
+          <DialogTitle>{t("ui.conflict.title")}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          目标位置已存在 {conflicts.length} 个同名项目，请选择处理方式：
+          {t("ui.conflict.description", { count: conflicts.length })}
         </p>
         <ScrollArea className="max-h-64 rounded-md border border-border">
           <div className="divide-y divide-border">
@@ -118,20 +120,20 @@ export function ConflictDialog({
                   >
                     <ToggleGroupItem value="rename">
                       <Icon name="pencil-line" data-icon="inline-start" />
-                      重命名为 {resolvedNames[i]}
+                      {t("ui.conflict.rename_to", { name: resolvedNames[i] })}
                     </ToggleGroupItem>
                     <ToggleGroupItem value="skip">
                       <Icon name="circle-slash" data-icon="inline-start" />
-                      跳过
+                      {t("ui.conflict.skip")}
                     </ToggleGroupItem>
                     <ToggleGroupItem value="overwrite">
                       <Icon name="replace" data-icon="inline-start" />
-                      覆盖
+                      {t("ui.conflict.overwrite")}
                     </ToggleGroupItem>
                     {isDir && (
                       <ToggleGroupItem value="merge">
                         <Icon name="folder-sync" data-icon="inline-start" />
-                        合并
+                        {t("ui.conflict.merge")}
                       </ToggleGroupItem>
                     )}
                   </ToggleGroup>
@@ -143,12 +145,12 @@ export function ConflictDialog({
         {conflicts.length > 1 && (
           <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
             <Checkbox checked={applyAll} onCheckedChange={(v) => setApplyAll(!!v)} />
-            对接下来所有同名项目执行此操作
+            {t("ui.conflict.apply_to_all")}
           </label>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button onClick={handleConfirm}>确认</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("ui.common.cancel")}</Button>
+          <Button onClick={handleConfirm}>{t("ui.common.confirm")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

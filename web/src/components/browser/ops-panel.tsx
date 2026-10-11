@@ -1,11 +1,13 @@
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Icon } from "@/components/icon"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { useOperations } from "@/state/operations"
 import { useUploads } from "@/state/uploads"
 
 export function OpsPanel() {
+  const t = useT()
   const { jobs, dismiss, clearFinished } = useOperations()
   const { jobs: uploadJobs } = useUploads()
   const active = jobs.filter((j) => j.status === "running").length
@@ -21,9 +23,9 @@ export function OpsPanel() {
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-sm font-medium">
-          {active > 0 ? `正在处理 ${active} 项` : "处理完成"}
+          {active > 0 ? t("ui.ops.processing_n", { n: active }) : t("ui.ops.done")}
         </span>
-        <Button variant="ghost" size="icon-xs" aria-label="清除已完成" onClick={clearFinished}>
+        <Button variant="ghost" size="icon-xs" aria-label={t("ui.progress.clear_finished")} onClick={clearFinished}>
           <Icon name="x" />
         </Button>
       </div>

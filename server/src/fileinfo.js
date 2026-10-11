@@ -54,102 +54,106 @@ function hexOf(buf, n = 16) {
   return [...buf.subarray(0, n)].map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")
 }
 
-/** 固定偏移的字节/字符串签名表（顺序即优先级） */
+/**
+ * 固定偏移的字节/字符串签名表（顺序即优先级）。
+ * key 是文案的命名键（前端查字典），label 是中文原文兜底；没有 key 的说明文案
+ * 本身是 ASCII（如 Monkey's Audio），任何语言下都无需翻译。
+ */
 const SIGNATURES = [
-  { off: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], label: "PNG 图像", mime: "image/png", kind: "image" },
-  { off: 0, bytes: [0xff, 0xd8, 0xff], label: "JPEG 图像", mime: "image/jpeg", kind: "image" },
-  { off: 0, ascii: "GIF87a", label: "GIF 图像", mime: "image/gif", kind: "image" },
-  { off: 0, ascii: "GIF89a", label: "GIF 图像", mime: "image/gif", kind: "image" },
-  { off: 0, ascii: "BM", label: "BMP 图像", mime: "image/bmp", kind: "image" },
-  { off: 0, ascii: "II*\u0000", label: "TIFF 图像（小端）", mime: "image/tiff", kind: "image" },
-  { off: 0, ascii: "MM\u0000*", label: "TIFF 图像（大端）", mime: "image/tiff", kind: "image" },
-  { off: 0, bytes: [0x00, 0x00, 0x01, 0x00], label: "ICO 图标", mime: "image/x-icon", kind: "image" },
-  { off: 0, bytes: [0x38, 0x42, 0x50, 0x53], label: "Photoshop 文档", mime: "image/vnd.adobe.photoshop", kind: "image" },
-  { off: 0, ascii: "%PDF-", label: "PDF 文档", mime: "application/pdf", kind: "document" },
-  { off: 0, bytes: [0x50, 0x4b, 0x03, 0x04], label: "ZIP 归档", mime: "application/zip", kind: "archive" },
-  { off: 0, bytes: [0x50, 0x4b, 0x05, 0x06], label: "ZIP 归档（空档案）", mime: "application/zip", kind: "archive" },
-  { off: 0, bytes: [0x50, 0x4b, 0x07, 0x08], label: "ZIP 分卷归档", mime: "application/zip", kind: "archive" },
-  { off: 0, ascii: "Rar!\u001a\u0007", label: "RAR 归档", mime: "application/vnd.rar", kind: "archive" },
-  { off: 0, bytes: [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], label: "7-Zip 归档", mime: "application/x-7z-compressed", kind: "archive" },
-  { off: 0, bytes: [0x1f, 0x8b], label: "GZip 压缩", mime: "application/gzip", kind: "archive" },
-  { off: 0, ascii: "BZh", label: "BZip2 压缩", mime: "application/x-bzip2", kind: "archive" },
-  { off: 0, bytes: [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00], label: "XZ 压缩", mime: "application/x-xz", kind: "archive" },
-  { off: 0, bytes: [0x28, 0xb5, 0x2f, 0xfd], label: "Zstandard 压缩", mime: "application/zstd", kind: "archive" },
-  { off: 0, ascii: "LZIP", label: "lzip 压缩", mime: "application/lzip", kind: "archive" },
-  { off: 0, bytes: [0x1f, 0x9d], label: "compress 压缩（.Z）", kind: "archive" },
-  { off: 0, ascii: "fLaC", label: "FLAC 音频", mime: "audio/flac", kind: "audio" },
-  { off: 0, ascii: "OggS", label: "Ogg 容器（Vorbis / Opus）", mime: "audio/ogg", kind: "audio" },
-  { off: 0, ascii: "ID3", label: "MP3 音频（带 ID3v2 标签）", mime: "audio/mpeg", kind: "audio" },
-  { off: 0, ascii: "MThd", label: "MIDI 音频", mime: "audio/midi", kind: "audio" },
-  { off: 0, ascii: "FORM", label: "IFF 容器（AIFF / ANIM）", kind: "audio" },
-  { off: 0, ascii: "caff", label: "CAF 音频", kind: "audio" },
+  { off: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], label: "PNG 图像", key: "meta.magic.png", mime: "image/png", kind: "image" },
+  { off: 0, bytes: [0xff, 0xd8, 0xff], label: "JPEG 图像", key: "meta.magic.jpeg", mime: "image/jpeg", kind: "image" },
+  { off: 0, ascii: "GIF87a", label: "GIF 图像", key: "meta.magic.gif", mime: "image/gif", kind: "image" },
+  { off: 0, ascii: "GIF89a", label: "GIF 图像", key: "meta.magic.gif", mime: "image/gif", kind: "image" },
+  { off: 0, ascii: "BM", label: "BMP 图像", key: "meta.magic.bmp", mime: "image/bmp", kind: "image" },
+  { off: 0, ascii: "II*\u0000", label: "TIFF 图像（小端）", key: "meta.magic.tiff_le", mime: "image/tiff", kind: "image" },
+  { off: 0, ascii: "MM\u0000*", label: "TIFF 图像（大端）", key: "meta.magic.tiff_be", mime: "image/tiff", kind: "image" },
+  { off: 0, bytes: [0x00, 0x00, 0x01, 0x00], label: "ICO 图标", key: "meta.magic.ico", mime: "image/x-icon", kind: "image" },
+  { off: 0, bytes: [0x38, 0x42, 0x50, 0x53], label: "Photoshop 文档", key: "meta.magic.photoshop", mime: "image/vnd.adobe.photoshop", kind: "image" },
+  { off: 0, ascii: "%PDF-", label: "PDF 文档", key: "meta.magic.pdf", mime: "application/pdf", kind: "document" },
+  { off: 0, bytes: [0x50, 0x4b, 0x03, 0x04], label: "ZIP 归档", key: "meta.magic.zip", mime: "application/zip", kind: "archive" },
+  { off: 0, bytes: [0x50, 0x4b, 0x05, 0x06], label: "ZIP 归档（空档案）", key: "meta.magic.zip_empty", mime: "application/zip", kind: "archive" },
+  { off: 0, bytes: [0x50, 0x4b, 0x07, 0x08], label: "ZIP 分卷归档", key: "meta.magic.zip_spanning", mime: "application/zip", kind: "archive" },
+  { off: 0, ascii: "Rar!\u001a\u0007", label: "RAR 归档", key: "meta.magic.rar", mime: "application/vnd.rar", kind: "archive" },
+  { off: 0, bytes: [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], label: "7-Zip 归档", key: "meta.magic.seven_zip", mime: "application/x-7z-compressed", kind: "archive" },
+  { off: 0, bytes: [0x1f, 0x8b], label: "GZip 压缩", key: "meta.magic.gzip", mime: "application/gzip", kind: "archive" },
+  { off: 0, ascii: "BZh", label: "BZip2 压缩", key: "meta.magic.bzip2", mime: "application/x-bzip2", kind: "archive" },
+  { off: 0, bytes: [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00], label: "XZ 压缩", key: "meta.magic.xz", mime: "application/x-xz", kind: "archive" },
+  { off: 0, bytes: [0x28, 0xb5, 0x2f, 0xfd], label: "Zstandard 压缩", key: "meta.magic.zstd", mime: "application/zstd", kind: "archive" },
+  { off: 0, ascii: "LZIP", label: "lzip 压缩", key: "meta.magic.lzip", mime: "application/lzip", kind: "archive" },
+  { off: 0, bytes: [0x1f, 0x9d], label: "compress 压缩（.Z）", key: "meta.magic.compress_z", kind: "archive" },
+  { off: 0, ascii: "fLaC", label: "FLAC 音频", key: "meta.magic.flac", mime: "audio/flac", kind: "audio" },
+  { off: 0, ascii: "OggS", label: "Ogg 容器（Vorbis / Opus）", key: "meta.magic.ogg", mime: "audio/ogg", kind: "audio" },
+  { off: 0, ascii: "ID3", label: "MP3 音频（带 ID3v2 标签）", key: "meta.magic.mp3_id3", mime: "audio/mpeg", kind: "audio" },
+  { off: 0, ascii: "MThd", label: "MIDI 音频", key: "meta.magic.midi", mime: "audio/midi", kind: "audio" },
+  { off: 0, ascii: "FORM", label: "IFF 容器（AIFF / ANIM）", key: "meta.magic.iff", kind: "audio" },
+  { off: 0, ascii: "caff", label: "CAF 音频", key: "meta.magic.caf", kind: "audio" },
   { off: 0, bytes: [0x4d, 0x41, 0x43, 0x20], label: "Monkey's Audio", kind: "audio" },
-  { off: 0, bytes: [0x1a, 0x45, 0xdf, 0xa3], label: "Matroska / WebM 容器", mime: "video/x-matroska", kind: "video" },
-  { off: 0, bytes: [0x00, 0x00, 0x01, 0xba], label: "MPEG 视频流", mime: "video/mpeg", kind: "video" },
-  { off: 0, bytes: [0x00, 0x00, 0x01, 0xb3], label: "MPEG 视频流", mime: "video/mpeg", kind: "video" },
-  { off: 0, ascii: "FLV\u0001", label: "Flash 视频", mime: "video/x-flv", kind: "video" },
-  { off: 0, ascii: "DKIF", label: "WebP 动画 / IVF 视频", kind: "video" },
-  { off: 0, bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], label: "OLE2 复合文档（旧版 Office / MSI / WPS）", kind: "document" },
-  { off: 0, ascii: "{\\rtf", label: "RTF 文档", mime: "application/rtf", kind: "document" },
-  { off: 0, ascii: "%!PS", label: "PostScript 文档", kind: "document" },
-  { off: 0, ascii: "\u0000\u0001\u0000\u0000", label: "TrueType 字体", mime: "font/ttf", kind: "font" },
-  { off: 0, ascii: "OTTO", label: "OpenType 字体（CFF 轮廓）", mime: "font/otf", kind: "font" },
-  { off: 0, ascii: "ttcf", label: "TrueType 字体集合", kind: "font" },
-  { off: 0, ascii: "wOFF", label: "WOFF 字体", mime: "font/woff", kind: "font" },
-  { off: 0, ascii: "wOF2", label: "WOFF2 字体", mime: "font/woff2", kind: "font" },
-  { off: 0, ascii: "SQLite format 3\u0000", label: "SQLite 数据库", mime: "application/vnd.sqlite3", kind: "database" },
-  { off: 0, bytes: [0x7f, 0x45, 0x4c, 0x46], label: "ELF 可执行文件 / 目标文件", kind: "program" },
-  { off: 0, ascii: "MZ", label: "Windows 可执行文件（PE / DLL / MSI 内嵌）", kind: "program" },
-  { off: 0, bytes: [0xfe, 0xed, 0xfa, 0xce], label: "Mach-O 可执行文件（32 位）", kind: "program" },
-  { off: 0, bytes: [0xfe, 0xed, 0xfa, 0xcf], label: "Mach-O 可执行文件（64 位）", kind: "program" },
-  { off: 0, bytes: [0xce, 0xfa, 0xed, 0xfe], label: "Mach-O 通用二进制", kind: "program" },
-  { off: 0, bytes: [0xcf, 0xfa, 0xed, 0xfe], label: "Mach-O 通用二进制（64 位）", kind: "program" },
-  { off: 0, bytes: [0xca, 0xfe, 0xba, 0xbe], label: "Java class / Mach-O 通用二进制", kind: "program" },
-  { off: 0, bytes: [0x00, 0x61, 0x73, 0x6d], label: "WebAssembly 模块", kind: "program" },
-  { off: 0, bytes: [0x4c, 0x00, 0x00, 0x00], label: "Windows 快捷方式（.lnk）", kind: "program" },
-  { off: 0, bytes: [0x00, 0x00, 0x00, 0x0c, 0x6a, 0x50], label: "JPEG 2000 图像", kind: "image" },
-  { off: 0, ascii: "gimp xcf", label: "GIMP 图像", kind: "image" },
-  { off: 0, bytes: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], label: "（前 8 字节全为 0，未能识别）", kind: "unknown" },
+  { off: 0, bytes: [0x1a, 0x45, 0xdf, 0xa3], label: "Matroska / WebM 容器", key: "meta.magic.matroska", mime: "video/x-matroska", kind: "video" },
+  { off: 0, bytes: [0x00, 0x00, 0x01, 0xba], label: "MPEG 视频流", key: "meta.magic.mpeg_video_stream", mime: "video/mpeg", kind: "video" },
+  { off: 0, bytes: [0x00, 0x00, 0x01, 0xb3], label: "MPEG 视频流", key: "meta.magic.mpeg_video_stream", mime: "video/mpeg", kind: "video" },
+  { off: 0, ascii: "FLV\u0001", label: "Flash 视频", key: "meta.magic.flash_video", mime: "video/x-flv", kind: "video" },
+  { off: 0, ascii: "DKIF", label: "WebP 动画 / IVF 视频", key: "meta.magic.webp_anim_ivf", kind: "video" },
+  { off: 0, bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], label: "OLE2 复合文档（旧版 Office / MSI / WPS）", key: "meta.magic.ole2", kind: "document" },
+  { off: 0, ascii: "{\\rtf", label: "RTF 文档", key: "meta.magic.rtf", mime: "application/rtf", kind: "document" },
+  { off: 0, ascii: "%!PS", label: "PostScript 文档", key: "meta.magic.postscript", kind: "document" },
+  { off: 0, ascii: "\u0000\u0001\u0000\u0000", label: "TrueType 字体", key: "meta.magic.ttf", mime: "font/ttf", kind: "font" },
+  { off: 0, ascii: "OTTO", label: "OpenType 字体（CFF 轮廓）", key: "meta.magic.otf", mime: "font/otf", kind: "font" },
+  { off: 0, ascii: "ttcf", label: "TrueType 字体集合", key: "meta.magic.ttc", kind: "font" },
+  { off: 0, ascii: "wOFF", label: "WOFF 字体", key: "meta.magic.woff", mime: "font/woff", kind: "font" },
+  { off: 0, ascii: "wOF2", label: "WOFF2 字体", key: "meta.magic.woff2", mime: "font/woff2", kind: "font" },
+  { off: 0, ascii: "SQLite format 3\u0000", label: "SQLite 数据库", key: "meta.magic.sqlite", mime: "application/vnd.sqlite3", kind: "database" },
+  { off: 0, bytes: [0x7f, 0x45, 0x4c, 0x46], label: "ELF 可执行文件 / 目标文件", key: "meta.magic.elf", kind: "program" },
+  { off: 0, ascii: "MZ", label: "Windows 可执行文件（PE / DLL / MSI 内嵌）", key: "meta.magic.pe", kind: "program" },
+  { off: 0, bytes: [0xfe, 0xed, 0xfa, 0xce], label: "Mach-O 可执行文件（32 位）", key: "meta.magic.macho32", kind: "program" },
+  { off: 0, bytes: [0xfe, 0xed, 0xfa, 0xcf], label: "Mach-O 可执行文件（64 位）", key: "meta.magic.macho64", kind: "program" },
+  { off: 0, bytes: [0xce, 0xfa, 0xed, 0xfe], label: "Mach-O 通用二进制", key: "meta.magic.macho_fat", kind: "program" },
+  { off: 0, bytes: [0xcf, 0xfa, 0xed, 0xfe], label: "Mach-O 通用二进制（64 位）", key: "meta.magic.macho_fat64", kind: "program" },
+  { off: 0, bytes: [0xca, 0xfe, 0xba, 0xbe], label: "Java class / Mach-O 通用二进制", key: "meta.magic.java_class", kind: "program" },
+  { off: 0, bytes: [0x00, 0x61, 0x73, 0x6d], label: "WebAssembly 模块", key: "meta.magic.wasm", kind: "program" },
+  { off: 0, bytes: [0x4c, 0x00, 0x00, 0x00], label: "Windows 快捷方式（.lnk）", key: "meta.magic.lnk", kind: "program" },
+  { off: 0, bytes: [0x00, 0x00, 0x00, 0x0c, 0x6a, 0x50], label: "JPEG 2000 图像", key: "meta.magic.jpeg2000", kind: "image" },
+  { off: 0, ascii: "gimp xcf", label: "GIMP 图像", key: "meta.magic.gimp", kind: "image" },
+  { off: 0, bytes: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], label: "（前 8 字节全为 0，未能识别）", key: "meta.magic.zero_bytes", kind: "unknown" },
 ]
 
-/** ftyp 里的品牌 -> 说明（MP4 / HEIC / AVIF 都是这个盒子） */
+/** ftyp 里的品牌 -> 说明（MP4 / HEIC / AVIF 都是这个盒子）；第 4 项是文案的命名键 */
 const FTYP_BRANDS = {
-  isom: ["MP4 视频", "video/mp4", "video"],
-  iso2: ["MP4 视频", "video/mp4", "video"],
-  iso4: ["MP4 视频", "video/mp4", "video"],
-  iso5: ["MP4 视频", "video/mp4", "video"],
-  iso6: ["MP4 视频", "video/mp4", "video"],
-  mp41: ["MP4 视频", "video/mp4", "video"],
-  mp42: ["MP4 视频", "video/mp4", "video"],
-  avc1: ["MP4 视频（H.264）", "video/mp4", "video"],
-  dash: ["MP4 视频（DASH 分片）", "video/mp4", "video"],
-  M4V: ["MP4 视频", "video/x-m4v", "video"],
-  M4A: ["MP4 音频", "audio/mp4", "audio"],
-  M4B: ["MP4 有声书", "audio/mp4", "audio"],
-  qt: ["QuickTime 影片", "video/quicktime", "video"],
-  "3gp4": ["3GPP 视频", "video/3gpp", "video"],
-  "3gp5": ["3GPP 视频", "video/3gpp", "video"],
-  "3g2a": ["3GPP2 视频", "video/3gpp2", "video"],
-  avif: ["AVIF 图像", "image/avif", "image"],
-  avis: ["AVIF 图像序列", "image/avif", "image"],
-  heic: ["HEIC 图像（HEVC）", "image/heic", "image"],
-  heix: ["HEIC 图像（HEVC）", "image/heic", "image"],
-  hevc: ["HEIC 图像序列", "image/heic", "image"],
-  mif1: ["HEIF 图像", "image/heif", "image"],
-  msf1: ["HEIF 图像序列", "image/heif", "image"],
-  crx: ["Canon CR3 原始图像", "image/x-canon-cr3", "image"],
+  isom: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  iso2: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  iso4: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  iso5: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  iso6: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  mp41: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  mp42: ["MP4 视频", "video/mp4", "video", "meta.magic.mp4"],
+  avc1: ["MP4 视频（H.264）", "video/mp4", "video", "meta.magic.mp4_h264"],
+  dash: ["MP4 视频（DASH 分片）", "video/mp4", "video", "meta.magic.mp4_dash"],
+  M4V: ["MP4 视频", "video/x-m4v", "video", "meta.magic.mp4"],
+  M4A: ["MP4 音频", "audio/mp4", "audio", "meta.magic.m4a"],
+  M4B: ["MP4 有声书", "audio/mp4", "audio", "meta.magic.m4b"],
+  qt: ["QuickTime 影片", "video/quicktime", "video", "meta.magic.quicktime"],
+  "3gp4": ["3GPP 视频", "video/3gpp", "video", "meta.magic.three_gpp"],
+  "3gp5": ["3GPP 视频", "video/3gpp", "video", "meta.magic.three_gpp"],
+  "3g2a": ["3GPP2 视频", "video/3gpp2", "video", "meta.magic.three_gpp2"],
+  avif: ["AVIF 图像", "image/avif", "image", "meta.magic.avif"],
+  avis: ["AVIF 图像序列", "image/avif", "image", "meta.magic.avif_sequence"],
+  heic: ["HEIC 图像（HEVC）", "image/heic", "image", "meta.magic.heic"],
+  heix: ["HEIC 图像（HEVC）", "image/heic", "image", "meta.magic.heic"],
+  hevc: ["HEIC 图像序列", "image/heic", "image", "meta.magic.heic_sequence"],
+  mif1: ["HEIF 图像", "image/heif", "image", "meta.magic.heif"],
+  msf1: ["HEIF 图像序列", "image/heif", "image", "meta.magic.heif_sequence"],
+  crx: ["Canon CR3 原始图像", "image/x-canon-cr3", "image", "meta.magic.cr3"],
 }
 
 /** OOXML（docx / xlsx / pptx）与同类 ZIP 容器：靠内部条目名区分 */
 const ZIP_KINDS = [
-  { probe: ["word/", "[Content_Types].xml"], label: "Word 文档（docx）", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", kind: "document", family: "ooxml" },
-  { probe: ["xl/", "[Content_Types].xml"], label: "Excel 工作簿（xlsx）", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", kind: "document", family: "ooxml" },
-  { probe: ["ppt/", "[Content_Types].xml"], label: "PowerPoint 演示文稿（pptx）", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", kind: "document", family: "ooxml" },
-  { probe: ["AndroidManifest.xml"], label: "Android 应用包（apk）", mime: "application/vnd.android.package-archive", kind: "archive", family: "zip" },
-  { probe: ["META-INF/MANIFEST.MF"], label: "Java 归档（jar）", mime: "application/java-archive", kind: "archive", family: "zip" },
-  { probe: ["mimetype", "META-INF/container.xml"], label: "EPUB 电子书", mime: "application/epub+zip", kind: "document", family: "zip" },
-  { probe: ["docProps/"], label: "OOXML 文档（docx / xlsx / pptx）", kind: "document", family: "ooxml" },
-  { probe: ["content.xml"], label: "OpenDocument 文档（odt / ods / odp）", kind: "document", family: "odf" },
+  { probe: ["word/", "[Content_Types].xml"], label: "Word 文档（docx）", key: "meta.magic.docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", kind: "document", family: "ooxml" },
+  { probe: ["xl/", "[Content_Types].xml"], label: "Excel 工作簿（xlsx）", key: "meta.magic.xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", kind: "document", family: "ooxml" },
+  { probe: ["ppt/", "[Content_Types].xml"], label: "PowerPoint 演示文稿（pptx）", key: "meta.magic.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", kind: "document", family: "ooxml" },
+  { probe: ["AndroidManifest.xml"], label: "Android 应用包（apk）", key: "meta.magic.apk", mime: "application/vnd.android.package-archive", kind: "archive", family: "zip" },
+  { probe: ["META-INF/MANIFEST.MF"], label: "Java 归档（jar）", key: "meta.magic.jar", mime: "application/java-archive", kind: "archive", family: "zip" },
+  { probe: ["mimetype", "META-INF/container.xml"], label: "EPUB 电子书", key: "meta.magic.epub", mime: "application/epub+zip", kind: "document", family: "zip" },
+  { probe: ["docProps/"], label: "OOXML 文档（docx / xlsx / pptx）", key: "meta.magic.ooxml", kind: "document", family: "ooxml" },
+  { probe: ["content.xml"], label: "OpenDocument 文档（odt / ods / odp）", key: "meta.magic.opendocument", kind: "document", family: "odf" },
 ]
 
 function startsWithBytes(buf, off, bytes) {
@@ -163,10 +167,12 @@ function startsWithAscii(buf, off, text) {
   return startsWithBytes(buf, off, [...s])
 }
 
-/** 识别文件签名。返回 { label, mime, kind, signature } */
+/** 识别文件签名。返回 { label, labelKey, labelParams, mime, kind, signature } */
 function detectMagic(head, size) {
   const signature = hexOf(head, 16)
-  if (size === 0) return { label: "空文件（0 字节）", kind: "empty", mime: null, family: null, signature }
+  if (size === 0) {
+    return { label: "空文件（0 字节）", labelKey: "meta.magic.empty_file_zero", kind: "empty", mime: null, family: null, signature }
+  }
 
   const asciiAt = (off, len) => head.subarray(off, off + len).toString("latin1")
 
@@ -174,23 +180,47 @@ function detectMagic(head, size) {
   if (head.length >= 12 && asciiAt(4, 4) === "ftyp") {
     const brand = asciiAt(8, 4).trim()
     const hit = FTYP_BRANDS[brand] || FTYP_BRANDS[asciiAt(16, 4).trim()]
-    const [label, mime, kind] = hit || ["ISO BMFF 媒体文件", null, "video"]
-    return { label: `${label}${hit ? "" : `（品牌 ${brand || "未知"}）`}`, mime, kind, family: null, signature }
+    if (!hit) {
+      // 品牌认不出来时把品牌名一并交代（品牌可以为空，这里必须与中文原文逐字一致）
+      return brand
+        ? {
+            label: `ISO BMFF 媒体文件（品牌 ${brand}）`,
+            labelKey: "meta.magic.iso_bmff_branded",
+            labelParams: { brand },
+            mime: null,
+            kind: "video",
+            family: null,
+            signature,
+          }
+        : {
+            label: "ISO BMFF 媒体文件（品牌 未知）",
+            labelKey: "meta.magic.iso_bmff_unknown_brand",
+            mime: null,
+            kind: "video",
+            family: null,
+            signature,
+          }
+    }
+    const [label, mime, kind, key] = hit
+    return { label, labelKey: key, mime, kind, family: null, signature }
   }
 
   // RIFF：WAV / AVI / WebP
   if (asciiAt(0, 4) === "RIFF" && head.length >= 12) {
     const sub = asciiAt(8, 4)
-    if (sub === "WAVE") return { label: "WAV 音频", mime: "audio/wav", kind: "audio", family: null, signature }
-    if (sub === "AVI ") return { label: "AVI 视频", mime: "video/x-msvideo", kind: "video", family: null, signature }
-    if (sub === "WEBP") return { label: "WebP 图像", mime: "image/webp", kind: "image", family: null, signature }
-    if (sub === "ACON") return { label: "Animated cursor 图像", mime: "image/x-icon", kind: "image", family: null, signature }
-    return { label: `RIFF 容器（${sub.trim() || "未知"}）`, kind: "archive", mime: null, family: null, signature }
+    if (sub === "WAVE") return { label: "WAV 音频", labelKey: "meta.magic.wav", mime: "audio/wav", kind: "audio", family: null, signature }
+    if (sub === "AVI ") return { label: "AVI 视频", labelKey: "meta.magic.avi", mime: "video/x-msvideo", kind: "video", family: null, signature }
+    if (sub === "WEBP") return { label: "WebP 图像", labelKey: "meta.magic.webp", mime: "image/webp", kind: "image", family: null, signature }
+    if (sub === "ACON") return { label: "Animated cursor 图像", labelKey: "meta.magic.animated_cursor", mime: "image/x-icon", kind: "image", family: null, signature }
+    const format = sub.trim()
+    return format
+      ? { label: `RIFF 容器（${format}）`, labelKey: "meta.magic.riff_container", labelParams: { format }, kind: "archive", mime: null, family: null, signature }
+      : { label: "RIFF 容器（未知）", labelKey: "meta.magic.riff_container_unknown_format", kind: "archive", mime: null, family: null, signature }
   }
 
   // MPEG-TS：每 188 字节一个 0x47 同步字节
   if (head[0] === 0x47 && head.length > 188 && head[188] === 0x47) {
-    return { label: "MPEG 传输流（.ts）", mime: "video/mp2t", kind: "video", family: null, signature }
+    return { label: "MPEG 传输流（.ts）", labelKey: "meta.magic.mpeg_ts", mime: "video/mp2t", kind: "video", family: null, signature }
   }
   // MP3：无 ID3 时的帧同步。注意 UTF-16 文本的 BOM（FF FE / FE FF）长得和
   // MPEG 帧同步一模一样，必须先让文本检测裁决，否则 txt 会被认成音频。
@@ -199,19 +229,29 @@ function detectMagic(head, size) {
     const detected = bom16 ? detectEncoding(head) : null
     if (detected && (detected.encoding === "utf16le" || detected.encoding === "utf16be")) {
       // UTF-16 文本天然含 NUL 字节，looksBinary 会误判成二进制，这里直接定性
-      return {
-        label: detected.encoding === "utf16le" ? "纯文本（UTF-16 LE）" : "纯文本（UTF-16 BE）",
-        mime: "text/plain",
-        kind: "text",
-        family: null,
-        signature,
-      }
+      return detected.encoding === "utf16le"
+        ? {
+            label: "纯文本（UTF-16 LE）",
+            labelKey: "meta.magic.plain_text_utf16le",
+            mime: "text/plain",
+            kind: "text",
+            family: null,
+            signature,
+          }
+        : {
+            label: "纯文本（UTF-16 BE）",
+            labelKey: "meta.magic.plain_text_utf16be",
+            mime: "text/plain",
+            kind: "text",
+            family: null,
+            signature,
+          }
     }
-    return { label: "MP3 音频", mime: "audio/mpeg", kind: "audio", family: null, signature }
+    return { label: "MP3 音频", labelKey: "meta.magic.mp3", mime: "audio/mpeg", kind: "audio", family: null, signature }
   }
   // TAR：偏移 257 处的 ustar
   if (asciiAt(257, 5) === "ustar") {
-    return { label: "TAR 归档", mime: "application/x-tar", kind: "archive", family: null, signature }
+    return { label: "TAR 归档", labelKey: "meta.magic.tar", mime: "application/x-tar", kind: "archive", family: null, signature }
   }
 
   for (const sig of SIGNATURES) {
@@ -225,18 +265,18 @@ function detectMagic(head, size) {
       const probeText = raw.includes("\\") ? raw.replace(/\\/g, "/") : raw
       for (const z of ZIP_KINDS) {
         if (z.probe.every((p) => probeText.includes(p))) {
-          return { label: z.label, mime: z.mime ?? null, kind: z.kind, family: z.family, signature }
+          return { label: z.label, labelKey: z.key, mime: z.mime ?? null, kind: z.kind, family: z.family, signature }
         }
       }
     }
-    return { label: sig.label, mime: sig.mime ?? null, kind: sig.kind, family: null, signature }
+    return { label: sig.label, labelKey: sig.key, mime: sig.mime ?? null, kind: sig.kind, family: null, signature }
   }
 
-  if (size === 0) return { label: "空文件", kind: "empty", mime: null, family: null, signature }
+  if (size === 0) return { label: "空文件", labelKey: "meta.magic.empty_file", kind: "empty", mime: null, family: null, signature }
   if (!looksBinary(head)) {
-    return { label: "纯文本", mime: "text/plain", kind: "text", family: null, signature }
+    return { label: "纯文本", labelKey: "meta.magic.plain_text", mime: "text/plain", kind: "text", family: null, signature }
   }
-  return { label: "未知二进制数据", kind: "unknown", mime: null, family: null, signature }
+  return { label: "未知二进制数据", labelKey: "meta.magic.unknown_binary", kind: "unknown", mime: null, family: null, signature }
 }
 
 /* ============================== 图片尺寸 ============================== */
@@ -317,90 +357,126 @@ function imageSize(head, magic) {
   }
 }
 
-const PNG_COLOR = { 0: "灰度", 2: "真彩色（RGB）", 3: "索引色", 4: "灰度 + Alpha", 6: "真彩色 + Alpha" }
+/** PNG 色彩类型 -> 文案（key 给界面查字典用，label 是中文原文兜底） */
+const PNG_COLOR = {
+  0: { key: "meta.image.color_grayscale", label: "灰度" },
+  2: { key: "meta.image.color_truecolor", label: "真彩色（RGB）" },
+  3: { key: "meta.image.color_indexed", label: "索引色" },
+  4: { key: "meta.image.color_grayscale_alpha", label: "灰度 + Alpha" },
+  6: { key: "meta.image.color_truecolor_alpha", label: "真彩色 + Alpha" },
+}
 
 /* ============================== EXIF ============================== */
 
+/**
+ * EXIF / GPS 字段表：键是 TIFF 标签号（查表用的值，不要改），值是该字段的
+ * 命名键与中文原文。formatExif() 按**命名键**分支，不再拿中文当分支条件。
+ */
 const TAG_IFD0 = {
-  0x0100: "图像宽度",
-  0x0101: "图像高度",
-  0x010e: "图像描述",
-  0x010f: "相机厂商",
-  0x0110: "相机型号",
-  0x0112: "方向",
-  0x011a: "水平分辨率",
-  0x011b: "垂直分辨率",
-  0x0128: "分辨率单位",
-  0x0131: "生成软件",
-  0x0132: "文件修改时间",
-  0x013b: "作者（Artist）",
-  0x013c: "主机",
-  0x8298: "版权",
+  0x0100: { key: "meta.exif.image_width", label: "图像宽度" },
+  0x0101: { key: "meta.exif.image_height", label: "图像高度" },
+  0x010e: { key: "meta.exif.image_description", label: "图像描述" },
+  0x010f: { key: "meta.exif.make", label: "相机厂商" },
+  0x0110: { key: "meta.exif.model", label: "相机型号" },
+  0x0112: { key: "meta.exif.orientation", label: "方向" },
+  0x011a: { key: "meta.exif.x_resolution", label: "水平分辨率" },
+  0x011b: { key: "meta.exif.y_resolution", label: "垂直分辨率" },
+  0x0128: { key: "meta.exif.resolution_unit", label: "分辨率单位" },
+  0x0131: { key: "meta.exif.software", label: "生成软件" },
+  0x0132: { key: "meta.exif.modify_date", label: "文件修改时间" },
+  0x013b: { key: "meta.exif.artist", label: "作者（Artist）" },
+  0x013c: { key: "meta.exif.host_computer", label: "主机" },
+  0x8298: { key: "meta.exif.copyright", label: "版权" },
 }
 
 const TAG_EXIF = {
-  0x829a: "曝光时间",
-  0x829d: "光圈（F 值）",
-  0x8822: "曝光程序",
-  0x8827: "ISO 感光度",
-  0x9000: "EXIF 版本",
-  0x9003: "拍摄时间",
-  0x9004: "数字化时间",
-  0x9101: "分量配置",
-  0x9201: "快门速度",
-  0x9202: "光圈值（APEX）",
-  0x9204: "曝光补偿",
-  0x9207: "测光模式",
-  0x9209: "闪光灯",
-  0x920a: "焦距",
-  0x9286: "用户注释",
-  0x9290: "秒以下时间（原始）",
-  0xa001: "色彩空间",
-  0xa002: "像素宽度",
-  0xa003: "像素高度",
-  0xa403: "白平衡",
-  0xa405: "35mm 等效焦距",
-  0xa431: "机身序列号",
-  0xa432: "镜头规格",
-  0xa433: "镜头厂商",
-  0xa434: "镜头型号",
-  0xa435: "镜头序列号",
+  0x829a: { key: "meta.exif.exposure_time", label: "曝光时间" },
+  0x829d: { key: "meta.exif.f_number", label: "光圈（F 值）" },
+  0x8822: { key: "meta.exif.exposure_program", label: "曝光程序" },
+  0x8827: { key: "meta.exif.iso", label: "ISO 感光度" },
+  0x9000: { key: "meta.exif.exif_version", label: "EXIF 版本" },
+  0x9003: { key: "meta.exif.datetime_original", label: "拍摄时间" },
+  0x9004: { key: "meta.exif.datetime_digitized", label: "数字化时间" },
+  0x9101: { key: "meta.exif.components_configuration", label: "分量配置" },
+  0x9201: { key: "meta.exif.shutter_speed", label: "快门速度" },
+  0x9202: { key: "meta.exif.aperture_value", label: "光圈值（APEX）" },
+  0x9204: { key: "meta.exif.exposure_bias", label: "曝光补偿" },
+  0x9207: { key: "meta.exif.metering_mode", label: "测光模式" },
+  0x9209: { key: "meta.exif.flash", label: "闪光灯" },
+  0x920a: { key: "meta.exif.focal_length", label: "焦距" },
+  0x9286: { key: "meta.exif.user_comment", label: "用户注释" },
+  0x9290: { key: "meta.exif.subsec_time_original", label: "秒以下时间（原始）" },
+  0xa001: { key: "meta.exif.color_space", label: "色彩空间" },
+  0xa002: { key: "meta.exif.pixel_x_dimension", label: "像素宽度" },
+  0xa003: { key: "meta.exif.pixel_y_dimension", label: "像素高度" },
+  0xa403: { key: "meta.exif.white_balance", label: "白平衡" },
+  0xa405: { key: "meta.exif.focal_length_35mm", label: "35mm 等效焦距" },
+  0xa431: { key: "meta.exif.body_serial_number", label: "机身序列号" },
+  0xa432: { key: "meta.exif.lens_specification", label: "镜头规格" },
+  0xa433: { key: "meta.exif.lens_make", label: "镜头厂商" },
+  0xa434: { key: "meta.exif.lens_model", label: "镜头型号" },
+  0xa435: { key: "meta.exif.lens_serial_number", label: "镜头序列号" },
 }
 
 const TAG_GPS = {
-  0x0001: "GPS 纬度",
-  0x0002: "纬度方向",
-  0x0003: "GPS 经度",
-  0x0004: "经度方向",
-  0x0005: "GPS 海拔",
-  0x0006: "海拔方向",
-  0x0007: "GPS 时间",
-  0x001d: "GPS 日期",
+  0x0001: { key: "meta.exif.gps_latitude", label: "GPS 纬度" },
+  0x0002: { key: "meta.exif.gps_latitude_ref", label: "纬度方向" },
+  0x0003: { key: "meta.exif.gps_longitude", label: "GPS 经度" },
+  0x0004: { key: "meta.exif.gps_longitude_ref", label: "经度方向" },
+  0x0005: { key: "meta.exif.gps_altitude", label: "GPS 海拔" },
+  0x0006: { key: "meta.exif.gps_altitude_ref", label: "海拔方向" },
+  0x0007: { key: "meta.exif.gps_time", label: "GPS 时间" },
+  0x001d: { key: "meta.exif.gps_date", label: "GPS 日期" },
 }
 
+/**
+ * 下面几张枚举表：TIFF 里的数字（查表用的值，不要改）-> 显示文案。
+ * 没有 key 的项说明文案是 ASCII（sRGB / Adobe RGB），任何语言下都无需翻译。
+ */
 const ORIENTATION = {
-  1: "正常",
-  2: "水平镜像",
-  3: "旋转 180°",
-  4: "垂直镜像",
-  5: "顺时针 90° 后镜像",
-  6: "顺时针 90°",
-  7: "逆时针 90° 后镜像",
-  8: "逆时针 90°",
+  1: { key: "meta.exif.orientation_normal", label: "正常" },
+  2: { key: "meta.exif.orientation_mirror_horizontal", label: "水平镜像" },
+  3: { key: "meta.exif.orientation_rotate_180", label: "旋转 180°" },
+  4: { key: "meta.exif.orientation_mirror_vertical", label: "垂直镜像" },
+  5: { key: "meta.exif.orientation_rotate_90_cw_mirrored", label: "顺时针 90° 后镜像" },
+  6: { key: "meta.exif.orientation_rotate_90_cw", label: "顺时针 90°" },
+  7: { key: "meta.exif.orientation_rotate_90_ccw_mirrored", label: "逆时针 90° 后镜像" },
+  8: { key: "meta.exif.orientation_rotate_90_ccw", label: "逆时针 90°" },
 }
 const EXPOSURE_PROGRAM = {
-  1: "手动",
-  2: "程序自动",
-  3: "光圈优先",
-  4: "快门优先",
-  5: "创意模式",
-  6: "运动模式",
-  7: "人像模式",
-  8: "风景模式",
-  9: "低感光度",
+  1: { key: "meta.exif.exposure_program_manual", label: "手动" },
+  2: { key: "meta.exif.exposure_program_normal", label: "程序自动" },
+  3: { key: "meta.exif.exposure_program_aperture_priority", label: "光圈优先" },
+  4: { key: "meta.exif.exposure_program_shutter_priority", label: "快门优先" },
+  5: { key: "meta.exif.exposure_program_creative", label: "创意模式" },
+  6: { key: "meta.exif.exposure_program_action", label: "运动模式" },
+  7: { key: "meta.exif.exposure_program_portrait", label: "人像模式" },
+  8: { key: "meta.exif.exposure_program_landscape", label: "风景模式" },
+  9: { key: "meta.exif.exposure_program_low_gain", label: "低感光度" },
 }
-const METERING = { 0: "未知", 1: "平均测光", 2: "中央重点", 3: "点测光", 4: "多点测光", 5: "评价测光", 6: "局部测光" }
-const COLOR_SPACE = { 1: "sRGB", 2: "Adobe RGB", 65535: "未校准" }
+const METERING = {
+  0: { key: "meta.exif.metering_unknown", label: "未知" },
+  1: { key: "meta.exif.metering_average", label: "平均测光" },
+  2: { key: "meta.exif.metering_center_weighted", label: "中央重点" },
+  3: { key: "meta.exif.metering_spot", label: "点测光" },
+  4: { key: "meta.exif.metering_multi_spot", label: "多点测光" },
+  5: { key: "meta.exif.metering_pattern", label: "评价测光" },
+  6: { key: "meta.exif.metering_partial", label: "局部测光" },
+}
+const COLOR_SPACE = {
+  1: { label: "sRGB" },
+  2: { label: "Adobe RGB" },
+  65535: { key: "meta.exif.color_space_uncalibrated", label: "未校准" },
+}
+const WHITE_BALANCE = {
+  0: { key: "meta.exif.white_balance_auto", label: "自动" },
+  1: { key: "meta.exif.white_balance_manual", label: "手动" },
+}
+const RESOLUTION_UNIT = {
+  1: { key: "meta.exif.resolution_unit_none", label: "无单位" },
+  2: { key: "meta.exif.resolution_unit_inch", label: "英寸" },
+  3: { key: "meta.exif.resolution_unit_centimeter", label: "厘米" },
+}
 
 const TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 }
 
@@ -470,7 +546,7 @@ function parseExif(buf) {
       const tag = u16(e)
       const type = u16(e + 2)
       const n = u32(e + 4)
-      const label = tags[tag]
+      const field = tags[tag]
       let value = null
       try {
         value = readTiffValue(buf, le, type, n, e)
@@ -479,9 +555,9 @@ function parseExif(buf) {
       }
       if (tag === 0x8769 && typeof value === "number") walk(value, TAG_EXIF, "")
       else if (tag === 0x8825 && typeof value === "number") walk(value, TAG_GPS, "")
-      else if (label) {
-        const text = formatExif(label, value)
-        if (text !== null && text !== "") rows.push([prefix + label, text])
+      else if (field) {
+        const text = formatExif(field.key, value)
+        if (text) rows.push({ key: prefix + field.key, label: prefix + field.label, ...text })
       }
     }
   }
@@ -490,63 +566,93 @@ function parseExif(buf) {
   return rows.length ? rows : null
 }
 
-/** 把 EXIF 原始值变成人能读的字符串；返回 null 表示这条不值得展示 */
-function formatExif(label, value) {
+/**
+ * 把 EXIF 原始值变成人能读的文案。
+ *
+ * 按**命名键**分支（不再拿中文当分支条件）。返回值是
+ * `{ value, unitKey?, valueKey? }`：value 只含数值/文案本身，单位与枚举文案各带一个键，
+ * 前端按 `${value} ${t(unitKey)}` 拼；返回 null 表示这条不值得展示。
+ */
+function formatExif(key, value) {
   if (value === null || value === undefined || value === "") return null
   try {
-    switch (label) {
-      case "方向":
-        return ORIENTATION[value] || String(value)
-      case "曝光程序":
-        return EXPOSURE_PROGRAM[value] || String(value)
-      case "测光模式":
-        return METERING[value] || String(value)
-      case "色彩空间":
-        return COLOR_SPACE[value] || String(value)
-      case "白平衡":
-        return value === 0 ? "自动" : value === 1 ? "手动" : String(value)
-      case "闪光灯":
-        if (typeof value !== "number") return String(value)
-        return `${value & 0x1 ? "闪光" : "未闪光"}${value & 0x40 ? "（防红眼）" : ""}`
-      case "曝光时间":
-        return rationalText(value, "秒", true)
-      case "快门速度":
-        return rationalText(value, "秒", true)
-      case "光圈（F 值）":
-        return `f/${num(rational(value)).toFixed(1)}`
-      case "光圈值（APEX）":
-        return `f/${Math.pow(2, num(rational(value)) / 2).toFixed(1)}（APEX ${num(rational(value))}）`
-      case "焦距":
-      case "35mm 等效焦距":
-        return `${num(rational(value)).toFixed(0)} mm`
-      case "曝光补偿":
-        return `${num(rational(value)) > 0 ? "+" : ""}${num(rational(value)).toFixed(2)} EV`
-      case "水平分辨率":
-      case "垂直分辨率":
-        return `${num(rational(value))} dpi`
-      case "ISO 感光度":
-        return `ISO ${Array.isArray(value) ? value[0] : value}`
-      case "拍摄时间":
-      case "数字化时间":
-      case "文件修改时间":
-        return exifDate(String(value))
-      case "用户注释":
-        return String(value).replace(/^(ASCII|UNICODE|JIS)\u0000+/, "").trim() || null
-      case "GPS 纬度":
-      case "GPS 经度":
-        return gpsText(value)
-      case "GPS 海拔":
-        return `${num(rational(value)).toFixed(1)} m`
-      case "镜头规格":
-        return Array.isArray(value) ? value.map((v) => num(rational(v)).toFixed(0)).join("-") + " mm" : String(value)
-      case "分辨率单位":
-        return { 1: "无单位", 2: "英寸", 3: "厘米" }[value] || String(value)
+    switch (key) {
+      case "meta.exif.orientation":
+        return enumText(ORIENTATION, value)
+      case "meta.exif.exposure_program":
+        return enumText(EXPOSURE_PROGRAM, value)
+      case "meta.exif.metering_mode":
+        return enumText(METERING, value)
+      case "meta.exif.color_space":
+        return enumText(COLOR_SPACE, value)
+      case "meta.exif.white_balance":
+        return value === 0 || value === 1 ? enumText(WHITE_BALANCE, value) : { value: String(value) }
+      case "meta.exif.flash": {
+        if (typeof value !== "number") return { value: String(value) }
+        const fired = value & 0x1
+        const redEye = value & 0x40
+        const text = `${fired ? "闪光" : "未闪光"}${redEye ? "（防红眼）" : ""}`
+        const valueKey = fired
+          ? redEye
+            ? "meta.exif.flash_fired_red_eye"
+            : "meta.exif.flash_fired"
+          : redEye
+            ? "meta.exif.flash_not_fired_red_eye"
+            : "meta.exif.flash_not_fired"
+        return { value: text, valueKey }
+      }
+      case "meta.exif.exposure_time":
+      case "meta.exif.shutter_speed":
+        return rationalText(value, "meta.unit.second", true)
+      case "meta.exif.f_number":
+        return { value: `f/${num(rational(value)).toFixed(1)}` }
+      case "meta.exif.aperture_value":
+        return { value: `f/${Math.pow(2, num(rational(value)) / 2).toFixed(1)}（APEX ${num(rational(value))}）` }
+      case "meta.exif.focal_length":
+      case "meta.exif.focal_length_35mm":
+        return { value: num(rational(value)).toFixed(0), unitKey: "meta.unit.mm" }
+      case "meta.exif.exposure_bias": {
+        const v = num(rational(value))
+        return { value: `${v > 0 ? "+" : ""}${v.toFixed(2)}`, unitKey: "meta.unit.ev" }
+      }
+      case "meta.exif.x_resolution":
+      case "meta.exif.y_resolution":
+        return { value: String(num(rational(value))), unitKey: "meta.unit.dpi" }
+      case "meta.exif.iso":
+        return { value: `ISO ${Array.isArray(value) ? value[0] : value}` }
+      case "meta.exif.datetime_original":
+      case "meta.exif.datetime_digitized":
+      case "meta.exif.modify_date":
+        return { value: exifDate(String(value)) }
+      case "meta.exif.user_comment": {
+        const text = String(value).replace(/^(ASCII|UNICODE|JIS)\u0000+/, "").trim()
+        return text ? { value: text } : null
+      }
+      case "meta.exif.gps_latitude":
+      case "meta.exif.gps_longitude":
+        // 度数符号紧贴数字（`37.123456°`），拆成「值 + 单位」会多出一个空格，故整体留在 value 里
+        return { value: gpsText(value) }
+      case "meta.exif.gps_altitude":
+        return { value: num(rational(value)).toFixed(1), unitKey: "meta.unit.meter" }
+      case "meta.exif.lens_specification":
+        return Array.isArray(value)
+          ? { value: value.map((v) => num(rational(v)).toFixed(0)).join("-"), unitKey: "meta.unit.mm" }
+          : { value: String(value) }
+      case "meta.exif.resolution_unit":
+        return enumText(RESOLUTION_UNIT, value)
       default:
-        return String(value)
+        return { value: String(value) }
     }
   } catch {
     return null
   }
+}
+
+/** 枚举表的统一取值：数字查表（值本身别改），命中就给 valueKey，未命中退回数字 */
+function enumText(table, value) {
+  const hit = table[value]
+  if (!hit) return { value: String(value) }
+  return hit.key ? { value: hit.label, valueKey: hit.key } : { value: hit.label }
 }
 
 function rational(v) {
@@ -557,11 +663,11 @@ function num(r) {
   const { num: n, den: d } = rational(r)
   return d ? n / d : 0
 }
-function rationalText(v, unit, asFraction) {
+function rationalText(v, unitKey, asFraction) {
   const value = num(rational(v))
   if (!value) return null
-  if (asFraction && value < 1) return `1/${Math.round(1 / value)} ${unit}`
-  return `${Number(value.toFixed(4))} ${unit}`
+  if (asFraction && value < 1) return { value: `1/${Math.round(1 / value)}`, unitKey }
+  return { value: String(Number(value.toFixed(4))), unitKey }
 }
 function exifDate(s) {
   const m = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s.trim())
@@ -606,16 +712,17 @@ function exifFromJpeg(buf) {
 
 /** PNG 文本块的常见键名（PNG 规范推荐用英文关键字，这里翻成中文更好读） */
 const PNG_KEY = {
-  Title: "标题",
-  Author: "作者",
-  Description: "描述",
-  Copyright: "版权",
-  "Creation Time": "创建时间",
-  Software: "生成软件",
-  Disclaimer: "免责声明",
-  Warning: "警告",
-  Source: "来源",
-  Comment: "备注",
+  Title: { key: "meta.doc.title", label: "标题" },
+  Author: { key: "meta.doc.author", label: "作者" },
+  Description: { key: "meta.doc.description", label: "描述" },
+  Copyright: { key: "meta.doc.copyright", label: "版权" },
+  "Creation Time": { key: "meta.doc.creation_time", label: "创建时间" },
+  Software: { key: "meta.doc.software", label: "生成软件" },
+  Disclaimer: { key: "meta.doc.disclaimer", label: "免责声明" },
+  Warning: { key: "meta.doc.warning", label: "警告" },
+  Source: { key: "meta.doc.source", label: "来源" },
+  Comment: { key: "meta.doc.comment", label: "备注" },
+  "PNG 修改时间": { key: "meta.doc.png_modified_time", label: "PNG 修改时间" }, // tIME 块也走这张表
 }
 
 /** PNG 的 tEXt / iTXt / tIME / eXIf —— 图片的「作者 / 软件 / 创建时间」常在这里 */
@@ -709,30 +816,30 @@ function pdfText(raw) {
 }
 
 const PDF_FIELDS = {
-  Title: "文档标题",
-  Author: "作者",
-  Subject: "主题",
-  Keywords: "关键词",
-  Creator: "创建程序",
-  Producer: "生成工具",
-  CreationDate: "创建时间",
-  ModDate: "修改时间",
+  Title: { key: "meta.doc.document_title", label: "文档标题" },
+  Author: { key: "meta.doc.author", label: "作者" },
+  Subject: { key: "meta.doc.subject", label: "主题" },
+  Keywords: { key: "meta.doc.keywords", label: "关键词" },
+  Creator: { key: "meta.doc.creator", label: "创建程序" },
+  Producer: { key: "meta.doc.producer", label: "生成工具" },
+  CreationDate: { key: "meta.doc.creation_time", label: "创建时间" },
+  ModDate: { key: "meta.doc.modified_time", label: "修改时间" },
 }
 
 function pdfInfo(parts) {
   const rows = []
   const text = Buffer.concat(parts).toString("latin1")
-  for (const [key, label] of Object.entries(PDF_FIELDS)) {
-    const m = new RegExp(`/${key}\\s*\\(((?:\\\\.|[^\\\\()])*)\\)`).exec(text)
+  for (const [name, field] of Object.entries(PDF_FIELDS)) {
+    const m = new RegExp(`/${name}\\s*\\(((?:\\\\.|[^\\\\()])*)\\)`).exec(text)
     if (!m) continue
     let value = pdfText(m[1])
     if (!value) continue
-    if (/Date$/.test(key)) value = pdfDate(value)
-    if (rows.some(([l]) => l === label)) continue
-    rows.push([label, value])
+    if (/Date$/.test(name)) value = pdfDate(value)
+    if (rows.some((r) => r.key === field.key)) continue
+    rows.push({ key: field.key, label: field.label, value })
   }
   const version = /^%PDF-(\d\.\d)/.exec(text)
-  if (version) rows.unshift(["PDF 版本", version[1]])
+  if (version) rows.unshift({ key: "meta.doc.pdf_version", label: "PDF 版本", value: version[1] })
   return rows
 }
 
@@ -814,42 +921,42 @@ async function ooxmlInfo(abs, head) {
   if (core) {
     const xml = core.toString("utf8")
     const fields = [
-      ["dc:title", "标题"],
-      ["dc:creator", "创建者"],
-      ["cp:lastModifiedBy", "最后修改者"],
-      ["dcterms:created", "创建时间"],
-      ["dcterms:modified", "修改时间"],
-      ["cp:revision", "修订次数"],
-      ["dc:subject", "主题"],
-      ["dc:description", "备注"],
-      ["cp:keywords", "关键词"],
-      ["cp:category", "分类"],
+      ["dc:title", "meta.doc.title", "标题"],
+      ["dc:creator", "meta.doc.created_by", "创建者"],
+      ["cp:lastModifiedBy", "meta.doc.last_modified_by", "最后修改者"],
+      ["dcterms:created", "meta.doc.creation_time", "创建时间"],
+      ["dcterms:modified", "meta.doc.modified_time", "修改时间"],
+      ["cp:revision", "meta.doc.revision", "修订次数"],
+      ["dc:subject", "meta.doc.subject", "主题"],
+      ["dc:description", "meta.doc.comment", "备注"],
+      ["cp:keywords", "meta.doc.keywords", "关键词"],
+      ["cp:category", "meta.doc.category", "分类"],
     ]
-    for (const [tag, label] of fields) {
+    for (const [tag, key, label] of fields) {
       let value = xmlTag(xml, tag)
       if (!value) continue
       if (/^dcterms:(created|modified)$/.test(tag)) value = isoTimestamp(value)
-      rows.push([label, value])
+      rows.push({ key, label, value })
     }
   }
   const app = await read("docProps/app.xml")
   if (app) {
     const xml = app.toString("utf8")
     const fields = [
-      ["Application", "生成程序"],
-      ["Company", "公司"],
-      ["Manager", "管理者"],
-      ["Pages", "页数"],
-      ["Words", "字数"],
-      ["Characters", "字符数"],
-      ["Slides", "幻灯片数"],
-      ["Sheets", "工作表数"],
-      ["TotalTime", "累计编辑分钟"],
-      ["Template", "模板"],
+      ["Application", "meta.doc.application", "生成程序"],
+      ["Company", "meta.doc.company", "公司"],
+      ["Manager", "meta.doc.manager", "管理者"],
+      ["Pages", "meta.doc.pages", "页数"],
+      ["Words", "meta.doc.word_count", "字数"],
+      ["Characters", "meta.doc.character_count", "字符数"],
+      ["Slides", "meta.doc.slides", "幻灯片数"],
+      ["Sheets", "meta.doc.sheets", "工作表数"],
+      ["TotalTime", "meta.doc.total_edit_minutes", "累计编辑分钟"],
+      ["Template", "meta.doc.template", "模板"],
     ]
-    for (const [tag, label] of fields) {
+    for (const [tag, key, label] of fields) {
       const value = xmlTag(xml, tag)
-      if (value) rows.push([label, value])
+      if (value) rows.push({ key, label, value })
     }
   }
   return rows
@@ -925,7 +1032,11 @@ function wavInfo(head) {
       const sampleRate = head.readUInt32LE(i + 12)
       const bits = head.readUInt16LE(i + 22)
       byteRate = head.readUInt32LE(i + 16)
-      out.push(["声道数", String(channels)], ["采样率", `${sampleRate} Hz`], ["位深", `${bits} bit`])
+      out.push(
+        { key: "meta.media.channels", label: "声道数", value: String(channels) },
+        { key: "meta.media.sample_rate", label: "采样率", value: String(sampleRate), unitKey: "meta.unit.hz" },
+        { key: "meta.media.bit_depth", label: "位深", value: String(bits), unitKey: "meta.unit.bit" }
+      )
     } else if (id === "data") {
       dataSize = size
     }
@@ -933,7 +1044,7 @@ function wavInfo(head) {
   }
   if (byteRate && dataSize) {
     const sec = secondsText(dataSize / byteRate)
-    if (sec) out.push(["时长", sec])
+    if (sec) out.push({ key: "meta.media.duration", label: "时长", ...sec })
   }
   return out
 }
@@ -945,8 +1056,15 @@ function flacInfo(head) {
   const channels = ((b[2] >> 1) & 0x07) + 1
   const bits = (((b[2] & 0x01) << 4) | (b[3] >> 4)) + 1
   const total = (b[3] & 0x0f) * 2 ** 32 + b.readUInt32BE(4)
-  const out = [["采样率", `${sampleRate} Hz`], ["声道数", String(channels)], ["位深", `${bits} bit`]]
-  if (sampleRate > 0 && total > 0) out.push(["时长", secondsText(total / sampleRate)])
+  const out = [
+    { key: "meta.media.sample_rate", label: "采样率", value: String(sampleRate), unitKey: "meta.unit.hz" },
+    { key: "meta.media.channels", label: "声道数", value: String(channels) },
+    { key: "meta.media.bit_depth", label: "位深", value: String(bits), unitKey: "meta.unit.bit" },
+  ]
+  if (sampleRate > 0 && total > 0) {
+    const sec = secondsText(total / sampleRate)
+    if (sec) out.push({ key: "meta.media.duration", label: "时长", ...sec })
+  }
   return out
 }
 
@@ -968,18 +1086,18 @@ function id3Info(head) {
   const size = ((head[6] & 0x7f) << 21) | ((head[7] & 0x7f) << 14) | ((head[8] & 0x7f) << 7) | (head[9] & 0x7f)
   const end = Math.min(10 + size, head.length)
   const frames = {
-    TIT2: "标题",
-    TPE1: "艺术家",
-    TPE2: "专辑艺术家",
-    TALB: "专辑",
-    TDRC: "年份",
-    TYER: "年份",
-    TRCK: "音轨",
-    TCON: "流派",
-    TCOM: "作曲",
-    TENC: "编码者",
-    TSSE: "编码软件",
-    COMM: "备注",
+    TIT2: { key: "meta.media.title", label: "标题" },
+    TPE1: { key: "meta.media.artist", label: "艺术家" },
+    TPE2: { key: "meta.media.album_artist", label: "专辑艺术家" },
+    TALB: { key: "meta.media.album", label: "专辑" },
+    TDRC: { key: "meta.media.year", label: "年份" },
+    TYER: { key: "meta.media.year", label: "年份" },
+    TRCK: { key: "meta.media.track", label: "音轨" },
+    TCON: { key: "meta.media.genre", label: "流派" },
+    TCOM: { key: "meta.media.composer", label: "作曲" },
+    TENC: { key: "meta.media.encoder", label: "编码者" },
+    TSSE: { key: "meta.media.encoder_software", label: "编码软件" },
+    COMM: { key: "meta.media.comment", label: "备注" },
   }
   const rows = []
   let i = 10
@@ -988,8 +1106,8 @@ function id3Info(head) {
     if (!/^[A-Z0-9]{4}$/.test(id)) break
     const fsize = head.readUInt32BE(i + 4)
     if (fsize <= 0 || i + 10 + fsize > end) break
-    const label = frames[id]
-    if (label && !rows.some(([l]) => l === label)) {
+    const field = frames[id]
+    if (field && !rows.some((r) => r.key === field.key)) {
       const enc = head[i + 10]
       const body = head.subarray(i + 11, i + 10 + fsize)
       let text = ""
@@ -1001,13 +1119,17 @@ function id3Info(head) {
         text = body.toString("latin1")
       }
       text = cleanText(text.replace(/\u0000/g, ""))
-      if (text) rows.push([label, text])
+      if (text) rows.push({ key: field.key, label: field.label, value: text })
     }
     i += 10 + fsize
   }
   return rows
 }
 
+/**
+ * 时长文案：`3:05（185 秒）`。
+ * 括号里的秒数与时间串都交给字典插值（`{time}` / `{sec}`），中文界面逐字不变。
+ */
 function secondsText(sec) {
   if (!Number.isFinite(sec) || sec <= 0) return null
   const total = Math.round(sec)
@@ -1015,7 +1137,12 @@ function secondsText(sec) {
   const m = Math.floor((total % 3600) / 60)
   const s = total % 60
   const pad = (n) => String(n).padStart(2, "0")
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}（${total} 秒）` : `${m}:${pad(s)}（${total} 秒）`
+  const time = h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+  return {
+    value: `${time}（${total} 秒）`,
+    valueKey: "meta.media.duration_text",
+    valueParams: { time, sec: total },
+  }
 }
 
 /* ============================== 哈希 ============================== */
@@ -1074,7 +1201,13 @@ function textInfo(buf, size) {
 
 /* ============================== 主入口 ============================== */
 
-const EOL_TEXT = { crlf: "CRLF（Windows）", lf: "LF（Unix / macOS）", cr: "CR（旧版 macOS）", mixed: "混合" }
+/** 换行风格 -> 文案（key 给界面查字典用，label 是中文原文兜底） */
+const EOL_TEXT = {
+  crlf: { key: "meta.text.eol_crlf", label: "CRLF（Windows）" },
+  lf: { key: "meta.text.eol_lf", label: "LF（Unix / macOS）" },
+  cr: { key: "meta.text.eol_cr", label: "CR（旧版 macOS）" },
+  mixed: { key: "meta.text.eol_mixed", label: "混合" },
+}
 
 /**
  * 提取一个文件的详细信息。
@@ -1094,6 +1227,8 @@ export async function inspectFile(abs, stat) {
     magic: null,
     hashes: null,
     hashNote: null,
+    hashNoteKey: null,
+    hashNoteParams: null,
     contentVersion: null,
     image: null,
     exif: null,
@@ -1108,16 +1243,18 @@ export async function inspectFile(abs, stat) {
   try {
     result.magic = detectMagic(head, size)
   } catch {
-    result.magic = { label: "识别失败", kind: "unknown", mime: null, signature: hexOf(head, 16) }
+    result.magic = { label: "识别失败", labelKey: "meta.magic.detect_failed", kind: "unknown", mime: null, signature: hexOf(head, 16) }
   }
 
   // 2) 图片尺寸（EXIF 里也可能有，作为补充）
   try {
     const img = imageSize(head, result.magic)
     if (img && img.width && img.height) {
+      const color = img.colorType === undefined ? undefined : PNG_COLOR[img.colorType]
       result.image = {
         ...img,
-        colorType: img.colorType === undefined ? undefined : PNG_COLOR[img.colorType] || String(img.colorType),
+        colorType: img.colorType === undefined ? undefined : color ? color.label : String(img.colorType),
+        colorTypeKey: color?.key,
         megapixels: Number(((img.width * img.height) / 1e6).toFixed(2)),
         aspect: `${(img.width / img.height).toFixed(3)} : 1`,
       }
@@ -1135,9 +1272,9 @@ export async function inspectFile(abs, stat) {
     if (exifBuf) result.exif = parseExif(exifBuf)
     // EXIF 里带了尺寸而前面没解析出来（例如 TIFF）
     if (!result.image && result.exif) {
-      const w = result.exif.find(([l]) => l === "图像宽度")
-      const h = result.exif.find(([l]) => l === "图像高度")
-      if (w && h) result.image = { width: Number(w[1]), height: Number(h[1]) }
+      const w = result.exif.find((r) => r.key === "meta.exif.image_width")
+      const h = result.exif.find((r) => r.key === "meta.exif.image_height")
+      if (w && h) result.image = { width: Number(w.value), height: Number(h.value) }
     }
   } catch {
     /* EXIF 坏了不影响其它信息 */
@@ -1147,7 +1284,11 @@ export async function inspectFile(abs, stat) {
   const doc = []
   try {
     if (result.magic?.label.startsWith("PNG")) {
-      for (const [k, v] of pngChunks(head).meta) doc.push([PNG_KEY[k] || k, v])
+      for (const [k, v] of pngChunks(head).meta) {
+        // 认不出的文本块（自造关键字）没有命名键：直接把关键字当键，前端查不到会回落到 label
+        const field = PNG_KEY[k]
+        doc.push(field ? { key: field.key, label: field.label, value: v } : { key: k, label: k, value: v })
+      }
     } else if (result.magic?.label.startsWith("PDF")) {
       doc.push(...pdfInfo([head, tail]))
     } else if (result.magic?.family === "ooxml") {
@@ -1155,7 +1296,9 @@ export async function inspectFile(abs, stat) {
     } else if (result.magic?.label.startsWith("ZIP") || result.magic?.mime === "application/zip") {
       // 普通 zip：只把前 64KB 里能看到的条目数报出来，不去读整个中央目录
       const entries = (head.toString("latin1").match(/PK\u0003\u0004/g) || []).length
-      if (entries) doc.push(["已扫描到的条目数（前 64KB 内）", String(entries)])
+      if (entries) {
+        doc.push({ key: "meta.doc.zip_scanned_entries", label: "已扫描到的条目数（前 64KB 内）", value: String(entries) })
+      }
     }
   } catch {
     /* 同上 */
@@ -1166,7 +1309,10 @@ export async function inspectFile(abs, stat) {
   try {
     if (result.magic?.label.startsWith("MP4") || result.magic?.label.includes("QuickTime") || result.magic?.label.includes("ISO BMFF") || result.magic?.label.includes("MP4 音频") || result.magic?.label.includes("MP4 有声书")) {
       const sec = await mp4Duration(abs, size)
-      if (sec) media.push(["时长", secondsText(sec)])
+      if (sec) {
+        const text = secondsText(sec)
+        if (text) media.push({ key: "meta.media.duration", label: "时长", ...text })
+      }
     } else if (result.magic?.label.includes("WAV")) {
       media.push(...wavInfo(head))
     } else if (result.magic?.label.includes("FLAC")) {
@@ -1186,7 +1332,10 @@ export async function inspectFile(abs, stat) {
     if (result.magic?.kind === "text" && size > 0) {
       if (size <= TEXT_SCAN_BYTES) {
         const info = textInfo(head.subarray(0, Math.min(head.length, size)), size)
-        if (info) result.text = { ...info, eolLabel: EOL_TEXT[info.eol] || info.eol }
+        if (info) {
+          const eol = EOL_TEXT[info.eol]
+          result.text = { ...info, eolLabel: eol ? eol.label : info.eol, eolKey: eol?.key }
+        }
       } else {
         result.text = { truncated: true }
       }
@@ -1197,6 +1346,7 @@ export async function inspectFile(abs, stat) {
 
   // 7) 哈希（流式，超限跳过）
   if (size === 0) {
+    result.hashNoteKey = "meta.hash.empty_file"
     result.hashNote = "空文件（0 字节），没有可计算的内容"
   } else if (size <= HASH_MAX_BYTES) {
     try {
@@ -1204,10 +1354,14 @@ export async function inspectFile(abs, stat) {
       result.contentVersion = `${Math.trunc(stat.mtimeMs)}-${size}-${h.sha1Base64Url}`
       result.hashes = { md5: h.md5, sha1: h.sha1, sha256: h.sha256 }
     } catch {
+      result.hashNoteKey = "meta.hash.read_failed"
       result.hashNote = "读取文件失败，未能计算校验和"
     }
   } else if (size > HASH_MAX_BYTES) {
-    result.hashNote = `文件超过 ${Math.round(HASH_MAX_BYTES / 1024 / 1024)}MB，为节省磁盘读取已跳过校验和`
+    const limitMB = Math.round(HASH_MAX_BYTES / 1024 / 1024)
+    result.hashNoteKey = "meta.hash.skipped_too_large"
+    result.hashNoteParams = { limit: limitMB }
+    result.hashNote = `文件超过 ${limitMB}MB，为节省磁盘读取已跳过校验和`
   }
 
   return result

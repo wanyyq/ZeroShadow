@@ -1,6 +1,8 @@
 // 把用户选择的图片裁切/缩放为 128×128 的 WebP。
 // 全部在浏览器端完成，服务端只做尺寸与体积校验。
 
+import { translate } from "@/lib/i18n"
+
 const TARGET = 128
 
 async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
@@ -16,7 +18,7 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const el = new Image()
       el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error("图片读取失败"))
+      el.onerror = () => reject(new Error(translate("ui.avatar.load_failed")))
       el.src = url
     })
     return img
@@ -26,17 +28,17 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
 }
 
 export async function fileToAvatarWebp(file: File): Promise<Blob> {
-  if (!file.type.startsWith("image/")) throw new Error("请选择图片文件")
+  if (!file.type.startsWith("image/")) throw new Error(translate("ui.avatar.select_image"))
   const source = await loadBitmap(file)
   const sw = "naturalWidth" in source ? source.naturalWidth : source.width
   const sh = "naturalHeight" in source ? source.naturalHeight : source.height
-  if (!sw || !sh) throw new Error("图片尺寸无效")
+  if (!sw || !sh) throw new Error(translate("ui.avatar.invalid_size"))
 
   const canvas = document.createElement("canvas")
   canvas.width = TARGET
   canvas.height = TARGET
   const ctx = canvas.getContext("2d")
-  if (!ctx) throw new Error("当前浏览器不支持图片处理")
+  if (!ctx) throw new Error(translate("ui.avatar.no_canvas"))
 
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = "high"
@@ -47,7 +49,7 @@ export async function fileToAvatarWebp(file: File): Promise<Blob> {
   ctx.drawImage(source as CanvasImageSource, (TARGET - dw) / 2, (TARGET - dh) / 2, dw, dh)
 
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.85))
-  if (!blob) throw new Error("当前浏览器不支持 WebP，请更换现代浏览器")
-  if (blob.type !== "image/webp") throw new Error("当前浏览器不支持 WebP，请更换现代浏览器")
+  if (!blob) throw new Error(translate("ui.avatar.no_webp"))
+  if (blob.type !== "image/webp") throw new Error(translate("ui.avatar.no_webp"))
   return blob
 }

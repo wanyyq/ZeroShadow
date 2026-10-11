@@ -3,6 +3,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { compressJobStatus, downloadUrlJobStatus, extractJobStatus, startCompressJob, startDownloadUrlJob, startExtractJob } from "@/lib/api"
 import { uid } from "@/lib/format"
+import { useT } from "@/lib/i18n"
 import type { OpType } from "@/lib/types"
 
 export interface OpJob {
@@ -30,6 +31,7 @@ const Ctx = React.createContext<OpsState | undefined>(undefined)
 const POLL_MS = 400
 
 export function OperationsProvider({ children }: { children: React.ReactNode }) {
+  const t = useT()
   const [jobs, setJobs] = React.useState<OpJob[]>([])
   const listeners = React.useRef(new Set<(job: OpJob) => void>())
   const timers = React.useRef(new Map<string, number>())
@@ -97,16 +99,27 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
         )
       )
       if (job.status === "done") {
-        if (job.type === "compress") toast.success("压缩完成")
-        else if (job.type === "download") toast.success("下载完成")
-        else toast.success(job.count !== undefined ? `已解压 ${job.count} 个文件` : "解压完成")
+        if (job.type === "compress") toast.success(t("ui.operations.compress_done"))
+        else if (job.type === "download") toast.success(t("ui.operations.download_done"))
+        else {
+          toast.success(
+            job.count !== undefined
+              ? t("ui.operations.extract_done_count", { count: job.count })
+              : t("ui.operations.extract_done")
+          )
+        }
       } else if (job.status === "error") {
-        const labels: Record<string, string> = { compress: "压缩失败", extract: "解压失败", download: "下载失败" }
-        toast.error(labels[job.type] || "操作失败", { description: job.error })
+        // 键（compress/extract/download）是代码值，只有文案取自字典
+        const labels: Record<string, string> = {
+          compress: t("ui.operations.compress_failed"),
+          extract: t("ui.operations.extract_failed"),
+          download: t("ui.operations.download_failed"),
+        }
+        toast.error(labels[job.type] || t("ui.common.operation_failed"), { description: job.error })
       }
       for (const fn of listeners.current) fn(job)
     },
-    []
+    [t]
   )
 
   const pollUntilDone = React.useCallback(
@@ -124,7 +137,7 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
           } else if (s.state === "error" || s.state === "gone") {
             stopPolling(serverJobId)
             uiToServer.current.delete(uiId)
-            finish({ id: uiId, type, label, percent: s.percent, status: "error", error: s.error || (s.state === "gone" ? "任务已过期，请重试" : undefined) })
+            finish({ id: uiId, type, label, percent: s.percent, status: "error", error: s.error || (s.state === "gone" ? t("ui.operations.job_expired") : undefined) })
           } else {
             patch(uiId, { percent: s.percent })
           }
@@ -138,14 +151,14 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
       timers.current.set(serverJobId, window.setInterval(() => void apply(), POLL_MS))
       void apply(true)
     },
-    [finish, patch, stopPolling]
+    [finish, patch, stopPolling, t]
   )
 
   const startCompress = React.useCallback(
     (paths: string[]) => {
       if (!paths.length) return
       const id = uid()
-      const label = paths.length === 1 ? `${paths[0].split("/").pop()} (Zip)` : `打包 ${paths.length} 项`
+      const label = paths.length === 1 ? `${paths[0].split("/").pop()} (Zip)` : t("ui.operations.compress_label_batch", { count: paths.length })
       pushJob({ id, type: "compress", label, percent: 0, status: "running" })
       void startCompressJob(paths)
         .then(({ jobId }) => { pollUntilDone(id, jobId, "compress", label, () => {}) })
@@ -155,13 +168,13 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
           finish({ id, type: "compress", label, percent: 0, status: "error", error: (err as Error).message })
         })
     },
-    [finish, pollUntilDone, pushJob, stopByUiId]
+    [finish, pollUntilDone, pushJob, stopByUiId, t]
   )
 
   const startExtract = React.useCallback(
     (path: string, dest: string) => {
       const id = uid()
-      const label = `${path.split("/").pop()} 解压`
+      const label = t("ui.operations.extract_label", { name: path.split("/").pop() ?? "" })
       pushJob({ id, type: "extract", label, percent: 0, status: "running" })
       void startExtractJob(path, dest)
         .then(({ jobId }) => { pollUntilDone(id, jobId, "extract", label, () => {}) })
@@ -170,13 +183,13 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
           finish({ id, type: "extract", label, percent: 0, status: "error", error: (err as Error).message })
         })
     },
-    [finish, pollUntilDone, pushJob, stopByUiId]
+    [finish, pollUntilDone, pushJob, stopByUiId, t]
   )
 
   const startDownloadUrl = React.useCallback(
     (url: string, dest: string, filename?: string) => {
       const id = uid()
-      const label = filename || url.split("/").pop()?.split("?")[0] || "远程文件"
+      const label = filename || url.split("/").pop()?.split("?")[0] || t("ui.operations.remote_file")
       pushJob({ id, type: "download", label, percent: 0, status: "running" })
       void startDownloadUrlJob(url, dest, filename)
         .then(({ jobId }) => { pollUntilDone(id, jobId, "download", label, () => {}) })
@@ -185,7 +198,7 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
           finish({ id, type: "download", label, percent: 0, status: "error", error: (err as Error).message })
         })
     },
-    [finish, pollUntilDone, pushJob, stopByUiId]
+    [finish, pollUntilDone, pushJob, stopByUiId, t]
   )
 
   const dismiss = React.useCallback(

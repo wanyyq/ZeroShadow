@@ -18,14 +18,9 @@ import { groupsForUser, listGroups } from "../groups.js"
 import { filesystemCaseInsensitive } from "../safety.js"
 import { rateLimit } from "../ratelimit.js"
 import { info, warn } from "../logger.js"
+import { httpError } from "../http.js"
 
 const router = Router()
-
-function httpError(status, message) {
-  const err = new Error(message)
-  err.status = status
-  return err
-}
 
 // 登录也要限流：账户锁定表虽然已经有了硬上限（见 auth.js 的 evictOldest），
 // 但没有限流时仍可被用于制造大量无效请求 / 反复触发 bcrypt 比对。
@@ -34,14 +29,20 @@ function httpError(status, message) {
 router.post("/login", rateLimit, async (req, res) => {
   const username = String(req.body?.username || "").trim()
   const password = String(req.body?.password || "")
-  if (!username || !password) return res.status(400).json({ error: "请输入用户名和密码" })
+  if (!username || !password) {
+    return res.status(400).json({ error: "请输入用户名和密码", errorKey: "api.auth.login_missing_credentials" })
+  }
   if (username.length > 64 || password.length > 256) {
-    return res.status(400).json({ error: "用户名或密码格式不正确" })
+    return res.status(400).json({ error: "用户名或密码格式不正确", errorKey: "api.auth.login_format_invalid" })
   }
 
   const lockedMinutes = loginLocked(req.ip, username)
   if (lockedMinutes) {
-    return res.status(429).json({ error: `尝试次数过多，请约 ${lockedMinutes} 分钟后再试` })
+    return res.status(429).json({
+      error: `尝试次数过多，请约 ${lockedMinutes} 分钟后再试`,
+      errorKey: "api.auth.login_locked",
+      errorParams: { minutes: lockedMinutes },
+    })
   }
 
   let auth = null
@@ -58,14 +59,14 @@ router.post("/login", rateLimit, async (req, res) => {
       }
     } else if (result.reason === "disabled") {
       warn("login_fail", { msg: "账户已被禁用", user: username, ip: req.ip })
-      return res.status(403).json({ error: "该账户已被禁用" })
+      return res.status(403).json({ error: "该账户已被禁用", errorKey: "api.auth.account_disabled" })
     }
   }
 
   if (!auth) {
     recordLoginFail(req.ip, username)
     warn("login_fail", { msg: "用户名或密码错误", user: username, ip: req.ip })
-    return res.status(401).json({ error: "用户名或密码错误" })
+    return res.status(401).json({ error: "用户名或密码错误", errorKey: "api.auth.login_invalid_credentials" })
   }
 
   recordLoginSuccess(req.ip, username)
@@ -78,20 +79,27 @@ router.post("/change-password", requireRole("superadmin", "member"), requirePerm
   try {
     const oldPwd = String(req.body?.oldPassword || "")
     const newPwd = String(req.body?.newPassword || "")
-    if (!oldPwd || !newPwd) throw httpError(400, "请输入旧密码和新密码")
-    if (newPwd.length < 6 || newPwd.length > 128) throw httpError(400, "新密码长度需为 6-128 位")
+    if (!oldPwd || !newPwd) {
+      throw httpError(400, "请输入旧密码和新密码", { errorKey: "api.auth.change_password_missing" })
+    }
+    if (newPwd.length < 6 || newPwd.length > 128) {
+      throw httpError(400, "新密码长度需为 6-128 位", { errorKey: "api.auth.new_password_length_invalid" })
+    }
 
     if (req.auth.role === "superadmin") {
-      throw httpError(400, "超级管理员密码请直接编辑 .env 中 SUPER_ADMIN_PASSWORD，改后重启服务生效")
+      throw httpError(400, "超级管理员密码请直接编辑 .env 中 SUPER_ADMIN_PASSWORD，改后重启服务生效", {
+        errorKey: "api.auth.superadmin_password_env",
+      })
     }
 
     const user = findById(req.auth.userId)
-    if (!user) throw httpError(404, "用户不存在")
+    if (!user) throw httpError(404, "用户不存在", { errorKey: "api.auth.user_not_found" })
     const ok = await bcrypt.compare(oldPwd, user.passwordHash)
-    if (!ok) throw httpError(403, "旧密码错误")
+    if (!ok) throw httpError(403, "旧密码错误", { errorKey: "api.auth.old_password_incorrect" })
 
+    // resetPassword() 返回 { key, message }：文案由 users.js 一处拥有
     const error = await resetPassword(req.auth.userId, newPwd)
-    if (error) throw httpError(400, error)
+    if (error) throw httpError(400, error.message, { errorKey: error.key })
     res.clearCookie(COOKIE_NAME, { path: "/" })
     info("password_change", { user: req.auth.username, role: req.auth.role })
     res.json({ ok: true, message: "密码已修改，请重新登录" })

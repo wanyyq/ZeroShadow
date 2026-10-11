@@ -13,6 +13,7 @@ import { getErrorMessage } from "@/lib/api"
 import { api, emptyTrash, fetchTrash, purgeTrash, restoreTrash } from "@/lib/api"
 import type { AdminConfig, TrashResponse } from "@/lib/types"
 import { formatBytes } from "@/lib/format"
+import { useT } from "@/lib/i18n"
 /**
  * 回收站。
  *
@@ -21,6 +22,7 @@ import { formatBytes } from "@/lib/format"
  * 由超管统一管理，权限面更小，也避免成员之间互相看到对方删掉的文件。
  */
 export function TrashSection() {
+  const t = useT()
   const [data, setData] = React.useState<TrashResponse | null>(null)
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [retention, setRetention] = React.useState("")
@@ -63,13 +65,13 @@ export function TrashSection() {
   const doRestore = (id: string, rel: string) =>
     runBusy(id, () =>
       confirm({
-        title: `还原「${rel}」？`,
-        description: "内容会回到原来的位置。如果那个位置已经有了同名项目，还原会被拒绝，需要你先处理冲突。",
-        confirmText: "还原",
+        title: t("ui.settings.trash.restore_confirm_title", { path: rel }),
+        description: t("ui.settings.trash.restore_confirm_description"),
+        confirmText: t("ui.settings.trash.restore"),
         destructive: false,
         onConfirm: async () => {
           await restoreTrash(id)
-          toast.success("已还原")
+          toast.success(t("ui.settings.trash.restored"))
           load()
         },
       }).then(() => undefined)
@@ -79,12 +81,12 @@ export function TrashSection() {
   const doRestoreOverwrite = (id: string, rel: string) =>
     runBusy(id, () =>
       confirm({
-        title: `用回收站里的版本覆盖「${rel}」？`,
-        description: "当前位置上已有的同名项目会被删除，且此操作不可撤销。",
-        confirmText: "覆盖还原",
+        title: t("ui.settings.trash.overwrite_confirm_title", { path: rel }),
+        description: t("ui.settings.trash.overwrite_confirm_description"),
+        confirmText: t("ui.settings.trash.overwrite_restore"),
         onConfirm: async () => {
           await restoreTrash(id, undefined, true)
-          toast.success("已覆盖还原")
+          toast.success(t("ui.settings.trash.overwrite_restored"))
           load()
         },
       }).then(() => undefined)
@@ -93,12 +95,12 @@ export function TrashSection() {
   const doPurge = (id: string, rel: string) =>
     runBusy(id, () =>
       confirm({
-        title: `彻底删除「${rel}」？`,
-        description: "内容会被永久删除，无法再还原。",
-        confirmText: "彻底删除",
+        title: t("ui.settings.trash.purge_confirm_title", { path: rel }),
+        description: t("ui.settings.trash.purge_confirm_description"),
+        confirmText: t("ui.settings.trash.purge"),
         onConfirm: async () => {
           await purgeTrash(id)
-          toast.success("已彻底删除")
+          toast.success(t("ui.settings.trash.purged"))
           load()
         },
       }).then(() => undefined)
@@ -106,12 +108,12 @@ export function TrashSection() {
 
   const doEmpty = () => {
     void confirm({
-      title: "清空回收站？",
-      description: `回收站里的 ${data?.stats.count ?? 0} 个项目会被永久删除，无法还原。`,
-      confirmText: "清空",
+      title: t("ui.settings.trash.empty_confirm_title"),
+      description: t("ui.settings.trash.empty_confirm_description", { n: data?.stats.count ?? 0 }),
+      confirmText: t("ui.settings.trash.empty"),
       onConfirm: async () => {
         const r = await emptyTrash()
-        toast.success(`已清空 ${r.removed} 项`)
+        toast.success(t("ui.settings.trash.emptied", { n: r.removed }))
         load()
       },
     })
@@ -124,8 +126,7 @@ export function TrashSection() {
     <div className="grid gap-5">
       {data && data.enabled && !data.available && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          回收站目录当前不可用（例如 data/ 只读或磁盘已满），因此<strong>删除会直接生效、不进入回收站</strong>。
-          请检查服务端 data/ 目录的写权限。
+          {t("ui.settings.trash.unavailable_prefix")}<strong>{t("ui.settings.trash.unavailable_strong")}</strong>{t("ui.settings.trash.unavailable_suffix")}
         </div>
       )}
 
@@ -133,35 +134,35 @@ export function TrashSection() {
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <CardTitle>回收站</CardTitle>
+              <CardTitle>{t("ui.settings.trash.title")}</CardTitle>
               <CardDescription>
-                删除的项目会先放在这里，超过保留期自动清理
-                {stats ? `；当前 ${stats.count} 项 · 占用 ${formatBytes(stats.bytes)}` : ""}
+                {t("ui.settings.trash.description_prefix")}
+                {stats ? t("ui.settings.trash.description_stats", { count: stats.count, size: formatBytes(stats.bytes) }) : ""}
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">保留</span>
+                <span className="text-xs text-muted-foreground">{t("ui.settings.trash.retention_label")}</span>
                 <Input
                   className="h-8 w-16 text-right"
                   inputMode="numeric"
                   value={retention}
                   onChange={(e) => setRetention(e.target.value)}
                 />
-                <span className="text-xs text-muted-foreground">天</span>
+                <span className="text-xs text-muted-foreground">{t("ui.settings.trash.unit_days")}</span>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => patch({ trashRetentionDays: Number(retention) }, "保留天数已更新")}
+                  onClick={() => patch({ trashRetentionDays: Number(retention) }, t("ui.settings.trash.retention_updated"))}
                 >
-                  保存
+                  {t("ui.common.save")}
                 </Button>
               </div>
               <Button size="sm" variant="outline" onClick={load}>
-                <Icon name="refresh-cw" /> 刷新
+                <Icon name="refresh-cw" /> {t("ui.common.refresh")}
               </Button>
               <Button size="sm" variant="outline" className="text-destructive" disabled={!items.length} onClick={doEmpty}>
-                <Icon name="trash-2" /> 清空回收站
+                <Icon name="trash-2" /> {t("ui.settings.trash.empty_button")}
               </Button>
             </div>
           </div>
@@ -170,33 +171,33 @@ export function TrashSection() {
           {config && (
             <label className="flex cursor-pointer items-center justify-between rounded-md bg-muted/50 px-3 py-2">
               <span>
-                <span className="block text-sm font-medium">删除时移入回收站</span>
+                <span className="block text-sm font-medium">{t("ui.settings.trash.enabled_label")}</span>
                 <span className="block text-xs text-muted-foreground">
-                  关闭后删除立即生效、不再保留副本
+                  {t("ui.settings.trash.enabled_hint")}
                 </span>
               </span>
               <input
                 type="checkbox"
                 className="size-4"
                 checked={config.trashEnabled !== false}
-                onChange={(e) => patch({ trashEnabled: e.target.checked }, e.target.checked ? "已启用回收站" : "已关闭回收站")}
+                onChange={(e) => patch({ trashEnabled: e.target.checked }, e.target.checked ? t("ui.settings.trash.enabled_toast") : t("ui.settings.trash.disabled_toast"))}
               />
             </label>
           )}
           <Separator />
           {items.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">回收站是空的</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">{t("ui.settings.trash.empty_state")}</p>
           ) : (
             <ScrollArea className="h-80 rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>名称</TableHead>
-                    <TableHead>原位置</TableHead>
-                    <TableHead className="w-24 text-right">大小</TableHead>
-                    <TableHead className="w-40">删除时间</TableHead>
-                    <TableHead className="w-24">删除者</TableHead>
-                    <TableHead className="w-44 text-right">操作</TableHead>
+                    <TableHead>{t("ui.common.name")}</TableHead>
+                    <TableHead>{t("ui.settings.trash.col_original_path")}</TableHead>
+                    <TableHead className="w-24 text-right">{t("ui.common.size")}</TableHead>
+                    <TableHead className="w-40">{t("ui.settings.trash.col_deleted_at")}</TableHead>
+                    <TableHead className="w-24">{t("ui.settings.trash.col_deleted_by")}</TableHead>
+                    <TableHead className="w-44 text-right">{t("ui.common.actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -210,12 +211,12 @@ export function TrashSection() {
                         /{it.rel}
                       </TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">
-                        {it.size < 0 ? "目录" : formatBytes(it.size)}
+                        {it.size < 0 ? t("ui.settings.trash.directory") : formatBytes(it.size)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{it.deletedAt.replace("T", " ").slice(0, 19)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {it.deletedBy || "—"}
-                        {it.deletedByRole === "superadmin" && <Badge variant="secondary" className="ml-1 text-[10px]">超管</Badge>}
+                        {it.deletedByRole === "superadmin" && <Badge variant="secondary" className="ml-1 text-[10px]">{t("ui.settings.trash.superadmin")}</Badge>}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
@@ -224,17 +225,17 @@ export function TrashSection() {
                           disabled={busyId === it.id}
                           onClick={() => { void doRestore(it.id, it.rel) }}
                         >
-                          还原
+                          {t("ui.settings.trash.restore")}
                         </Button>
                         <Button
                           size="xs"
                           variant="ghost"
                           className="ml-1"
-                          title="同名冲突时用回收站里的版本覆盖"
+                          title={t("ui.settings.trash.overwrite_hint")}
                           disabled={busyId === it.id}
                           onClick={() => { void doRestoreOverwrite(it.id, it.rel) }}
                         >
-                          覆盖还原
+                          {t("ui.settings.trash.overwrite_restore")}
                         </Button>
                         <Button
                           size="xs"
@@ -243,7 +244,7 @@ export function TrashSection() {
                           disabled={busyId === it.id}
                           onClick={() => { void doPurge(it.id, it.rel) }}
                         >
-                          彻底删除
+                          {t("ui.settings.trash.purge")}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -253,8 +254,7 @@ export function TrashSection() {
             </ScrollArea>
           )}
           <p className="text-xs text-muted-foreground">
-            「还原」会放回原位置；若该位置已有同名项目，请先用「覆盖还原」或先改名/删除冲突项。
-            超过保留期的项目会在服务启动或每 6 小时的维护任务中被自动清理。
+            {t("ui.settings.trash.hint")}
           </p>
         </CardContent>
       </Card>

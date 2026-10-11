@@ -45,13 +45,32 @@ export function findByUsername(username) {
   return users.find((u) => u.username.toLowerCase() === lower) || null
 }
 
-export function validateNewUser(username, password) {
-  if (!USERNAME_RE.test(username)) return "用户名需为 2-32 位字母、数字、_ . -"
-  if (username.toLowerCase() === env.superUser.toLowerCase()) return "该用户名已被超级管理员占用"
-  if (findByUsername(username)) return "用户名已存在"
-  if (typeof password !== "string" || password.length < 6 || password.length > 128)
-    return "密码长度需为 6-128 位"
+/**
+ * 校验新成员的用户名/密码。
+ *
+ * 返回 null（通过）或 `{ message, errorKey, errorParams? }`：`message` 仍是中文原文，
+ * 命名键给前端按界面语言渲染用（见 http.js 的说明）。
+ * `validateNewUser` 保留"只返回中文字符串"的旧签名给外部调用方，两者共用同一份判断。
+ */
+function checkNewUser(username, password) {
+  if (!USERNAME_RE.test(username)) {
+    return { message: "用户名需为 2-32 位字母、数字、_ . -", errorKey: "api.admin.username_invalid" }
+  }
+  if (username.toLowerCase() === env.superUser.toLowerCase()) {
+    return { message: "该用户名已被超级管理员占用", errorKey: "api.admin.username_reserved" }
+  }
+  if (findByUsername(username)) {
+    return { message: "用户名已存在", errorKey: "api.admin.username_taken" }
+  }
+  if (typeof password !== "string" || password.length < 6 || password.length > 128) {
+    return { message: "密码长度需为 6-128 位", errorKey: "api.admin.password_length_invalid" }
+  }
   return null
+}
+
+/** 只返回中文错误文案（或 null，表示通过）；命名键见 checkNewUser */
+export function validateNewUser(username, password) {
+  return checkNewUser(username, password)?.message ?? null
 }
 
 export async function createMembers(entries) {
@@ -61,11 +80,27 @@ export async function createMembers(entries) {
     for (const entry of entries) {
       const username = String(entry.username || "").trim()
       const password = String(entry.password || "")
-      let err = validateNewUser(username, password)
-      if (!err && seen.has(username.toLowerCase())) err = "本次提交中用户名重复"
-      if (!err && users.length >= MAX_MEMBERS) err = `成员数量已达上限 ${MAX_MEMBERS}`
-      if (err) {
-        results.push({ username, ok: false, error: err })
+      let check = checkNewUser(username, password)
+      if (!check && seen.has(username.toLowerCase())) {
+        check = { message: "本次提交中用户名重复", errorKey: "api.admin.username_duplicate" }
+      }
+      if (!check && users.length >= MAX_MEMBERS) {
+        check = {
+          message: `成员数量已达上限 ${MAX_MEMBERS}`,
+          errorKey: "api.admin.member_limit_reached",
+          errorParams: { max: MAX_MEMBERS },
+        }
+      }
+      if (check) {
+        // error/errorKey 一起返回：error 是中文原文（旧前端与脚本照旧），
+        // errorKey 让界面能按当前语言渲染这一行的失败原因。
+        results.push({
+          username,
+          ok: false,
+          error: check.message,
+          errorKey: check.errorKey,
+          ...(check.errorParams ? { errorParams: check.errorParams } : {}),
+        })
         continue
       }
       seen.add(username.toLowerCase())
@@ -123,12 +158,19 @@ export async function batchMembers(action, ids) {
   })
 }
 
+/**
+ * 重置成员密码。
+ *
+ * 失败时返回 `{ key, message }`：`message` 是中文原文（调用方照搬进 error 字段），
+ * `key` 是命名键（前端据此按当前界面语言渲染）。这样文案由本文件一处拥有，
+ * 调用方不必维护"文案 → 键"的映射表（中文一改，映射会静默失效）。
+ */
 export async function resetPassword(id, password) {
   return withLock("users", async () => {
     const user = findById(id)
-    if (!user) return "用户不存在"
+    if (!user) return { key: "api.admin.user_not_found", message: "用户不存在" }
     if (typeof password !== "string" || password.length < 6 || password.length > 128)
-      return "密码长度需为 6-128 位"
+      return { key: "api.admin.password_length_invalid", message: "密码长度需为 6-128 位" }
     user.passwordHash = await bcrypt.hash(password, 10)
     user.tokenVersion += 1
     await persist()

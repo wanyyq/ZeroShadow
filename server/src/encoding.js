@@ -263,7 +263,13 @@ export function encodeText(text, encoding) {
   try {
     buffer = iconv.encode(text, codec)
   } catch (err) {
-    return { error: `无法用 ${encodingLabel(encoding)} 编码：${err.message}` }
+    // errorKey / errorParams 供调用方（routes/fs.js）把提示按界面语言渲染，
+    // error 仍是中文原文，第三方脚本拿到的行为不变（见 http.js 的 httpError）。
+    return {
+      error: `无法用 ${encodingLabel(encoding)} 编码：${err.message}`,
+      errorKey: "api.fs.encoding_failed",
+      errorParams: { encoding: encodingLabel(encoding), message: String(err.message) },
+    }
   }
   let back = iconv.decode(buffer, codec).replace(/^\uFEFF/, "")
   // 按标准给需要 BOM 的编码补上 BOM：

@@ -44,11 +44,24 @@ function pushOutput(line) {
 
 const HOST_RE = /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+(?::\d{1,5})?$/
 
+/**
+ * 构造"自定义 SSH 目标不合法"的返回值：`{ key, message }`。
+ *   - `message`：中文原文，调用方原样回传给用户（一个字都不改）；
+ *   - `key`    ：命名键（见 http.js），界面按当前语言渲染它。
+ * 调用方（routes/admin.js）用 `httpError(400, invalid.message, { errorKey: invalid.key })`
+ * 把它转成 HTTP 错误 —— 文案归这里所有，调用方不需要维护"文案 → 键"的映射表。
+ */
+function hostError(key, message) {
+  return { key, message }
+}
+
 export function validateCustomHost(host) {
   const value = String(host || "").trim()
-  if (!value) return "请填写 SSH 目标，例如 user@example.com"
-  if (value.startsWith("-")) return "SSH 目标格式无效"
-  if (!HOST_RE.test(value)) return "SSH 目标格式无效，仅支持 user@host 或 user@host:端口"
+  if (!value) return hostError("api.tunnel.custom_host_required", "请填写 SSH 目标，例如 user@example.com")
+  if (value.startsWith("-")) return hostError("api.tunnel.custom_host_invalid", "SSH 目标格式无效")
+  if (!HOST_RE.test(value)) {
+    return hostError("api.tunnel.custom_host_format", "SSH 目标格式无效，仅支持 user@host 或 user@host:端口")
+  }
   return null
 }
 

@@ -17,6 +17,7 @@ import {
   isSensitiveAbs,
   isSoftPath,
   joinRel,
+  nameErrorKey,
   normRel,
   resolveAny,
   resolveSafe,
@@ -52,18 +53,12 @@ import { isVisibleForContext } from "../groups.js"
 import { compareVersion, versionOf } from "../version.js"
 import { inspectFile } from "../fileinfo.js"
 import { moveToTrash, trashAvailable } from "../trash.js"
-import { contentDisposition } from "../http.js"
+import { contentDisposition, httpError } from "../http.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
 import { rateLimit } from "../ratelimit.js"
 import { createJob, failJob, finishJob, jobCreatedBy, jobStatus, patchJob } from "../jobs.js"
 
 const router = Router()
-
-function httpError(status, message) {
-  const err = new Error(message)
-  err.status = status
-  return err
-}
 
 function actor(req) {
   return { user: req.auth.username || "guest", role: req.auth.role, ip: req.ip }
@@ -73,6 +68,7 @@ function blockSoft(rel) {
   if (isSoftPath(rel)) {
     const err = new Error("外部映射目录仅支持只读操作")
     err.status = 403
+    err.errorKey = "api.fs.soft_read_only"
     throw err
   }
 }
@@ -84,6 +80,7 @@ function blockSoftCopyOut(rel) {
   if (isSoftPath(rel) && !getConfig().softDirAllowCopyOut) {
     const err = new Error("只读映射目录的内容不允许复制到网盘目录（可在后台设置中放开）")
     err.status = 403
+    err.errorKey = "api.fs.soft_copy_out_forbidden"
     throw err
   }
 }
@@ -106,6 +103,7 @@ function assertContextVisible(req, rel) {
   if (guestBlocked(req, rel) || !contextVisible(req, rel)) {
     const err = new Error("文件或目录不存在")
     err.status = 404
+    err.errorKey = "api.fs.not_found"
     throw err
   }
 }
@@ -197,10 +195,10 @@ const SCRIPTABLE_EXT = new Set(["html", "htm", "svg"])
 router.get("/list", requirePerm("browse"), async (req, res, next) => {
   try {
     const { abs, rel, isSoft } = resolveSafe(req.query.path)
-    if (!isSoft && guestBlocked(req, rel)) throw httpError(404, "目录不存在")
+    if (!isSoft && guestBlocked(req, rel)) throw httpError(404, "目录不存在", { errorKey: "api.fs.dir_not_found" })
     assertContextVisible(req, rel)
     if (isSoft) {
-      if (guestBlocked(req, rel)) throw httpError(404, "目录不存在")
+      if (guestBlocked(req, rel)) throw httpError(404, "目录不存在", { errorKey: "api.fs.dir_not_found" })
       const resolved = resolveAny(rel)
       await assertDir(resolved.abs)
       const entries = await listDir(resolved.abs, rel, { forGuest: req.auth.role === "guest" })
@@ -236,13 +234,13 @@ router.get("/list", requirePerm("browse"), async (req, res, next) => {
 router.get("/download", async (req, res, next) => {
   try {
     const resolved = resolveAny(normRel(req.query.path))
-    if (!resolved.rel) throw httpError(400, "非法路径")
+    if (!resolved.rel) throw httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
     // 只读映射目录同样要尊重「对访客隐藏」：旧实现用 `!isSoft` 跳过了这一步，
     // 于是访客只要猜到隐藏软目录里的完整文件名就能下载。
-    if (guestBlocked(req, resolved.rel)) throw httpError(404, "文件不存在")
+    if (guestBlocked(req, resolved.rel)) throw httpError(404, "文件不存在", { errorKey: "api.fs.file_not_found" })
     assertContextVisible(req, resolved.rel)
     const stat = await assertExists(resolved.abs)
-    if (!stat.isFile()) throw httpError(400, "只能下载文件，文件夹请使用打包下载")
+    if (!stat.isFile()) throw httpError(400, "只能下载文件，文件夹请使用打包下载", { errorKey: "api.fs.download_files_only" })
 
     const name = path.basename(resolved.abs)
     const ext = path.extname(name).slice(1).toLowerCase()
@@ -254,8 +252,10 @@ router.get("/download", async (req, res, next) => {
 
     if (!perms.downloadFile) {
       if (!perms.preview || !INLINE_TYPES.has(extKey)) {
-        if (req.auth.role === "guest") return res.status(401).json({ error: "请先登录" })
-        return res.status(403).json({ error: "没有权限下载文件" })
+        if (req.auth.role === "guest") {
+          return res.status(401).json({ error: "请先登录", errorKey: "api.auth.login_required" })
+        }
+        return res.status(403).json({ error: "没有权限下载文件", errorKey: "api.fs.download_forbidden" })
       }
     }
 
@@ -376,14 +376,38 @@ async function validateZipLimits(items, vis) {
   const limits = zipLimits()
   const { fileCount, totalSize } = await countZipFilesAndSize(items, vis)
   if (fileCount > limits.maxFiles) {
-    throw httpError(400, `打包文件数 (${fileCount}) 超出限制 (最多 ${limits.maxFiles} 个)`)
+    throw httpError(400, `打包文件数 (${fileCount}) 超出限制 (最多 ${limits.maxFiles} 个)`, {
+      errorKey: "api.fs.zip_too_many_files",
+      errorParams: { count: fileCount, max: limits.maxFiles },
+    })
   }
   if (totalSize > limits.maxTotalBytes) {
-    throw httpError(400, `打包总大小 (${Math.round(totalSize / 1024 / 1024)}MB) 超出限制 (${Math.round(limits.maxTotalBytes / 1024 / 1024)}MB)`)
+    throw httpError(
+      400,
+      `打包总大小 (${Math.round(totalSize / 1024 / 1024)}MB) 超出限制 (${Math.round(limits.maxTotalBytes / 1024 / 1024)}MB)`,
+      {
+        errorKey: "api.fs.zip_total_too_large",
+        errorParams: {
+          size: `${Math.round(totalSize / 1024 / 1024)}MB`,
+          limit: `${Math.round(limits.maxTotalBytes / 1024 / 1024)}MB`,
+        },
+      }
+    )
   }
   for (const item of items) {
     if (!item.isDir && item.size > limits.maxSingleBytes) {
-      throw httpError(400, `文件 "${item.name}" 大小 (${Math.round(item.size / 1024 / 1024)}MB) 超出单文件限制 (${Math.round(limits.maxSingleBytes / 1024 / 1024)}MB)`)
+      throw httpError(
+        400,
+        `文件 "${item.name}" 大小 (${Math.round(item.size / 1024 / 1024)}MB) 超出单文件限制 (${Math.round(limits.maxSingleBytes / 1024 / 1024)}MB)`,
+        {
+          errorKey: "api.fs.zip_single_too_large",
+          errorParams: {
+            name: item.name,
+            size: `${Math.round(item.size / 1024 / 1024)}MB`,
+            limit: `${Math.round(limits.maxSingleBytes / 1024 / 1024)}MB`,
+          },
+        }
+      )
     }
   }
 }
@@ -422,10 +446,10 @@ router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, ne
       try {
         parsed = JSON.parse(String(req.query.paths))
       } catch {
-        throw httpError(400, "参数格式错误")
+        throw httpError(400, "参数格式错误", { errorKey: "api.fs.invalid_params" })
       }
       if (!Array.isArray(parsed) || !parsed.length || parsed.length > 200) {
-        throw httpError(400, "参数格式错误")
+        throw httpError(400, "参数格式错误", { errorKey: "api.fs.invalid_params" })
       }
       rels = parsed.map((p) => normRel(p))
     } else {
@@ -434,7 +458,7 @@ router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, ne
 
     const vis = zipVisibility(req)
     const items = await collectZipItems(rels, vis)
-    if (!items.length) throw httpError(404, "没有可下载的内容")
+    if (!items.length) throw httpError(404, "没有可下载的内容", { errorKey: "api.fs.zip_nothing_to_download" })
     await validateZipLimits(items, vis)
 
     const zipName =
@@ -489,7 +513,7 @@ router.post("/mkdir", requirePerm("mkdir"), async (req, res, next) => {
     await assertDir(abs)
     const name = String(req.body?.name || "").trim()
     const invalid = validateName(name)
-    if (invalid) throw httpError(400, invalid)
+    if (invalid) throw httpError(400, invalid, { errorKey: nameErrorKey(invalid) })
     const finalName = await uniqueName(abs, name)
     await fs.promises.mkdir(path.join(abs, finalName))
     info("mkdir", { msg: joinRel(rel, finalName), ...actor(req) })
@@ -605,7 +629,7 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
       limits: { fileSize: limitBytes, files: MAX_FILES_PER_REQUEST, fields: 10 },
     })
   } catch {
-    return next(httpError(400, "上传请求格式错误"))
+    return next(httpError(400, "上传请求格式错误", { errorKey: "api.fs.upload_request_invalid" }))
   }
 
   const pending = []
@@ -671,11 +695,11 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
     assertContextVisible(req, rel)
-    if (!rel) throw httpError(400, "非法路径")
+    if (!rel) throw httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
     await assertExists(abs)
     const newName = String(req.body?.newName || "").trim()
     const invalid = validateName(newName)
-    if (invalid) throw httpError(400, invalid)
+    if (invalid) throw httpError(400, invalid, { errorKey: nameErrorKey(invalid) })
     const parentAbs = path.dirname(abs)
     const target = path.join(parentAbs, newName)
     const existing = await statSafe(target)
@@ -688,7 +712,7 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
       } else if (req.body?.overwrite) {
         await fs.promises.rm(target, { recursive: true, force: true })
       } else {
-        throw httpError(409, "已存在同名文件或文件夹")
+        throw httpError(409, "已存在同名文件或文件夹", { errorKey: "api.fs.name_conflict" })
       }
     }
     if (!merged) {
@@ -707,7 +731,7 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
   try {
     const paths = req.body?.paths
     if (!Array.isArray(paths) || !paths.length || paths.length > 500) {
-      throw httpError(400, "参数格式错误")
+      throw httpError(400, "参数格式错误", { errorKey: "api.fs.invalid_params" })
     }
     const useTrash = getConfig().trashEnabled !== false && trashAvailable()
     const deleted = []
@@ -722,7 +746,7 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
       const resolved = resolveAny(normRel(p))
       blockSoft(resolved.rel)
       assertContextVisible(req, resolved.rel)
-      if (!resolved.rel) throw httpError(400, "不能删除根目录")
+      if (!resolved.rel) throw httpError(400, "不能删除根目录", { errorKey: "api.fs.cannot_delete_root" })
       if (useTrash) {
         let meta = null
         try {
@@ -802,7 +826,7 @@ async function transfer(req, res, next, mode) {
   try {
     const sources = req.body?.sources
     if (!Array.isArray(sources) || !sources.length || sources.length > 500) {
-      throw httpError(400, "参数格式错误")
+      throw httpError(400, "参数格式错误", { errorKey: "api.fs.invalid_params" })
     }
     const overwrite = !!req.body?.overwrite
     const merge = !!req.body?.merge
@@ -822,19 +846,19 @@ async function transfer(req, res, next, mode) {
       if (mode === "move") blockSoft(src.rel)
       if (mode === "copy") blockSoftCopyOut(src.rel)
       assertContextVisible(req, src.rel)
-      if (!src.rel) throw httpError(400, "非法来源")
+      if (!src.rel) throw httpError(400, "非法来源", { errorKey: "api.fs.source_invalid" })
       const stat = await assertExists(src.abs)
       // 用大小写不敏感比较：Windows 上 URL 里的路径大小写常与磁盘不一致，
       // 裸串比较会漏判，导致「把文件夹复制进它自己」。
       if (stat.isDirectory() && isSameOrInside(dest.rel, src.rel)) {
-        throw httpError(400, "不能将文件夹移动/复制到其自身内部")
+        throw httpError(400, "不能将文件夹移动/复制到其自身内部", { errorKey: "api.fs.transfer_into_self" })
       }
       const srcName = path.basename(src.abs)
       let wanted = srcName
       const wantRaw = targetNames[src.rel]
       if (typeof wantRaw === "string" && wantRaw.trim() && !samePath(wantRaw.trim(), srcName)) {
         const invalid = validateName(wantRaw.trim())
-        if (invalid) throw httpError(400, invalid)
+        if (invalid) throw httpError(400, invalid, { errorKey: nameErrorKey(invalid) })
         wanted = wantRaw.trim()
       }
       const srcParent = src.rel.includes("/") ? src.rel.slice(0, src.rel.lastIndexOf("/")) : ""
@@ -911,7 +935,7 @@ router.get("/details", requirePerm("details"), rateLimit, async (req, res, next)
     const resolved = resolveAny(normRel(req.query.path))
     assertContextVisible(req, resolved.rel)
     const stat = await assertExists(resolved.abs)
-    if (!stat.isFile()) throw httpError(400, "只有文件才有这些详细信息")
+    if (!stat.isFile()) throw httpError(400, "只有文件才有这些详细信息", { errorKey: "api.fs.details_files_only" })
     const details = await inspectFile(resolved.abs, stat)
     res.json({ path: resolved.rel, softReadOnly: !!resolved.isSoft, ...details })
   } catch (err) {
@@ -921,9 +945,9 @@ router.get("/details", requirePerm("details"), rateLimit, async (req, res, next)
 
 router.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) => {  try {
     const q = String(req.query.q || "").trim()
-    if (!q || q.length > 100) throw httpError(400, "请输入搜索关键词")
+    if (!q || q.length > 100) throw httpError(400, "请输入搜索关键词", { errorKey: "api.fs.search_query_required" })
     const resolved = resolveAny(normRel(req.query.path))
-    if (!resolved.isSoft && guestBlocked(req, resolved.rel)) throw httpError(404, "目录不存在")
+    if (!resolved.isSoft && guestBlocked(req, resolved.rel)) throw httpError(404, "目录不存在", { errorKey: "api.fs.dir_not_found" })
     assertContextVisible(req, resolved.rel)
     await assertDir(resolved.abs)
     let results = await searchFiles(resolved.abs, resolved.rel, q, { forGuest: req.auth.role === "guest" })
@@ -944,11 +968,11 @@ router.post(
   async (req, res, next) => {
     try {
       const { abs, rel } = resolveSafe(req.body?.path)
-      if (!rel) throw httpError(400, "不能隐藏根目录")
+      if (!rel) throw httpError(400, "不能隐藏根目录", { errorKey: "api.fs.cannot_hide_root" })
       // 小组可见范围之外的目录不该被设置访客隐藏标记：与其它写端点保持一致
       assertContextVisible(req, rel)
       const stat = await assertExists(abs)
-      if (!stat.isDirectory()) throw httpError(400, "只能对文件夹设置访客可见性")
+      if (!stat.isDirectory()) throw httpError(400, "只能对文件夹设置访客可见性", { errorKey: "api.fs.guest_visibility_folder_only" })
       const hidden = !!req.body?.hidden
       await saveConfig((draft) => {
         const withoutCurrent = draft.guestHiddenPaths.filter((h) => !samePath(h, rel))
@@ -1035,7 +1059,7 @@ router.post("/compress", requirePerm("compressZip"), rateLimit, async (req, res,
   try {
     const paths = req.body?.paths
     if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
-      throw httpError(400, "参数格式错误")
+      throw httpError(400, "参数格式错误", { errorKey: "api.fs.invalid_params" })
     }
     const destRel = req.body?.dest || path.dirname(paths[0] || "")
     const dest = resolveSafe(destRel)
@@ -1046,7 +1070,7 @@ router.post("/compress", requirePerm("compressZip"), rateLimit, async (req, res,
     const sourceRels = paths.map((p) => normRel(p))
     for (const rel of sourceRels) blockSoftCopyOut(rel)
     const items = await collectZipItems(sourceRels, vis)
-    if (!items.length) throw httpError(404, "没有可压缩的内容")
+    if (!items.length) throw httpError(404, "没有可压缩的内容", { errorKey: "api.fs.compress_nothing" })
     await validateZipLimits(items, vis)
     const { fileCount, totalSize } = await countZipFilesAndSize(items, vis)
     const label = items.length === 1 ? `${items[0].name}.zip` : `ZeroShadow-${new Date().toISOString().slice(0, 10)}.zip`
@@ -1099,7 +1123,7 @@ router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, n
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
     assertContextVisible(req, rel)
-    if (!rel) throw httpError(400, "非法路径")
+    if (!rel) throw httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
     const destResolved = req.body?.dest ? resolveSafe(req.body.dest) : null
     const destAbs = destResolved ? destResolved.abs : path.dirname(abs)
     blockSoft(req.body?.dest || rel)
@@ -1107,21 +1131,41 @@ router.post("/extract", requirePerm("extractZip"), rateLimit, async (req, res, n
     await assertDir(destAbs)
     const stat = await assertExists(abs)
     if (!stat.isFile() || !rel.toLowerCase().endsWith(".zip")) {
-      throw httpError(400, "只能解压 zip 文件")
+      throw httpError(400, "只能解压 zip 文件", { errorKey: "api.fs.extract_zip_only" })
     }
     const limits = zipLimits()
     if (stat.size > limits.extractMaxBytes) {
-      throw httpError(400, `ZIP 文件超出解压大小限制 (${Math.round(limits.extractMaxBytes / 1024 / 1024)}MB)`)
+      throw httpError(
+        400,
+        `ZIP 文件超出解压大小限制 (${Math.round(limits.extractMaxBytes / 1024 / 1024)}MB)`,
+        {
+          errorKey: "api.fs.zip_file_too_large",
+          errorParams: { limit: `${Math.round(limits.extractMaxBytes / 1024 / 1024)}MB` },
+        }
+      )
     }
     const unzipper = await import("unzipper")
     const directory = await unzipper.Open.file(abs)
     if (directory.files.length > limits.maxFiles) {
-      throw httpError(400, `ZIP 内文件数超出限制 (最多 ${limits.maxFiles} 个)`)
+      throw httpError(400, `ZIP 内文件数超出限制 (最多 ${limits.maxFiles} 个)`, {
+        errorKey: "api.fs.zip_too_many_entries",
+        errorParams: { max: limits.maxFiles },
+      })
     }
     // 先按包头声明值快速拒绝；真正的防护在解压循环里边写边累计
     const declaredTotal = directory.files.reduce((sum, f) => sum + (Number(f.uncompressedSize) || 0), 0)
     if (declaredTotal > limits.extractMaxTotalBytes) {
-      throw httpError(400, `ZIP 解压后总大小 (${Math.round(declaredTotal / 1024 / 1024)}MB) 超出限制 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`)
+      throw httpError(
+        400,
+        `ZIP 解压后总大小 (${Math.round(declaredTotal / 1024 / 1024)}MB) 超出限制 (${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB)`,
+        {
+          errorKey: "api.fs.zip_extract_total_too_large",
+          errorParams: {
+            size: `${Math.round(declaredTotal / 1024 / 1024)}MB`,
+            limit: `${Math.round(limits.extractMaxTotalBytes / 1024 / 1024)}MB`,
+          },
+        }
+      )
     }
     const job = createJob("extract", { label: path.basename(abs), total: directory.files.length })
     job.createdBy = req.auth.username || "guest"
@@ -1222,13 +1266,20 @@ router.get("/file", requirePerm("browse"), async (req, res, next) => {
   try {
     const { abs, rel, isSoft } = resolveSafe(req.query?.path)
     assertContextVisible(req, rel)
-    if (!rel) throw httpError(400, "非法路径")
+    if (!rel) throw httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
     const stat = await fs.promises.stat(abs).catch(() => null)
-    if (!stat || !stat.isFile()) throw httpError(404, "文件不存在")
+    if (!stat || !stat.isFile()) throw httpError(404, "文件不存在", { errorKey: "api.fs.file_not_found" })
     if (stat.size > EDITOR_MAX_BYTES) {
       throw httpError(
         413,
-        `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB），在线编辑上限 ${EDITOR_MAX_BYTES / 1024 / 1024}MB`
+        `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB），在线编辑上限 ${EDITOR_MAX_BYTES / 1024 / 1024}MB`,
+        {
+          errorKey: "api.fs.file_too_large_for_editor",
+          errorParams: {
+            size: `${(stat.size / 1024 / 1024).toFixed(1)}MB`,
+            limit: `${EDITOR_MAX_BYTES / 1024 / 1024}MB`,
+          },
+        }
       )
     }
 
@@ -1241,7 +1292,7 @@ router.get("/file", requirePerm("browse"), async (req, res, next) => {
     // UTF-16 文本天然含 NUL 字节，不能按二进制拦掉
     const isUtf16 = detected.encoding === "utf16le" || detected.encoding === "utf16be"
     if (!isUtf16 && looksBinary(buf)) {
-      throw httpError(415, "这看起来是二进制文件，不能当文本编辑")
+      throw httpError(415, "这看起来是二进制文件，不能当文本编辑", { errorKey: "api.fs.binary_not_editable" })
     }
 
     const raw = decodeBuffer(buf, detected.encoding)
@@ -1272,11 +1323,16 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
     const { abs, rel } = resolveSafe(req.body?.path)
     blockSoft(rel)
     assertContextVisible(req, rel)
-    if (!rel) throw httpError(400, "非法路径")
+    if (!rel) throw httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
 
     const content = String(req.body?.content ?? "")
     const encoding = String(req.body?.encoding || "utf8")
-    if (!isSupportedEncoding(encoding)) throw httpError(400, `不支持的编码：${encoding}`)
+    if (!isSupportedEncoding(encoding)) {
+      throw httpError(400, `不支持的编码：${encoding}`, {
+        errorKey: "api.fs.encoding_unsupported",
+        errorParams: { encoding },
+      })
+    }
     const rawEol = String(req.body?.eol || "lf")
     const eol = ["crlf", "lf", "cr"].includes(rawEol) ? rawEol : "lf"
 
@@ -1291,7 +1347,8 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
     if (verdict === "conflict") {
       const err = httpError(
         409,
-        "这个文件在您打开之后已被其他人修改。为避免覆盖对方的改动，本次保存未执行。请重新打开（或刷新页面）查看最新内容后再决定怎么合并。"
+        "这个文件在您打开之后已被其他人修改。为避免覆盖对方的改动，本次保存未执行。请重新打开（或刷新页面）查看最新内容后再决定怎么合并。",
+        { errorKey: "api.fs.version_conflict" }
       )
       // 把服务器上的当前版本一并回传，前端可以据此提示"重新加载"
       err.code = "VERSION_CONFLICT"
@@ -1305,20 +1362,34 @@ router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
 
     const text = applyEol(content, eol)
     const encoded = encodeText(text, encoding)
-    if (encoded.error) throw httpError(400, encoded.error)
+    if (encoded.error) {
+      throw httpError(400, encoded.error, { errorKey: encoded.errorKey, errorParams: encoded.errorParams })
+    }
     // 目标编码表示不了的字符会被 iconv 静默写成「?」——宁可拒绝保存，也不要悄悄改坏内容
     if (encoded.unmappable?.length) {
       const shown = encoded.unmappable.slice(0, 12).join(" ")
+      const chars = `${shown}${encoded.unmappable.length > 12 ? " …" : ""}`
       throw httpError(
         400,
-        `这些字符无法用 ${encodingLabel(encoding)} 表示：${shown}${encoded.unmappable.length > 12 ? " …" : ""}。请改用 UTF-8 保存。`
+        `这些字符无法用 ${encodingLabel(encoding)} 表示：${chars}。请改用 UTF-8 保存。`,
+        {
+          errorKey: "api.fs.unmappable_chars",
+          errorParams: { encoding: encodingLabel(encoding), chars },
+        }
       )
     }
     const buffer = encoded.buffer
     if (buffer.length > SAVE_FILE_MAX_BYTES) {
       throw httpError(
         413,
-        `内容过大（${Math.round(buffer.length / 1024 / 1024)}MB），在线编辑上限 ${SAVE_FILE_MAX_BYTES / 1024 / 1024}MB`
+        `内容过大（${Math.round(buffer.length / 1024 / 1024)}MB），在线编辑上限 ${SAVE_FILE_MAX_BYTES / 1024 / 1024}MB`,
+        {
+          errorKey: "api.fs.save_content_too_large",
+          errorParams: {
+            size: `${Math.round(buffer.length / 1024 / 1024)}MB`,
+            limit: `${SAVE_FILE_MAX_BYTES / 1024 / 1024}MB`,
+          },
+        }
       )
     }
 
@@ -1479,7 +1550,7 @@ async function downloadFileFromUrl(job, firstTarget, destAbs, maxBytes) {
 router.post("/download-url", requirePerm("downloadUrl"), rateLimit, async (req, res, next) => {
   try {
     const urlStr = String(req.body?.url || "").trim()
-    if (!urlStr) throw httpError(400, "请输入下载链接")
+    if (!urlStr) throw httpError(400, "请输入下载链接", { errorKey: "api.fs.download_url_required" })
     // 先做目标校验：不合格的地址直接 400，不创建任务
     const target = await resolveDownloadTarget(urlStr)
 

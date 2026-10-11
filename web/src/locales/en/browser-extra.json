@@ -1,0 +1,48 @@
+{
+  "ui.preview.source_code": "Source",
+  "ui.preview.unsupported_format": "This format cannot be previewed yet",
+  "ui.preview.raw_html_notice": "This file contains raw HTML tags, so it is shown as plain text for safety. Switch to “Source” to view the original text.",
+  "ui.preview.download_original": "Download original file",
+  "ui.preview.link_copied": "Link copied",
+
+  "ui.shortcut.type_dir": "Folder",
+  "ui.shortcut.type_soft_dir": "Mapped external folder",
+  "ui.shortcut.type_soft_file": "Mapped external file",
+  "ui.shortcut.default_name": "{name} shortcut",
+  "ui.shortcut.name_target_required": "Name and target cannot be empty",
+  "ui.shortcut.saved_old_not_deleted": "The shortcut was saved, but the old file with the same name could not be deleted",
+  "ui.shortcut.updated": "Shortcut updated",
+  "ui.shortcut.created": "Shortcut created",
+  "ui.shortcut.name_label": "Display name",
+  "ui.shortcut.name_placeholder": "Shortcut display name",
+  "ui.shortcut.target_path_label": "Target path",
+  "ui.shortcut.target_placeholder": "Relative path or mapped external path",
+  "ui.shortcut.target_type_label": "Target type",
+  "ui.shortcut.icon_label": "Icon",
+  "ui.shortcut.create": "Create",
+
+  "ui.dest_picker.copy_here": "Copy here",
+  "ui.dest_picker.move_here": "Move here",
+
+  "ui.picker.parent": "Go to parent folder",
+  "ui.picker.no_subfolders": "No subfolders",
+
+  "ui.path_picker.title": "Choose folder",
+  "ui.path_picker.pick": "Choose this folder",
+
+  "ui.conflict.title": "Resolve name conflicts",
+  "ui.conflict.description": "{count} item(s) with the same name already exist at the destination. Choose how to handle them:",
+  "ui.conflict.rename_to": "Rename to {name}",
+  "ui.conflict.skip": "Skip",
+  "ui.conflict.overwrite": "Overwrite",
+  "ui.conflict.merge": "Merge",
+  "ui.conflict.apply_to_all": "Apply this action to all remaining items with the same name",
+
+  "ui.ops.processing_n": "Processing {n} item(s)",
+  "ui.ops.done": "Processing complete",
+
+  "ui.upload.uploading_n": "Uploading {n} item(s)",
+  "ui.upload.done": "Upload complete",
+
+  "ui.progress.clear_finished": "Clear completed"
+}

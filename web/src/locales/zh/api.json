@@ -1,0 +1,16 @@
+{
+  "api.common.not_found": "接口不存在",
+  "api.common.server_error": "服务器内部错误",
+  "api.auth.login_required": "请先登录",
+  "api.auth.forbidden": "没有权限执行此操作",
+  "api.auth.csrf_failed": "请求校验失败",
+  "api.i18n.unknown_lang": "没有这个语言文件",
+  "api.admin.default_lang_invalid": "defaultLang 必须是当前可用的语言代码",
+  "api.fs.version_conflict": "这个文件在您打开之后已被其他人修改。为避免覆盖对方的改动，本次保存未执行。请重新打开（或刷新页面）查看最新内容后再决定怎么合并。",
+  "ui.api.upload_failed": "上传失败 ({status})",
+  "ui.api.upload_network_error": "网络错误，上传中断",
+  "ui.api.upload_cancelled": "已取消上传",
+  "ui.api.download_failed": "下载失败 ({status})",
+  "ui.api.avatar_fetch_failed": "头像获取失败 ({status})",
+  "ui.api.avatar_upload_failed": "头像上传失败 ({status})"
+}

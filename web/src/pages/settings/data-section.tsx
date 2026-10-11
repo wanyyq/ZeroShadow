@@ -14,15 +14,18 @@ import { PathPicker } from "@/components/browser/path-picker"
 import { api, createBackup, fetchBackups, restoreBackup } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import type { AdminConfig, BackupsResponse } from "@/lib/types"
+import { currentLang, useT } from "@/lib/i18n"
 
-const FILE_LABEL: Record<string, string> = {
-  "config.json": "系统配置",
-  "users.json": "成员账户",
-  "groups.json": "小组",
-  "todos.json": "团队待办",
+// 键是数据文件名（代码里用于查表），值是界面文案的键
+const FILE_LABEL_KEY: Record<string, string> = {
+  "config.json": "ui.settings.data.file_config",
+  "users.json": "ui.settings.data.file_users",
+  "groups.json": "ui.settings.data.file_groups",
+  "todos.json": "ui.settings.data.todos",
 }
 
 export function DataSection() {
+  const t = useT()
   const [config, setConfig] = React.useState<AdminConfig | null>(null)
   const [avatarMax, setAvatarMax] = React.useState("")
   const [backupKeep, setBackupKeep] = React.useState("")
@@ -36,6 +39,11 @@ export function DataSection() {
   const [restoreTarget, setRestoreTarget] = React.useState<{ name: string; id: string } | null>(null)
   // 「从目录选择」当前要追加到哪个列表
   const [picking, setPicking] = React.useState<null | "white" | "black">(null)
+
+  const fileLabel = (name: string) => {
+    const key = FILE_LABEL_KEY[name]
+    return key ? t(key) : name
+  }
 
   const insertPicked = (picked: string) => {
     const isWhite = picking === "white"
@@ -79,14 +87,14 @@ export function DataSection() {
         whitelist: defWhite.split("\n").map((l) => l.trim()).filter(Boolean),
         blacklist: defBlack.split("\n").map((l) => l.trim()).filter(Boolean),
       },
-    }, "默认可见范围已更新")
+    }, t("ui.settings.data.default_visibility_updated"))
   }
 
   const doBackup = async () => {
     try {
       const d = await createBackup()
       setBackups(d.backups)
-      toast.success(`已创建 ${d.count} 个文件的快照`)
+      toast.success(t("ui.settings.data.snapshot_created", { n: d.count }))
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -96,7 +104,7 @@ export function DataSection() {
     if (!restoreTarget) return
     try {
       await restoreBackup(restoreTarget.name, restoreTarget.id)
-      toast.success("已回滚，请刷新页面")
+      toast.success(t("ui.settings.data.restored"))
       setRestoreTarget(null)
       load()
     } catch (e) {
@@ -104,31 +112,31 @@ export function DataSection() {
     }
   }
 
-  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+  if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   return (
     <div className="grid gap-5">
       {/* 头像 */}
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>头像</CardTitle>
-          <CardDescription>服务端与前端统一使用 128×128 WebP，客户端用 IndexedDB 缓存，未更换不重复下载</CardDescription>
+          <CardTitle>{t("ui.settings.data.avatar_title")}</CardTitle>
+          <CardDescription>{t("ui.settings.data.avatar_description")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">允许成员设置头像</p>
-              <p className="text-xs text-muted-foreground">关闭后成员与超管均无法上传/修改头像</p>
+              <p className="text-sm font-medium">{t("ui.settings.data.avatar_enabled")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.data.avatar_enabled_hint")}</p>
             </div>
-            <Switch checked={config.avatarEnabled !== false} onCheckedChange={(v) => patch({ avatarEnabled: !!v }, "已更新")} />
+            <Switch checked={config.avatarEnabled !== false} onCheckedChange={(v) => patch({ avatarEnabled: !!v }, t("ui.settings.data.updated"))} />
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex items-center gap-2">
-              <span className="w-28 shrink-0 text-sm text-muted-foreground">单张体积上限</span>
+              <span className="w-28 shrink-0 text-sm text-muted-foreground">{t("ui.settings.data.avatar_max_label")}</span>
               <Input className="w-24 text-right" inputMode="numeric" value={avatarMax} onChange={(e) => setAvatarMax(e.target.value)} />
               <span className="text-xs text-muted-foreground">KB</span>
             </div>
-            <Button size="sm" onClick={() => patch({ avatarMaxKB: Number(avatarMax) }, "头像体积上限已更新")}>保存</Button>
+            <Button size="sm" onClick={() => patch({ avatarMaxKB: Number(avatarMax) }, t("ui.settings.data.avatar_max_updated"))}>{t("ui.common.save")}</Button>
           </div>
         </CardContent>
       </Card>
@@ -136,16 +144,16 @@ export function DataSection() {
       {/* 团队待办 */}
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>团队待办</CardTitle>
-          <CardDescription>控制「团队」页面是否可用</CardDescription>
+          <CardTitle>{t("ui.settings.data.todos")}</CardTitle>
+          <CardDescription>{t("ui.settings.data.todos_description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">启用团队待办</p>
-              <p className="text-xs text-muted-foreground">关闭后所有成员看不到待办功能</p>
+              <p className="text-sm font-medium">{t("ui.settings.data.todos_enabled")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.data.todos_enabled_hint")}</p>
             </div>
-            <Switch checked={config.todoEnabled !== false} onCheckedChange={(v) => patch({ todoEnabled: !!v }, "已更新")} />
+            <Switch checked={config.todoEnabled !== false} onCheckedChange={(v) => patch({ todoEnabled: !!v }, t("ui.settings.data.updated"))} />
           </div>
         </CardContent>
       </Card>
@@ -153,33 +161,33 @@ export function DataSection() {
       {/* 未分组默认可见范围 */}
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>默认上下文可见范围</CardTitle>
-          <CardDescription>不属于任何小组、或顶栏选择「默认」时生效。白名单为空表示不限制，黑名单优先</CardDescription>
+          <CardTitle>{t("ui.settings.data.default_visibility_title")}</CardTitle>
+          <CardDescription>{t("ui.settings.data.default_visibility_description")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">白名单（每行一个相对路径）</span>
+                <span className="text-xs text-muted-foreground">{t("ui.settings.data.whitelist_label")}</span>
                 <Button size="xs" variant="outline" onClick={() => setPicking("white")}>
-                  <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                  <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.settings.data.pick_from_dir")}
                 </Button>
               </div>
               <Textarea className="h-24 resize-none font-mono text-xs" value={defWhite} onChange={(e) => setDefWhite(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">黑名单（一律隐藏）</span>
+                <span className="text-xs text-muted-foreground">{t("ui.settings.data.blacklist_label")}</span>
                 <Button size="xs" variant="outline" onClick={() => setPicking("black")}>
-                  <Icon name="folder-tree" data-icon="inline-start" /> 从目录选择
+                  <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.settings.data.pick_from_dir")}
                 </Button>
               </div>
               <Textarea className="h-24 resize-none font-mono text-xs" value={defBlack} onChange={(e) => setDefBlack(e.target.value)} />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={saveDefaults}>保存</Button>
-            <span className="text-xs text-muted-foreground">点「从目录选择」会追加一行，仍需点保存才会生效</span>
+            <Button size="sm" onClick={saveDefaults}>{t("ui.common.save")}</Button>
+            <span className="text-xs text-muted-foreground">{t("ui.settings.data.pick_hint")}</span>
           </div>
         </CardContent>
       </Card>
@@ -189,22 +197,22 @@ export function DataSection() {
       {/* 日志与指标保留 */}
       <Card className="edge-highlight">
         <CardHeader>
-          <CardTitle>日志与指标保留</CardTitle>
-          <CardDescription>控制磁盘与内存占用；日志按天自动轮转清理</CardDescription>
+          <CardTitle>{t("ui.settings.data.retention_title")}</CardTitle>
+          <CardDescription>{t("ui.settings.data.retention_description")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
           <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">采集请求指标</p>
-              <p className="text-xs text-muted-foreground">统计 QPS、状态码分布与慢请求</p>
+              <p className="text-sm font-medium">{t("ui.settings.data.metrics_enabled")}</p>
+              <p className="text-xs text-muted-foreground">{t("ui.settings.data.metrics_enabled_hint")}</p>
             </div>
-            <Switch checked={config.requestMetricsEnabled !== false} onCheckedChange={(v) => patch({ requestMetricsEnabled: !!v }, "已更新")} />
+            <Switch checked={config.requestMetricsEnabled !== false} onCheckedChange={(v) => patch({ requestMetricsEnabled: !!v }, t("ui.settings.data.updated"))} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <NumberRow label="日志保留" value={logDays} onChange={setLogDays} unit="天" onSave={() => patch({ logRetentionDays: Number(logDays) }, "日志保留已更新")} />
-            <NumberRow label="指标落盘保留" value={metricsDays} onChange={setMetricsDays} unit="天" onSave={() => patch({ metricsRetentionDays: Number(metricsDays) }, "已更新")} />
-            <NumberRow label="内存曲线窗口" value={metricsMem} onChange={setMetricsMem} unit="分钟" onSave={() => patch({ metricsMemMinutes: Number(metricsMem) }, "已更新")} />
-            <NumberRow label="慢请求阈值" value={slowMs} onChange={setSlowMs} unit="毫秒" onSave={() => patch({ slowRequestMs: Number(slowMs) }, "已更新")} />
+            <NumberRow label={t("ui.settings.data.log_retention")} value={logDays} onChange={setLogDays} unit={t("ui.settings.data.unit_days")} onSave={() => patch({ logRetentionDays: Number(logDays) }, t("ui.settings.data.log_retention_updated"))} />
+            <NumberRow label={t("ui.settings.data.metrics_retention")} value={metricsDays} onChange={setMetricsDays} unit={t("ui.settings.data.unit_days")} onSave={() => patch({ metricsRetentionDays: Number(metricsDays) }, t("ui.settings.data.updated"))} />
+            <NumberRow label={t("ui.settings.data.mem_window")} value={metricsMem} onChange={setMetricsMem} unit={t("ui.settings.data.unit_minutes")} onSave={() => patch({ metricsMemMinutes: Number(metricsMem) }, t("ui.settings.data.updated"))} />
+            <NumberRow label={t("ui.settings.data.slow_threshold")} value={slowMs} onChange={setSlowMs} unit={t("ui.settings.data.unit_ms")} onSave={() => patch({ slowRequestMs: Number(slowMs) }, t("ui.settings.data.updated"))} />
           </div>
         </CardContent>
       </Card>
@@ -214,10 +222,10 @@ export function DataSection() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>数据备份与回滚</CardTitle>
-              <CardDescription>覆盖写入前自动快照，另每日快照；保留最近 {config.backupKeep} 份</CardDescription>
+              <CardTitle>{t("ui.settings.data.backup_title")}</CardTitle>
+              <CardDescription>{t("ui.settings.data.backup_description", { n: config.backupKeep })}</CardDescription>
             </div>
-            <Button size="sm" onClick={doBackup}><Icon name="database-backup" /> 立即备份</Button>
+            <Button size="sm" onClick={doBackup}><Icon name="database-backup" /> {t("ui.settings.data.backup_now")}</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -225,69 +233,69 @@ export function DataSection() {
               而文档里又说「快照默认开启」——两边对不上。 */}
           <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">启用数据快照</p>
+              <p className="text-sm font-medium">{t("ui.settings.data.backup_enabled")}</p>
               <p className="text-xs text-muted-foreground">
-                关闭后不再写入 data/backups/（覆盖写前的自动快照与每日快照都会停止）
+                {t("ui.settings.data.backup_enabled_hint")}
               </p>
             </div>
             <Switch
               checked={config.backupEnabled !== false}
-              onCheckedChange={(v) => patch({ backupEnabled: !!v }, "已更新")}
+              onCheckedChange={(v) => patch({ backupEnabled: !!v }, t("ui.settings.data.updated"))}
             />
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="w-28 shrink-0 text-sm text-muted-foreground">每个文件保留</span>
+              <span className="w-28 shrink-0 text-sm text-muted-foreground">{t("ui.settings.data.backup_keep_label")}</span>
               <Input className="w-20 text-right" inputMode="numeric" value={backupKeep} onChange={(e) => setBackupKeep(e.target.value)} />
-              <span className="text-xs text-muted-foreground">份</span>
+              <span className="text-xs text-muted-foreground">{t("ui.settings.data.unit_copies")}</span>
             </div>
-            <Button size="sm" onClick={() => patch({ backupKeep: Number(backupKeep) }, "保留份数已更新")}>保存</Button>
+            <Button size="sm" onClick={() => patch({ backupKeep: Number(backupKeep) }, t("ui.settings.data.backup_keep_updated"))}>{t("ui.common.save")}</Button>
           </div>
           <Separator />
           <ScrollArea className="h-72 rounded-md border border-border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>文件</TableHead>
-                  <TableHead className="w-40">时间</TableHead>
-                  <TableHead className="w-20">大小</TableHead>
-                  <TableHead className="w-20 text-right">操作</TableHead>
+                  <TableHead>{t("ui.common.file")}</TableHead>
+                  <TableHead className="w-40">{t("ui.common.time")}</TableHead>
+                  <TableHead className="w-20">{t("ui.common.size")}</TableHead>
+                  <TableHead className="w-20 text-right">{t("ui.common.actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {Object.entries(backups).flatMap(([name, rows]) =>
                   rows.map((row) => (
                     <TableRow key={`${name}-${row.id}`}>
-                      <TableCell className="text-xs">{FILE_LABEL[name] || name}</TableCell>
-                      <TableCell className="font-mono text-xs">{new Date(row.mtime).toLocaleString("zh-CN")}</TableCell>
+                      <TableCell className="text-xs">{fileLabel(name)}</TableCell>
+                      <TableCell className="font-mono text-xs">{new Date(row.mtime).toLocaleString(currentLang())}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{formatBytes(row.size)}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="xs" variant="ghost" onClick={() => setRestoreTarget({ name, id: row.id })}>回滚</Button>
+                        <Button size="xs" variant="ghost" onClick={() => setRestoreTarget({ name, id: row.id })}>{t("ui.settings.data.restore")}</Button>
                       </TableCell>
                     </TableRow>
                   ))
                 )}
                 {Object.values(backups).every((r) => r.length === 0) && (
-                  <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">暂无备份</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">{t("ui.settings.data.no_backups")}</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </ScrollArea>
-          <p className="text-xs text-muted-foreground">备份保存在 data/backups/，仅包含 config/users/groups/todos 四个数据文件。</p>
+          <p className="text-xs text-muted-foreground">{t("ui.settings.data.backup_hint")}</p>
         </CardContent>
       </Card>
 
       <AlertDialog open={restoreTarget !== null} onOpenChange={(o) => !o && setRestoreTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>回滚到该备份？</AlertDialogTitle>
+            <AlertDialogTitle>{t("ui.settings.data.restore_confirm_title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              将用所选备份覆盖当前的「{restoreTarget ? FILE_LABEL[restoreTarget.name] || restoreTarget.name : ""}」。当前状态也会先自动快照一份以便反悔。
+              {t("ui.settings.data.restore_confirm_description", { name: restoreTarget ? fileLabel(restoreTarget.name) : "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={(e) => { e.preventDefault(); doRestore() }}>确认回滚</AlertDialogAction>
+            <AlertDialogCancel>{t("ui.common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); doRestore() }}>{t("ui.settings.data.restore_confirm_action")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -302,6 +310,7 @@ function NumberRow({ label, value, onChange, unit, onSave }: {
   unit: string
   onSave: () => void
 }) {
+  const t = useT()
   return (
     <div className="flex items-end gap-2">
       <div className="flex flex-1 items-center gap-2">
@@ -309,7 +318,7 @@ function NumberRow({ label, value, onChange, unit, onSave }: {
         <Input className="w-20 text-right" inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} />
         <span className="text-xs text-muted-foreground">{unit}</span>
       </div>
-      <Button size="sm" variant="outline" onClick={onSave}>保存</Button>
+      <Button size="sm" variant="outline" onClick={onSave}>{t("ui.common.save")}</Button>
     </div>
   )
 }

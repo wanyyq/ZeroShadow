@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { fetchMyGroups, getGroupContext, setGroupContext } from "@/lib/api"
+import { translate } from "@/lib/i18n"
 import type { PublicGroup } from "@/lib/types"
 import { useAuth } from "@/state/auth"
 
@@ -95,6 +96,6 @@ export function GroupsProvider({ children }: { children: ReactNode }) {
 
 export function useGroups() {
   const ctx = useContext(GroupsContext)
-  if (!ctx) throw new Error("useGroups 必须在 GroupsProvider 内使用")
+  if (!ctx) throw new Error(translate("ui.groups.provider_required"))
   return ctx
 }

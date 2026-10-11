@@ -46,9 +46,9 @@ router.get("/", requireRole("superadmin", "member"), (_req, res) => {
 router.get("/:owner", requireRole("superadmin", "member"), (req, res, next) => {
   try {
     const owner = String(req.params.owner || "")
-    if (!isValidOwner(owner)) return res.status(400).json({ error: "头像标识无效" })
+    if (!isValidOwner(owner)) return res.status(400).json({ error: "头像标识无效", errorKey: "api.avatars.owner_invalid" })
     const meta = getAvatar(owner)
-    if (!meta) return res.status(404).json({ error: "头像不存在" })
+    if (!meta) return res.status(404).json({ error: "头像不存在", errorKey: "api.avatars.not_found" })
     res.setHeader("Content-Type", "image/webp")
     res.setHeader("Cache-Control", "no-cache")
     res.setHeader("ETag", `"${meta.md5}"`)
@@ -66,9 +66,9 @@ const rawImage = express.raw({ type: ["image/webp", "application/octet-stream"],
 
 router.post("/me", requireRole("superadmin", "member"), rawImage, (req, res, next) => {
   try {
-    if (getConfig().avatarEnabled === false) return res.status(403).json({ error: "头像功能已关闭" })
+    if (getConfig().avatarEnabled === false) return res.status(403).json({ error: "头像功能已关闭", errorKey: "api.avatars.disabled" })
     const owner = ownerForRequest(req)
-    if (!owner) return res.status(400).json({ error: "无法确定账户标识" })
+    if (!owner) return res.status(400).json({ error: "无法确定账户标识", errorKey: "api.avatars.owner_unknown" })
     const meta = saveAvatar(owner, req.body)
     info("avatar_update", { msg: owner, ...actor(req) })
     res.json({ owner: meta.owner, md5: meta.md5, size: meta.size })
@@ -79,10 +79,10 @@ router.post("/me", requireRole("superadmin", "member"), rawImage, (req, res, nex
 
 router.post("/:owner", requireRole("superadmin", "member"), rawImage, (req, res, next) => {
   try {
-    if (getConfig().avatarEnabled === false) return res.status(403).json({ error: "头像功能已关闭" })
+    if (getConfig().avatarEnabled === false) return res.status(403).json({ error: "头像功能已关闭", errorKey: "api.avatars.disabled" })
     const owner = String(req.params.owner || "")
-    if (!isValidOwner(owner)) return res.status(400).json({ error: "头像标识无效" })
-    if (!canEditOwner(req, owner)) return res.status(403).json({ error: "没有权限修改该头像" })
+    if (!isValidOwner(owner)) return res.status(400).json({ error: "头像标识无效", errorKey: "api.avatars.owner_invalid" })
+    if (!canEditOwner(req, owner)) return res.status(403).json({ error: "没有权限修改该头像", errorKey: "api.avatars.forbidden" })
     const meta = saveAvatar(owner, req.body)
     info("avatar_update", { msg: owner, ...actor(req) })
     res.json({ owner: meta.owner, md5: meta.md5, size: meta.size })
@@ -94,8 +94,8 @@ router.post("/:owner", requireRole("superadmin", "member"), rawImage, (req, res,
 router.delete("/:owner", requireRole("superadmin", "member"), (req, res, next) => {
   try {
     const owner = String(req.params.owner || "")
-    if (!isValidOwner(owner)) return res.status(400).json({ error: "头像标识无效" })
-    if (!canEditOwner(req, owner)) return res.status(403).json({ error: "没有权限修改该头像" })
+    if (!isValidOwner(owner)) return res.status(400).json({ error: "头像标识无效", errorKey: "api.avatars.owner_invalid" })
+    if (!canEditOwner(req, owner)) return res.status(403).json({ error: "没有权限修改该头像", errorKey: "api.avatars.forbidden" })
     deleteAvatar(owner)
     info("avatar_delete", { msg: owner, ...actor(req) })
     res.json({ ok: true })

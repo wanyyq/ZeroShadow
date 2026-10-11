@@ -5,6 +5,7 @@ import { createTodo, deleteTodo, getTodo, listTodos, setTodoDone, updateTodo } f
 import { findById, listMembers } from "../users.js"
 import { getGroup, groupsForUser, leaderHasCap } from "../groups.js"
 import { info } from "../logger.js"
+import { httpError } from "../http.js"
 
 const router = Router()
 
@@ -13,12 +14,6 @@ router.use(requireRole("superadmin", "member"))
 
 function actor(req) {
   return { user: req.auth.username || "guest", role: req.auth.role, ip: req.ip }
-}
-
-function httpError(status, message) {
-  const err = new Error(message)
-  err.status = status
-  return err
 }
 
 function memberName(id) {
@@ -89,27 +84,33 @@ function decorate(todo, req) {
 
 function validateTarget(data, req) {
   if (data.scope === "all") {
-    if (req.auth.role !== "superadmin") throw httpError(403, "只有超级管理员可以创建全体 Todo")
+    if (req.auth.role !== "superadmin") {
+      throw httpError(403, "只有超级管理员可以创建全体 Todo", { errorKey: "api.todos.superadmin_only" })
+    }
     return { scope: "all", groupId: "", memberId: "" }
   }
   const leaders = leaderGroups(req)
   if (data.scope === "group") {
     const group = getGroup(String(data.groupId || ""))
-    if (!group) throw httpError(400, "小组不存在")
+    if (!group) throw httpError(400, "小组不存在", { errorKey: "api.groups.not_found" })
     const allowed = req.auth.role === "superadmin" || leaders.some((g) => g.id === group.id)
-    if (!allowed) throw httpError(403, "没有权限向该小组下发 Todo")
+    if (!allowed) {
+      throw httpError(403, "没有权限向该小组下发 Todo", { errorKey: "api.todos.no_perm_to_group" })
+    }
     return { scope: "group", groupId: group.id, memberId: "" }
   }
   if (data.scope === "member") {
     const memberId = String(data.memberId || "")
     const user = findById(memberId)
-    if (!user) throw httpError(400, "成员不存在")
+    if (!user) throw httpError(400, "成员不存在", { errorKey: "api.todos.member_not_found" })
     const allowed =
       req.auth.role === "superadmin" || leaders.some((g) => g.members.includes(memberId))
-    if (!allowed) throw httpError(403, "没有权限向该成员下发 Todo")
+    if (!allowed) {
+      throw httpError(403, "没有权限向该成员下发 Todo", { errorKey: "api.todos.no_perm_to_member" })
+    }
     return { scope: "member", groupId: "", memberId }
   }
-  throw httpError(400, "作用域无效")
+  throw httpError(400, "作用域无效", { errorKey: "api.todos.invalid_scope" })
 }
 
 router.get("/", (req, res) => {
@@ -154,9 +155,16 @@ router.get("/", (req, res) => {
 
 router.post("/", async (req, res, next) => {
   try {
-    if (getConfig().todoEnabled === false) throw httpError(403, "Todo 功能已关闭")
+    if (getConfig().todoEnabled === false) {
+      throw httpError(403, "Todo 功能已关闭", { errorKey: "api.todos.disabled" })
+    }
     const title = String(req.body?.title || "").trim()
-    if (!title || title.length > 200) throw httpError(400, "标题不能为空且不超过 200 字")
+    if (!title || title.length > 200) {
+      throw httpError(400, "标题不能为空且不超过 200 字", {
+        errorKey: "api.todos.title_invalid",
+        errorParams: { max: 200 },
+      })
+    }
     const target = validateTarget(req.body || {}, req)
     const todo = await createTodo({
       title,
@@ -179,13 +187,20 @@ router.post("/", async (req, res, next) => {
 router.patch("/:id", async (req, res, next) => {
   try {
     const todo = getTodo(String(req.params.id))
-    if (!todo) throw httpError(404, "Todo 不存在")
-    if (getConfig().todoEnabled === false) throw httpError(403, "Todo 功能已关闭")
+    if (!todo) throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
+    if (getConfig().todoEnabled === false) {
+      throw httpError(403, "Todo 功能已关闭", { errorKey: "api.todos.disabled" })
+    }
     const patch = {}
     // 内容字段：有编辑权即可
     if (req.body?.title !== undefined) {
       const title = String(req.body.title).trim()
-      if (!title || title.length > 200) throw httpError(400, "标题不能为空且不超过 200 字")
+      if (!title || title.length > 200) {
+        throw httpError(400, "标题不能为空且不超过 200 字", {
+          errorKey: "api.todos.title_invalid",
+          errorParams: { max: 200 },
+        })
+      }
       patch.title = title
     }
     if (req.body?.note !== undefined) patch.note = String(req.body.note).slice(0, 2000)
@@ -199,8 +214,12 @@ router.patch("/:id", async (req, res, next) => {
       const target = validateTarget(req.body, req)
       Object.assign(patch, target)
     }
-    if (!Object.keys(patch).length) throw httpError(400, "没有可更新的字段")
-    if (!canEdit(todo, req)) throw httpError(403, "没有权限编辑该 Todo")
+    if (!Object.keys(patch).length) {
+      throw httpError(400, "没有可更新的字段", { errorKey: "api.todos.no_fields_to_update" })
+    }
+    if (!canEdit(todo, req)) {
+      throw httpError(403, "没有权限编辑该 Todo", { errorKey: "api.todos.edit_forbidden" })
+    }
     const updated = await updateTodo(todo.id, patch)
     info("todo_update", { msg: updated.title, ...actor(req) })
     res.json({ todo: decorate(updated, req) })
@@ -212,8 +231,10 @@ router.patch("/:id", async (req, res, next) => {
 router.post("/:id/done", async (req, res, next) => {
   try {
     const todo = getTodo(String(req.params.id))
-    if (!todo) throw httpError(404, "Todo 不存在")
-    if (!canComplete(todo, req)) throw httpError(403, "没有权限完成该 Todo")
+    if (!todo) throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
+    if (!canComplete(todo, req)) {
+      throw httpError(403, "没有权限完成该 Todo", { errorKey: "api.todos.complete_forbidden" })
+    }
     const done = req.body?.done === undefined ? !todo.done : !!req.body.done
     const updated = await setTodoDone(todo.id, done, req.auth.username || "guest")
     info("todo_done", { msg: `${updated.title} → ${done ? "完成" : "未完成"}`, ...actor(req) })
@@ -226,8 +247,10 @@ router.post("/:id/done", async (req, res, next) => {
 router.delete("/:id", async (req, res, next) => {
   try {
     const todo = getTodo(String(req.params.id))
-    if (!todo) throw httpError(404, "Todo 不存在")
-    if (!canManage(todo, req)) throw httpError(403, "没有权限删除该 Todo")
+    if (!todo) throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
+    if (!canManage(todo, req)) {
+      throw httpError(403, "没有权限删除该 Todo", { errorKey: "api.todos.delete_forbidden" })
+    }
     await deleteTodo(todo.id)
     info("todo_delete", { msg: todo.title, ...actor(req) })
     res.json({ ok: true })

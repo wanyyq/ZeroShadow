@@ -3,6 +3,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { uploadFiles } from "@/lib/api"
 import { uid } from "@/lib/format"
+import { useT } from "@/lib/i18n"
 import type { UploadResult } from "@/lib/types"
 import type { UploadOptions } from "@/lib/api"
 
@@ -34,6 +35,7 @@ const Ctx = React.createContext<UploadsState | undefined>(undefined)
 const MAX_FILES_PER_REQUEST = 100
 
 export function UploadsProvider({ children }: { children: React.ReactNode }) {
+  const t = useT()
   const [jobs, setJobs] = React.useState<UploadJob[]>([])
   const listeners = React.useRef(new Set<(destPath: string) => void>())
 
@@ -47,7 +49,9 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
       const id = uid()
       const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
       const label =
-        files.length === 1 ? files[0].name : `${files[0].name} 等 ${files.length} 个文件`
+        files.length === 1
+          ? files[0].name
+          : t("ui.uploads.multi_files_label", { name: files[0].name, count: files.length })
 
       const batches: File[][] = []
       for (let i = 0; i < files.length; i += MAX_FILES_PER_REQUEST) {
@@ -73,7 +77,7 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
         let doneBytes = 0
         try {
           for (const batch of batches) {
-            if (aborted) throw new Error("已取消上传")
+            if (aborted) throw new Error(t("ui.uploads.cancelled"))
             const batchBytes = batch.reduce((sum, f) => sum + f.size, 0)
             const base = doneBytes
             const task = uploadFiles(destPath, batch, (loaded) => patch(id, { loaded: base + loaded }), options)
@@ -100,30 +104,45 @@ export function UploadsProvider({ children }: { children: React.ReactNode }) {
             patch(id, {
               status: "error",
               loaded: totalBytes,
-              error: failed.map((f) => `${f.name}: ${f.error}`).join("；"),
+              error: failed.map((f) => `${f.name}: ${f.error}`).join(t("ui.uploads.error_separator")),
             })
-            toast.error(okCount > 0 ? `已上传 ${okCount} 个，${failed.length} 个失败` : "上传失败", {
-              description: failed.map((f) => `${f.name}：${f.error}`).join("\n"),
-            })
+            toast.error(
+              okCount > 0
+                ? t("ui.uploads.partial_ok", { ok: okCount, failed: failed.length })
+                : t("ui.uploads.failed"),
+              {
+                description: failed
+                  .map((f) => t("ui.uploads.failed_item", { name: f.name, error: String(f.error) }))
+                  .join("\n"),
+              }
+            )
           } else {
             patch(id, { status: "done", loaded: totalBytes })
-            toast.success(`已上传 ${okCount} 个文件`)
+            toast.success(t("ui.uploads.ok_count", { count: okCount }))
           }
           if (truncated) {
-            toast.warning(`单次最多上传 ${MAX_FILES_PER_REQUEST} 个文件，${dropped || "部分"}个未处理`, {
-              description: "请分批再次上传剩余文件",
-            })
+            toast.warning(
+              t("ui.uploads.limit_warning", {
+                limit: MAX_FILES_PER_REQUEST,
+                dropped: dropped || t("ui.uploads.partial"),
+              }),
+              {
+                description: t("ui.uploads.limit_hint"),
+              }
+            )
           }
           for (const fn of listeners.current) fn(destPath)
         } catch (err) {
           const message = (err as Error).message
-          const cancelled = message.includes("取消")
+          // 「用户取消」不能靠文案判断（文案会随语言变），只看 abort() 置下的标志：
+          // 它同时覆盖"下一批开始前发现已取消"和"XHR 被 abort"两条路径。
+          const cancelled = aborted
           patch(id, { status: cancelled ? "cancelled" : "error", error: message })
-          if (!cancelled) toast.error("上传失败", { description: message })
+          if (!cancelled) toast.error(t("ui.uploads.failed"), { description: message })
         }
       })()
     },
-    [patch]
+    [patch, t]
   )
 
   const cancel = React.useCallback(
