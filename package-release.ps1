@@ -29,7 +29,7 @@
 #    powershell -NoProfile -ExecutionPolicy Bypass -File package-release.ps1
 #    powershell ... -File package-release.ps1 -Platform windows-x64
 #    powershell ... -File package-release.ps1 -ReleaseDir ZeroShadow-Release `
-#                                               -ZipPath ZeroShadow-1.1.2-linux-x64.zip
+#                                               -ZipPath ZeroShadow-1.2.0-linux-x64.zip
 #    powershell ... -File package-release.ps1 -NoZip    # purge + scan + stage only
 #    powershell ... -File package-release.ps1 -DryRun   # report only, no changes
 #

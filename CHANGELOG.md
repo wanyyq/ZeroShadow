@@ -11,7 +11,7 @@
 
 ---
 
-## [未发布]
+## [1.2.0] - 2026-10-11
 
 ### 新增
 
@@ -259,6 +259,7 @@
 
 ---
 
+[1.2.0]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.0
 [1.1.2]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.2
 [1.1.1]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.1
 [1.1.0]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.0-rc1

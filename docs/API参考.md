@@ -144,7 +144,7 @@ X-ZS-Group: <小组 id>
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.1.2" }
+{ "name": "ZeroShadow", "version": "1.2.0" }
 ```
 
 > `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：

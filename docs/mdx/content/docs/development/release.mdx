@@ -261,7 +261,7 @@ ZeroShadow-1.1.0-windows-x64.zip
 ## 改版本号的完整清单
 
 版本号是**写死在代码与文档里**的，不从 `package.json` 读（浏览器里拿不到），
-所以每次发版要逐项同步。目前一共 8 处：
+所以每次发版要逐项同步。目前一共 10 处：
 
 | # | 位置 | 说明 |
 |:--|:--|:--|
@@ -273,18 +273,23 @@ ZeroShadow-1.1.0-windows-x64.zip
 | 6 | `README.md` 的「发布包内容」示例 | 形如 `ZeroShadow-<版本>-windows-x64.zip` |
 | 7 | `docs/使用手册.md` 的界面结构示意图 | 侧边栏品牌区显示 `v<版本号>` |
 | 8 | `docs/API参考.md` 里 `/api/meta` 的响应示例 | 与第 2 项一致 |
+| 9 | `docs/mdx/content/docs/api/reference.mdx` 里 `/api/meta` 的响应示例 | 文档站那一份，与第 8 项保持一致 |
+| 10 | `README.md`「更新日志」一节的 `**v<版本>（当前版本）**` | 新版本写在最上面，旧版本去掉"（当前版本）" |
 
 另外几处**不是版本号但常一起改**：
 
 - `docs/README.md` 开头的「本文档对应仓库当前 `main` 分支（`package.json` 版本 `x.y.z`）」；
-- `CHANGELOG.md`（以及内容应保持一致的 `docs/changelog.md`）顶部追加新版本一节
+- `CHANGELOG.md`（以及内容应保持一致的 `docs/changelog.md`）把顶部的 `## [未发布]`
+  改成 `## [<版本>] - <日期>`，并在文件末尾补上 `[<版本>]: …/releases/tag/v<版本>` 链接
   （Keep a Changelog 风格）；
 - `package-release.ps1` 用法注释里的示例归档名（纯注释，改了更清楚，不改也不影响功能）。
 
-改完用这条命令核对，应当只剩更新日志里的历史版本号：
+改完用这两条命令核对：第一条应当命中上面那 10 处，第二条应当**只剩历史标注**
+（更新日志里的旧版本号、文档里的「（1.1.2 起）」、`SECURITY-AUDIT.md` 的审计对象版本）：
 
 ```bash
-grep -rn "1\.1\.0" --include="*.json" --include="*.js" --include="*.ts" --include="*.md" . | grep -v node_modules
+grep -rn "1\.2\.0" --include="*.json" --include="*.js" --include="*.ts" --include="*.md" . | grep -v node_modules
+grep -rn "1\.1\.2" --include="*.json" --include="*.js" --include="*.ts" --include="*.md" . | grep -v node_modules
 ```
 
 <Callout type="warn" title="别动 server/dist/server-bundle.cjs">
