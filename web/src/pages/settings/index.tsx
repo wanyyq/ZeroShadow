@@ -39,6 +39,7 @@ import { GroupsSection } from "@/pages/settings/groups-section"
 import { DataSection } from "@/pages/settings/data-section"
 import { TrashSection } from "@/pages/settings/trash-section"
 import { LogsMetricsSection } from "@/pages/settings/logs-metrics-section"
+import { SharesSection } from "@/pages/settings/shares-section"
 
 export function SettingsPage() {
   const { me, ready } = useAuth()
@@ -47,13 +48,24 @@ export function SettingsPage() {
 
   return (
     <AppShell>
-      <div className="flex flex-1 flex-col overflow-auto">
-        <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        <div className="mx-auto w-full max-w-4xl min-w-0 px-3 py-5 sm:px-6 sm:py-6">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{t("ui.settings.page.title")}</h1>
           <p className="mb-6 text-sm text-muted-foreground">{isSuper ? t("ui.settings.page.subtitle_admin") : t("ui.settings.page.subtitle_member")}</p>
           {ready && (
             <Tabs defaultValue="appearance">
-              <TabsList variant="line" className="mb-6 flex-wrap">
+              {/*
+                手机上有 11 个标签，必须换行 —— 但 TabsList 的默认样式带
+                `group-data-horizontal/tabs:h-9`（固定 36px），换行后第二、三行
+                会被这个固定高度裁掉，看起来就是"标签显示不全"。
+                变体类的特异性高于普通 `h-auto`，所以这里用内联 style 覆盖，
+                并且让触发器自己撑开高度（h-auto 需要父级有确定高度才生效）。
+              */}
+              <TabsList
+                variant="line"
+                className="mb-6 max-w-full flex-wrap"
+                style={{ height: "auto" }}
+              >
                 <TabsTrigger value="appearance"><Icon name="palette" /> {t("ui.settings.tabs.appearance")}</TabsTrigger>
                 {isSuper && (
                   <>
@@ -61,6 +73,7 @@ export function SettingsPage() {
                     <TabsTrigger value="logs"><Icon name="scroll-text" /> {t("ui.settings.tabs.logs")}</TabsTrigger>
                     <TabsTrigger value="members"><Icon name="users" /> {t("ui.settings.tabs.members")}</TabsTrigger>
                     <TabsTrigger value="groups"><Icon name="layers" /> {t("ui.settings.tabs.groups")}</TabsTrigger>
+                    <TabsTrigger value="shares"><Icon name="share-2" /> {t("ui.share.tab")}</TabsTrigger>
                     <TabsTrigger value="perms"><Icon name="shield-check" /> {t("ui.settings.tabs.perms")}</TabsTrigger>
                     <TabsTrigger value="data"><Icon name="database" /> {t("ui.settings.tabs.data")}</TabsTrigger>
                     <TabsTrigger value="trash"><Icon name="trash-2" /> {t("ui.settings.tabs.trash")}</TabsTrigger>
@@ -76,6 +89,7 @@ export function SettingsPage() {
                   <TabsContent value="logs"><LogsMetricsSection /></TabsContent>
                   <TabsContent value="members"><MembersSection /></TabsContent>
                   <TabsContent value="groups"><GroupsSection /></TabsContent>
+                  <TabsContent value="shares"><SharesSection /></TabsContent>
                   <TabsContent value="perms"><PermsSection /></TabsContent>
                   <TabsContent value="data"><DataSection /></TabsContent>
                   <TabsContent value="trash"><TrashSection /></TabsContent>
@@ -472,17 +486,17 @@ function MembersSection() {
           </div>
         )}
 
-        <div className="rounded-md border border-border">
+        <div className="min-w-0 overflow-hidden rounded-md border border-border">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">
                   <Checkbox checked={allChecked} onCheckedChange={() => setSelected(allChecked ? new Set() : new Set(members.map((m) => m.id)))} />
                 </TableHead>
-                <TableHead className="w-14">{t("ui.settings.members.col_avatar")}</TableHead>
+                <TableHead className="hidden w-14 sm:table-cell">{t("ui.settings.members.col_avatar")}</TableHead>
                 <TableHead>{t("ui.settings.members.col_username")}</TableHead>
                 <TableHead className="w-20">{t("ui.common.status")}</TableHead>
-                <TableHead className="w-40">{t("ui.settings.members.col_created_at")}</TableHead>
+                <TableHead className="hidden w-40 md:table-cell">{t("ui.settings.members.col_created_at")}</TableHead>
                 <TableHead className="w-12 text-right">{t("ui.common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -495,14 +509,14 @@ function MembersSection() {
                       <TableCell>
                         <Checkbox checked={selected.has(m.id)} onCheckedChange={() => setSelected((prev) => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next })} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <button type="button" onClick={() => pickAvatar(m)} title={t("ui.settings.members.change_avatar_hint")} className="rounded-full">
                           <Avatar owner={ownerForUser(m.id)} name={m.username} size={28} />
                         </button>
                       </TableCell>
-                      <TableCell className="font-medium">{m.username}</TableCell>
+                      <TableCell className="max-w-40 truncate font-medium">{m.username}</TableCell>
                       <TableCell><Badge variant={m.disabled ? "secondary" : "default"}>{m.disabled ? t("ui.common.disabled") : t("ui.settings.members.status_active")}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{m.createdAt.replace("T", " ").slice(0, 19)}</TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground md:table-cell">{m.createdAt.replace("T", " ").slice(0, 19)}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger render={<Button size="icon-xs" variant="ghost" />}><Icon name="ellipsis-vertical" className="size-3.5" /></DropdownMenuTrigger>

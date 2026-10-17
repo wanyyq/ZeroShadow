@@ -11,6 +11,19 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      静态兜底入口（v1.2.1）：正常浏览器里 noscript 不渲染，界面上完全看不到；
+      但脚本被禁用、或 JS 引擎太老导致 SPA 起不来时，
+      这是唯一还能点到「兼容模式」的地方（smoke-test 的 robustness-entry-on-home
+      断言也依赖它存在于首页 HTML 里）。
+    -->
+    <noscript>
+      <p style="margin:2rem auto;max-width:32rem;font:14px/1.7 system-ui,sans-serif;color:#444">
+        当前浏览器未启用 JavaScript，无法加载网盘界面。<br />
+        如果你的浏览器较旧，请使用
+        <a href="/robustness/index.html">兼容模式</a>。
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -297,6 +297,10 @@ export interface AdminConfig {
   metricsMemMinutes: number
   requestMetricsEnabled: boolean
   slowRequestMs: number
+  /** 分享总开关（v1.2.1）：关掉后既有链接一律失效，也不能新建 */
+  shareEnabled: boolean
+  /** 允许匿名访问分享链接；false 表示必须先登录网盘账号 */
+  sharePublicAccess: boolean
   defaultVisibility: { whitelist: string[]; blacklist: string[] }
   memberPerms: {
     fileWrite: boolean

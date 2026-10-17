@@ -1,0 +1,11 @@
+{
+  "ui.i18n.language": "Langue de l'interface",
+  "ui.i18n.language_hint": "Prise en compte immédiate, pour ce navigateur uniquement ; la langue par défaut du site est « {name} »",
+  "ui.i18n.custom_tag": "Depuis data/lang",
+  "ui.i18n.follow_default": "Suivre la langue du site",
+  "ui.i18n.export_template": "Exporter le modèle de traduction",
+  "ui.i18n.export_template_hint": "Exporte toutes les clés (valeurs en chinois). Traduisez les valeurs, ajoutez un _meta.name et déposez le fichier dans data/lang/ côté serveur pour ajouter une langue",
+  "ui.i18n.exported": "Modèle de traduction exporté",
+  "ui.i18n.loading": "Chargement du fichier de langue…",
+  "ui.i18n.template_name_placeholder": "(remplacez par le nom de cette langue)"
+}

@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { BUILTIN, BUILTIN_META, FALLBACK_LANG, isBuiltinLang, type Dict, type LangMeta } from "@/locales"
+import { VERSION } from "@/version"
 
 /**
  * lib/i18n.tsx —— 界面语言
@@ -100,6 +101,17 @@ const Ctx = React.createContext<I18nValue | undefined>(undefined)
 
 const LANG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/
 
+/**
+ * 语言包静态资源的 URL（带版本号）。
+ *
+ * 这些 JSON 由构建产出、可被浏览器缓存；但每次发版都会新增键，
+ * 不带版本号时老访客会一直用缓存里的旧字典，新文案全部回落成中文。
+ * 加 `?v=<版本>` 让"同一版本内吃缓存、换版本立刻换新"。
+ */
+function localeAssetUrl(code: string) {
+  return `/resources/locales/${encodeURIComponent(code)}.json?v=${encodeURIComponent(VERSION)}`
+}
+
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
     const res = await fetch(url, {
@@ -125,11 +137,15 @@ async function fetchJson<T>(url: string): Promise<T | null> {
  *   2. `/api/i18n/<code>` —— `data/lang/` 里的扩展语言：拿它声明的 base 语言字典
  *      再叠上它自己的译文。
  * 两条都失败时什么都不做：translate() 会继续用中文兜底，界面仍然可读。
+ *
+ * **URL 上必须带版本号**：这些 JSON 的缓存是 `max-age` 一天的静态资源，而语言包
+ * 每次发版都会新增键。不带 `?v=` 的话，老访客会一直用缓存里的旧字典 ——
+ * 新加的文案全部回落成中文，表现就是"选了自己语言但很多地方没翻译"。
  */
 async function loadRuntimeDict(code: string): Promise<void> {
   if (code === FALLBACK_LANG || runtimeDicts.has(code)) return
 
-  const staticDict = await fetchJson<Dict>(`/resources/locales/${encodeURIComponent(code)}.json`)
+  const staticDict = await fetchJson<Dict>(localeAssetUrl(code))
   if (staticDict && typeof staticDict === "object") {
     runtimeDicts.set(code, staticDict)
     return
@@ -144,7 +160,7 @@ async function loadRuntimeDict(code: string): Promise<void> {
   const baseCode = data.base && isBuiltinLang(data.base) ? data.base : FALLBACK_LANG
   const baseDict =
     BUILTIN[baseCode] ??
-    (await fetchJson<Dict>(`/resources/locales/${encodeURIComponent(baseCode)}.json`)) ??
+    (await fetchJson<Dict>(localeAssetUrl(baseCode))) ??
     {}
   runtimeDicts.set(code, { ...baseDict, ...(data.translations ?? {}) })
 }

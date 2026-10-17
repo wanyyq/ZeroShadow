@@ -15,7 +15,7 @@ import { BUILTIN } from "@/locales"
  * 之所以由前端导出而不由服务端生成：语言文件与前端源码同源，服务端没有键清单，
  * 而前端本来就打包了完整的中文字典，导出是零成本的。
  */
-export function LanguageSelect({ className }: { className?: string }) {
+export function LanguageSelect({ className, compact = false }: { className?: string; compact?: boolean }) {
   const { lang, langs, defaultLang, loading, setLang } = useI18n()
   const t = useT()
 
@@ -58,9 +58,9 @@ export function LanguageSelect({ className }: { className?: string }) {
 
   return (
     <div className={className}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Select value={lang} onValueChange={(value) => setLang(String(value))}>
-          <SelectTrigger className="w-48" size="sm">
+          <SelectTrigger className={compact ? "w-32" : "w-48"} size="sm">
             <SelectValue>
               {(value) => langs.find((l) => l.code === String(value))?.name ?? String(value)}
             </SelectValue>
@@ -74,27 +74,33 @@ export function LanguageSelect({ className }: { className?: string }) {
             ))}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={followDefault}
-          disabled={lang === defaultLang}
-        >
-          {t("ui.i18n.follow_default")}
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label={t("ui.i18n.export_template")}
-          title={t("ui.i18n.export_template_hint")}
-          onClick={exportTemplate}
-        >
-          <Icon name="download" />
-        </Button>
+        {compact ? null : (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={followDefault}
+              disabled={lang === defaultLang}
+            >
+              {t("ui.i18n.follow_default")}
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t("ui.i18n.export_template")}
+              title={t("ui.i18n.export_template_hint")}
+              onClick={exportTemplate}
+            >
+              <Icon name="download" />
+            </Button>
+          </>
+        )}
       </div>
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        {loading ? t("ui.i18n.loading") : t("ui.i18n.language_hint", { name: defaultName })}
-      </p>
+      {compact ? null : (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {loading ? t("ui.i18n.loading") : t("ui.i18n.language_hint", { name: defaultName })}
+        </p>
+      )}
     </div>
   )
 }

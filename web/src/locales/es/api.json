@@ -1,0 +1,16 @@
+{
+  "api.common.not_found": "Endpoint no encontrado",
+  "api.common.server_error": "Error interno del servidor",
+  "api.auth.login_required": "Inicia sesión primero",
+  "api.auth.forbidden": "Sin permiso para esta operación",
+  "api.auth.csrf_failed": "Error al validar la solicitud",
+  "api.i18n.unknown_lang": "Ese archivo de idioma no existe",
+  "api.admin.default_lang_invalid": "defaultLang debe ser un código de idioma disponible",
+  "api.fs.version_conflict": "Otra persona ha modificado este archivo desde que lo abriste. Para no sobrescribir sus cambios, no se ha guardado. Vuelve a abrirlo (o recarga la página) para ver el contenido más reciente y decidir cómo combinarlo.",
+  "ui.api.upload_failed": "Error al subir ({status})",
+  "ui.api.upload_network_error": "Error de red, subida interrumpida",
+  "ui.api.upload_cancelled": "Subida cancelada",
+  "ui.api.download_failed": "Error al descargar ({status})",
+  "ui.api.avatar_fetch_failed": "Error al obtener el avatar ({status})",
+  "ui.api.avatar_upload_failed": "Error al subir el avatar ({status})"
+}

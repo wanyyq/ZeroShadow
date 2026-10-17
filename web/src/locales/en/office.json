@@ -1,0 +1,21 @@
+{
+  "ui.office.loading": "Parsing document…",
+  "ui.office.error.invalid": "The document is damaged and cannot be parsed",
+  "ui.office.error.encrypted": "This document is encrypted and cannot be previewed",
+  "ui.office.error.unsupported": "Preview is not supported for this document type",
+  "ui.office.error.too_large": "The document is too large to preview online",
+  "ui.office.error.empty": "The document is empty",
+  "ui.office.error.network": "Failed to download the file, please try again",
+  "ui.office.error.generic": "Preview failed, please download the file to view it",
+  "ui.office.image_alt": "Document image",
+  "ui.office.docx.page_break": "Page break",
+  "ui.office.xlsx.sheet_tabs": "Worksheets",
+  "ui.office.xlsx.truncated": "Large sheet, showing only the first {rows} rows",
+  "ui.office.xlsx.empty": "This worksheet is empty",
+  "ui.office.xlsx.formula": "Formula: {formula}",
+  "ui.office.pptx.prev": "Previous slide",
+  "ui.office.pptx.next": "Next slide",
+  "ui.office.pptx.counter": "Slide {index} / {total}",
+  "ui.office.pptx.slides": "Slides",
+  "ui.office.pptx.empty": "This slide has nothing to display"
+}

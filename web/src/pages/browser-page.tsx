@@ -8,6 +8,9 @@ import { DeleteDialog, DetailsDialog, NewFolderDialog, RenameDialog } from "@/co
 import { DestPickerDialog } from "@/components/browser/dest-picker"
 import { ConflictDialog } from "@/components/browser/conflict-dialog"
 import { ShortcutEditorDialog } from "@/components/browser/shortcut-editor"
+import { DownloadTaskDialog, NewCustomFileDialog } from "@/components/browser/new-file-dialog"
+import { createTextFileWithDefault } from "@/lib/new-file"
+import { ShareDialog } from "@/components/browser/share-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -17,7 +20,7 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui
 import { Spinner } from "@/components/ui/spinner"
 import { Icon } from "@/components/icon"
 import { api, downloadUrl, triggerDownload, zipUrl } from "@/lib/api"
-import { fileKind, formatBytes, formatDate, joinPath, previewType } from "@/lib/format"
+import { fileKind, formatBytes, formatDate, joinPath, canPreview } from "@/lib/format"
 import { animateListIn } from "@/lib/lucide"
 import type { Entry, SearchResult } from "@/lib/types"
 import { useAuth } from "@/state/auth"
@@ -116,6 +119,12 @@ export function BrowserPage() {
 
   const [shortcutOpen, setShortcutOpen] = React.useState(false)
   const [shortcutEntry, setShortcutEntry] = React.useState<Entry | null>(null)
+
+  // 右键「新建…」与「分享」（v1.2.1）
+  const [newFileOpen, setNewFileOpen] = React.useState(false)
+  const [newFileDir, setNewFileDir] = React.useState("")
+  const [downloadOpen, setDownloadOpen] = React.useState(false)
+  const [shareTarget, setShareTarget] = React.useState<Entry | null>(null)
 
   // 请求序号：快速连续切目录时，先发出的慢响应会覆盖后发出的结果，
   // 表现为「面包屑已经是 B，列表还是 A」并且 loading 提前结束。只认最新一次。
@@ -222,7 +231,10 @@ export function BrowserPage() {
     if (entry.type === "shortcut") { handleShortcut(entry); return }
     const rel = joinPath(path, entry.name)
     const ext = (entry.name.split(".").pop() || "").toLowerCase()
-    if (previewType(entry.name) && me.perms.preview) {
+    // 注意用 canPreview()：它同时认 Office（docx/xlsx/pptx）。
+    // 旧实现只判 previewType()，Office 文件返回 null，双击于是直接变成下载 ——
+    // 预览页里的 Office 分支永远走不到。
+    if (canPreview(entry.name) && me.perms.preview) {
       if (ext === "html" || ext === "htm") {
         if (me.perms.htmlPreview) navigate(`/html-preview?path=${encodeURIComponent(rel)}`)
         else navigate(`/preview?path=${encodeURIComponent(rel)}`)
@@ -633,6 +645,55 @@ export function BrowserPage() {
 
   const crumbs = path ? path.split("/") : []
 
+  // 新建文本文档：文件名按当前界面语言生成（服务端只收到最终字符串）
+  const handleCreateTextFile = async (dir: string) => {
+    const created = await createTextFileWithDefault(dir, t("ui.create.text_file_default"))
+    if (!created) return
+    toast.success(t("ui.create.created", { name: created }))
+    refresh()
+  }
+
+  // ---------- 新建… 子菜单（文件夹右键与空白处右键共用） ----------
+  const newSubmenu = (dir: string, key: string) => {
+    const canCreate = me.perms.upload && !isCurrentSoft
+    return (
+      <ContextMenuSub key={key}>
+        <ContextMenuSubTrigger>
+          <Icon name="file-plus" /> {t("ui.create.menu")}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuItem
+            onClick={() => {
+              if (!canCreate) return noPermToast()
+              void handleCreateTextFile(dir)
+            }}
+          >
+            <Icon name="file-text" /> {t("ui.create.text_file")}
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              if (!canCreate) return noPermToast()
+              setNewFileDir(dir)
+              setNewFileOpen(true)
+            }}
+          >
+            <Icon name="file-plus-2" /> {t("ui.create.custom_file")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onClick={() => {
+              if (!me.perms.downloadUrl) return noPermToast()
+              setNewFileDir(dir)
+              setDownloadOpen(true)
+            }}
+          >
+            <Icon name="download" /> {t("ui.create.download_task")}
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    )
+  }
+
   // ---------- 上下文菜单内容（提取为函数，供三个点和右键共用） ----------
   const buildMenuItems = (entry: Entry) => {
     const targets = targetsOf(entry)
@@ -642,12 +703,25 @@ export function BrowserPage() {
     if (entry.type === "dir" && single) {
       items.push(<ContextMenuItem key="open" onClick={() => openEntry(entry)}><Icon name="folder-open" /> {t("ui.common.open")}</ContextMenuItem>)
     }
+    // 新建…：文件夹里就在该文件夹内新建，其余情况新建到当前目录
+    if (single) {
+      items.push(newSubmenu(entry.type === "dir" ? joinPath(path, entry.name) : path, "newsub"))
+    }
     items.push(
       <ContextMenuItem key="download" disabled={single && entry.type === "file" ? !me.perms.downloadFile : !me.perms.downloadFolder} onClick={() => { doDownload(targets) }}>
         <Icon name="download" /> {t("ui.common.download")}{!single || entry.type === "dir" ? " (Zip)" : ""}
       </ContextMenuItem>
     )
-    if (single && entry.type === "file" && previewType(entry.name)) {
+    // 分享（v1.2.1）：仅登录用户、且只能分享自己有权下载的单项
+    if (single && me.role !== "guest") {
+      const canShare = entry.type === "dir" ? me.perms.downloadFolder : me.perms.downloadFile
+      items.push(
+        <ContextMenuItem key="share" disabled={!canShare} onClick={() => { if (!canShare) return noPermToast(); setShareTarget(entry) }}>
+          <Icon name="share-2" /> {t("ui.share.menu")}
+        </ContextMenuItem>
+      )
+    }
+    if (single && entry.type === "file" && canPreview(entry.name)) {
       items.push(
         <ContextMenuItem key="preview" disabled={!me.perms.preview} onClick={() => { if (!me.perms.preview) noPermToast(); else handleOpenFile(entry) }}>
           <Icon name="eye" /> {t("ui.common.preview")}
@@ -802,6 +876,7 @@ export function BrowserPage() {
       <ContextMenuItem key="mkdir" disabled={!canMkdir} onClick={() => { if (!canMkdir) noPermToast(); else openDialog("newFolder") }}>
         <Icon name="folder-plus" /> {t("ui.browser.new_folder")}
       </ContextMenuItem>,
+      newSubmenu(path, "newsub"),
       <ContextMenuItem key="paste" disabled={!canPaste} onClick={() => { if (!canPaste) noPermToast(); else void doPaste() }}>
         <Icon name="clipboard-paste" /> {clipboard.items.length ? t("ui.browser.paste_n_items", { n: clipboard.items.length }) : t("ui.browser.paste")}
         <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
@@ -1187,6 +1262,25 @@ export function BrowserPage() {
         entry={shortcutEntry}
         currentPath={path}
         onDone={refresh}
+      />
+      <NewCustomFileDialog
+        open={newFileOpen}
+        onOpenChange={setNewFileOpen}
+        dirPath={newFileDir}
+        onDone={refresh}
+      />
+      <DownloadTaskDialog
+        open={downloadOpen}
+        onOpenChange={setDownloadOpen}
+        dest={newFileDir}
+        onDone={() => { /* 进度在「工具」面板里，列表无需刷新 */ }}
+      />
+      <ShareDialog
+        open={!!shareTarget}
+        onOpenChange={(o) => !o && setShareTarget(null)}
+        path={shareTarget ? joinPath(path, shareTarget.name) : ""}
+        name={shareTarget ? displayName(shareTarget) : ""}
+        isFolder={shareTarget?.type === "dir"}
       />
     </AppShell>
   )

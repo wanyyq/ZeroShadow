@@ -1,0 +1,48 @@
+{
+  "ui.preview.source_code": "原始碼",
+  "ui.preview.unsupported_format": "暫不支援預覽此格式",
+  "ui.preview.raw_html_notice": "檔案內含原始 HTML 標籤，出於安全考慮以純文字顯示；可切換到「原始碼」查看原文。",
+  "ui.preview.download_original": "下載原始檔案",
+  "ui.preview.link_copied": "已複製連結",
+
+  "ui.shortcut.type_dir": "目錄",
+  "ui.shortcut.type_soft_dir": "外部映射目錄",
+  "ui.shortcut.type_soft_file": "外部映射檔案",
+  "ui.shortcut.default_name": "{name} 捷徑",
+  "ui.shortcut.name_target_required": "名稱和目標不能為空",
+  "ui.shortcut.saved_old_not_deleted": "捷徑已儲存，但舊的同名檔案未能刪除",
+  "ui.shortcut.updated": "捷徑已更新",
+  "ui.shortcut.created": "捷徑已建立",
+  "ui.shortcut.name_label": "顯示名稱",
+  "ui.shortcut.name_placeholder": "捷徑顯示名稱",
+  "ui.shortcut.target_path_label": "目標路徑",
+  "ui.shortcut.target_placeholder": "相對路徑或外部映射路徑",
+  "ui.shortcut.target_type_label": "目標類型",
+  "ui.shortcut.icon_label": "圖示",
+  "ui.shortcut.create": "建立",
+
+  "ui.dest_picker.copy_here": "複製到此處",
+  "ui.dest_picker.move_here": "移動到此處",
+
+  "ui.picker.parent": "返回上層",
+  "ui.picker.no_subfolders": "沒有子資料夾",
+
+  "ui.path_picker.title": "選擇目錄",
+  "ui.path_picker.pick": "選擇此目錄",
+
+  "ui.conflict.title": "同名檔案處理",
+  "ui.conflict.description": "目標位置已存在 {count} 個同名項目，請選擇處理方式：",
+  "ui.conflict.rename_to": "重新命名為 {name}",
+  "ui.conflict.skip": "略過",
+  "ui.conflict.overwrite": "覆蓋",
+  "ui.conflict.merge": "合併",
+  "ui.conflict.apply_to_all": "對接下來所有同名項目執行此操作",
+
+  "ui.ops.processing_n": "正在處理 {n} 項",
+  "ui.ops.done": "處理完成",
+
+  "ui.upload.uploading_n": "正在上載 {n} 項",
+  "ui.upload.done": "上載完成",
+
+  "ui.progress.clear_finished": "清除已完成"
+}

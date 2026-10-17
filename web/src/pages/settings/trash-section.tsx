@@ -188,33 +188,33 @@ export function TrashSection() {
           {items.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">{t("ui.settings.trash.empty_state")}</p>
           ) : (
-            <ScrollArea className="h-80 rounded-md border border-border">
+            <ScrollArea className="h-80 min-w-0 rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t("ui.common.name")}</TableHead>
-                    <TableHead>{t("ui.settings.trash.col_original_path")}</TableHead>
-                    <TableHead className="w-24 text-right">{t("ui.common.size")}</TableHead>
-                    <TableHead className="w-40">{t("ui.settings.trash.col_deleted_at")}</TableHead>
-                    <TableHead className="w-24">{t("ui.settings.trash.col_deleted_by")}</TableHead>
-                    <TableHead className="w-44 text-right">{t("ui.common.actions")}</TableHead>
+                    <TableHead className="hidden md:table-cell">{t("ui.settings.trash.col_original_path")}</TableHead>
+                    <TableHead className="hidden w-20 text-right sm:table-cell">{t("ui.common.size")}</TableHead>
+                    <TableHead className="w-28 sm:w-40">{t("ui.settings.trash.col_deleted_at")}</TableHead>
+                    <TableHead className="hidden w-24 md:table-cell">{t("ui.settings.trash.col_deleted_by")}</TableHead>
+                    <TableHead className="w-32 text-right sm:w-44">{t("ui.common.actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((it) => (
                     <TableRow key={it.id}>
-                      <TableCell className="max-w-56 truncate font-medium" title={it.name}>
+                      <TableCell className="max-w-40 truncate font-medium sm:max-w-56" title={it.name}>
                         <Icon name={it.type === "dir" ? "folder" : "file"} className="mr-1.5 inline size-3.5 text-muted-foreground" />
                         {it.name}
                       </TableCell>
-                      <TableCell className="max-w-56 truncate font-mono text-xs text-muted-foreground" title={it.rel}>
+                      <TableCell className="hidden max-w-56 truncate font-mono text-xs text-muted-foreground md:table-cell" title={it.rel}>
                         /{it.rel}
                       </TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">
+                      <TableCell className="hidden text-right text-xs text-muted-foreground sm:table-cell">
                         {it.size < 0 ? t("ui.settings.trash.directory") : formatBytes(it.size)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{it.deletedAt.replace("T", " ").slice(0, 19)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
                         {it.deletedBy || "—"}
                         {it.deletedByRole === "superadmin" && <Badge variant="secondary" className="ml-1 text-[10px]">{t("ui.settings.trash.superadmin")}</Badge>}
                       </TableCell>

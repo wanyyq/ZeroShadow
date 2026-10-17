@@ -1,0 +1,21 @@
+{
+  "ui.office.loading": "Analizando el documento…",
+  "ui.office.error.invalid": "El documento está dañado y no se puede analizar",
+  "ui.office.error.encrypted": "Este documento está cifrado y no se puede previsualizar",
+  "ui.office.error.unsupported": "Este tipo de documento no se puede previsualizar",
+  "ui.office.error.too_large": "El documento es demasiado grande para previsualizarlo en línea",
+  "ui.office.error.empty": "El documento está vacío",
+  "ui.office.error.network": "Error al descargar el archivo; inténtalo de nuevo",
+  "ui.office.error.generic": "Error en la vista previa; descarga el archivo para verlo",
+  "ui.office.image_alt": "Imagen del documento",
+  "ui.office.docx.page_break": "Salto de página",
+  "ui.office.xlsx.sheet_tabs": "Hojas",
+  "ui.office.xlsx.truncated": "Hoja grande: solo se muestran las primeras {rows} filas",
+  "ui.office.xlsx.empty": "Esta hoja no tiene contenido",
+  "ui.office.xlsx.formula": "Fórmula: {formula}",
+  "ui.office.pptx.prev": "Diapositiva anterior",
+  "ui.office.pptx.next": "Diapositiva siguiente",
+  "ui.office.pptx.counter": "Diapositiva {index} / {total}",
+  "ui.office.pptx.slides": "Diapositivas",
+  "ui.office.pptx.empty": "Esta diapositiva no tiene nada que mostrar"
+}

@@ -18,6 +18,9 @@ const MANAGED = [
   { file: "users.json", type: "array" },
   { file: "groups.json", type: "array" },
   { file: "todos.json", type: "array" },
+  // v1.2.1：分享记录是对象（{ version, shares: [] }）。
+  // 老版本实例没有这个文件，checkFile 会返回 absent，不影响启动。
+  { file: "shares.json", type: "object" },
 ]
 
 function quarantine(name) {

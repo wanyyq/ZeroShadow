@@ -13,9 +13,20 @@
  * 不支持（有意为之，见 docs/安全设计.md）：原始 HTML、参考式链接、脚注、数学公式、目录。
  */
 
+import { canPreview } from "./format"
+import { downloadFileUrl, inlineFileUrl, looksLikeFile, resolveRef } from "./markdown-urls"
+
+/**
+ * 当前渲染的基准目录（.md 文件所在目录，相对网盘根）。
+ *
+ * 用模块级变量而不是给十几个内部函数加参数：`renderMarkdown` 是纯同步的，
+ * 一次渲染期间不会被另一次渲染打断，所以这里没有并发问题；
+ * 用完在 finally 里恢复原值，异常也不会把状态留在错误的值上。
+ */
+let activeBaseDir = ""
+
 /** HTML 转义表：只有这 4 个字符需要处理，属性值因此无法被闭合 */
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }
-
 export function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (ch) => ESC[ch])
 }
@@ -31,7 +42,14 @@ const TOKEN = new RegExp(`${NUL}(\\d+)${NUL}`, "g")
 
 /* ============================== 行内 ============================== */
 
+/*
+ * 地址解析（相对路径 / `..` 折叠 / 网盘下载地址）全部在 `./markdown-urls` 里，
+ * 那边是**零依赖的纯函数**，可以用 `node --experimental-strip-types` 直接单测
+ * （scripts/markdown-url-test.mjs）。这里只负责把解析结果拼成标签。
+ */
+
 function inline(raw: string): string {
+  const baseDir = activeBaseDir
   const stash: string[] = []
   // push() 返回新长度，所以写入的下标是 length-1
   const keep = (html: string) => `\u0000${stash.push(html) - 1}\u0000`
@@ -44,29 +62,45 @@ function inline(raw: string): string {
     keep(`<code>${code.replace(/^ | $/g, "")}</code>`)
   )
 
-  // 3) 图片 / 链接：只把地址单独 keep，正文保持"可继续做强调"的状态。
+  // 3) 图片 / 链接：整段标签都放进占位符。
+  //    只把地址 keep() 是不够的 —— 标签还留在正文里，后面的强调 / 硬换行规则
+  //    会去动 alt / title 属性里的 * _ 等字符，把属性改坏。
   //    地址允许一层配对括号，否则维基百科这类 `.../A_(b)` 会被截断。
   s = s.replace(
     /!\[([^\]]*)\]\(\s*((?:[^\s()]|\([^\s()]*\))*)(?:\s+(?:"|&quot;)([\s\S]*?)(?:"|&quot;))?\s*\)/g,
-    (_m, alt: string, src: string, title?: string) =>
-      BAD_URL.test(src)
-        ? alt
-        : `<img src="${keep(src)}" alt="${alt}"${title ? ` title="${keep(title)}"` : ""} loading="lazy" />`
+    (_m, alt: string, src: string, title?: string) => {
+      if (BAD_URL.test(src)) return alt
+      const ref = resolveRef(baseDir, src)
+      const real = ref.external ? ref.path : inlineFileUrl(ref.path)
+      const titleAttr = title ? ` title="${escapeHtml(title)}"` : ""
+      return keep(`<img src="${escapeHtml(real)}" alt="${alt}"${titleAttr} loading="lazy" />`)
+    }
   )
   s = s.replace(
     /\[([^\]]*)\]\(\s*((?:[^\s()]|\([^\s()]*\))*)(?:\s+(?:"|&quot;)([\s\S]*?)(?:"|&quot;))?\s*\)/g,
     (_m, text: string, href: string, title?: string) => {
       if (BAD_URL.test(href)) return text
-      const ext = /^[a-z][\w+.-]*:/i.test(href) && !/^mailto:/i.test(href)
-      return (
-        `<a href="${keep(href)}"${title ? ` title="${keep(title)}"` : ""}` +
-        `${ext ? ' target="_blank" rel="noopener noreferrer"' : ""}>${text || href}</a>`
-      )
+      const ref = resolveRef(baseDir, href)
+      const label = text || escapeHtml(ref.path)
+      if (ref.external) {
+        const titleAttr = title ? ` title="${escapeHtml(title)}"` : ""
+        return keep(`<a href="${escapeHtml(ref.path)}"${titleAttr} target="_blank" rel="noopener noreferrer">${label}</a>`)
+      }
+      if (ref.path.startsWith("#")) {
+        return keep(`<a href="${escapeHtml(ref.path)}">${label}</a>`)
+      }
+      // 网盘内的目标：能预览的走预览页，其余直接给下载；没有扩展名按目录处理
+      const target = looksLikeFile(ref.path)
+        ? canPreview(ref.path) || isMarkdown(ref.path)
+          ? `/preview?path=${encodeURIComponent(ref.path)}`
+          : downloadFileUrl(ref.path)
+        : `/?path=${encodeURIComponent(ref.path)}`
+      return keep(`<a href="${escapeHtml(target)}">${label}</a>`)
     }
   )
   // 4) <https://…> / <a@b.com> 自动链接（URL 里的 & 此时已经是 &amp;，所以不能用 [^\s&]）
   s = s.replace(/&lt;(https?:\/\/[^\s]*?|[\w.+-]+@[\w-]+\.[\w.-]+)&gt;/g, (_m, url: string) =>
-    `<a href="${keep(/^https?:/i.test(url) ? url : `mailto:${url}`)}" target="_blank" rel="noopener noreferrer">${url}</a>`
+    keep(`<a href="${escapeHtml(/^https?:/i.test(url) ? url : `mailto:${url}`)}" target="_blank" rel="noopener noreferrer">${url}</a>`)
   )
 
   // 5) 强调。先长后短：** 必须在 * 之前处理掉
@@ -310,8 +344,14 @@ function renderBlocks(lines: string[]): string {
 }
 
 /** 把 Markdown 源文本渲染成 HTML 片段（可安全用于 dangerouslySetInnerHTML） */
-export function renderMarkdown(src: string): string {
-  return renderBlocks(src.replace(/\r\n?/g, "\n").split("\n"))
+export function renderMarkdown(src: string, options?: { baseDir?: string }): string {
+  const prev = activeBaseDir
+  activeBaseDir = options?.baseDir ?? ""
+  try {
+    return renderBlocks(src.replace(/\r\n?/g, "\n").split("\n"))
+  } finally {
+    activeBaseDir = prev
+  }
 }
 
 /** 是否属于"按 Markdown 渲染"的文件名 */

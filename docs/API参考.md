@@ -4,7 +4,7 @@ ZeroShadow 的服务端是一套纯 JSON + 文件流的 HTTP 接口，前端只�
 你可以用同一套接口写脚本、做自动化、接自己的客户端。
 
 > 想直接对照源码看：路由在 `server/src/routes/`（`auth.js` / `fs.js` / `admin.js` / `avatars.js` /
-> `todos.js` / `groups.js`，共 6 个文件），
+> `todos.js` / `groups.js` / `shares.js`，共 7 个文件），
 > 中间件与静态托管在 `server/index.js`。
 
 ---
@@ -83,6 +83,7 @@ X-Requested-With: XMLHttpRequest
 | 403 | 已登录但权限不足 → `{"error":"没有权限执行此操作"}`；CSRF 失败 → `请求校验失败` |
 | 404 | 目标不存在；或访客访问了对其隐藏的路径（故意用 404 而不是 403） |
 | 409 | 已存在同名文件或文件夹 |
+| 410 | 目标已失效：分享链接已过期 / 已被取消，或回收站里的内容已丢失 |
 | 413 | 请求体或文件体积超出限制（上传单文件、在线编辑内容、头像、在线阅读 8 MB 上限） |
 | 415 | 在线编辑打开的文件被判定为二进制（见下文 `GET /api/fs/file`） |
 | 429 | 被限流或账户被临时锁定（带 `Retry-After` 头时会给出建议等待秒数） |
@@ -144,7 +145,7 @@ X-ZS-Group: <小组 id>
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.2.0" }
+{ "name": "ZeroShadow", "version": "1.2.1" }
 ```
 
 > `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：
@@ -162,8 +163,14 @@ X-ZS-Group: <小组 id>
 {
   "langs": [
     { "code": "zh", "name": "简体中文", "builtin": true },
+    { "code": "zh-TW", "name": "繁體中文（台灣）", "builtin": true },
+    { "code": "zh-HK", "name": "繁體中文（香港）", "builtin": true },
+    { "code": "zh-MO", "name": "繁體中文（澳門）", "builtin": true },
     { "code": "en", "name": "English", "builtin": true },
-    { "code": "ja", "name": "日本語", "builtin": false, "keys": 812 }
+    { "code": "ja", "name": "日本語", "builtin": true },
+    { "code": "es", "name": "Español", "builtin": true },
+    { "code": "fr", "name": "Français", "builtin": true },
+    { "code": "pt", "name": "Português", "builtin": false, "keys": 812 }
   ],
   "default": "zh"
 }
@@ -171,7 +178,7 @@ X-ZS-Group: <小组 id>
 
 | 字段 | 说明 |
 |:--|:--|
-| `langs` | 内置语言（`builtin: true`，随前端产物发布）在前，`data/lang/` 里的自定义语言在后（按文件名排序）；`name` 取自语言文件的 `_meta.name`，`keys` 是该文件里有效的译文条数 |
+| `langs` | 内置语言（`builtin: true`，共 8 种，随前端产物发布）在前，`data/lang/` 里的自定义语言在后（按文件名排序）；`name` 取自语言文件的 `_meta.name`，`keys` 是该文件里有效的译文条数（内置语言没有 `keys`） |
 | `default` | 站点默认语言（`data/config.json` 的 `defaultLang`）。若它指向的语言文件已被删除，这里会回落成 `zh` |
 
 - 目录内容随时可能变（往 `data/lang/` 丢一个文件即可），所以响应带 `Cache-Control: no-cache`，**不需要重启服务**。
@@ -185,14 +192,15 @@ X-ZS-Group: <小组 id>
 
 ```json
 {
-  "code": "ja",
+  "code": "pt",
   "base": "en",
   "builtin": false,
-  "translations": { "ui.common.ok": "OK", "ui.common.cancel": "キャンセル" }
+  "translations": { "ui.common.ok": "OK", "ui.common.cancel": "Cancelar" }
 }
 ```
 
-- 内置语言返回 `"builtin": true` 且 `translations: null`（它们的字典已经打包在前端产物里，不需要再传一遍）；
+- 内置语言返回 `"builtin": true` 且 `translations: null`（它们的字典随前端产物一起发布，
+  除简体中文打进主包外，其余 7 种按需请求 `resources/locales/<code>.json`，所以不需要再传一遍）；
 - `base` 是"没翻译到的键回落到哪种语言"，默认 `zh`，可由语言文件的 `_meta.base` 指定；
 - 语言文件不存在、代码不合规（只允许 `^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`），或文件不是合法 JSON → `404`：
 
@@ -399,6 +407,26 @@ X-ZS-Group: <小组 id>
 - 请求体：`{ "path": "资料", "name": "2026" }`
 - 响应：`{ "name": "2026" }`（若同名已存在，返回的名字会自动变成 `2026 (1)`）
 - 错误：名称校验失败的说明、`404 目录不存在`、`403 外部映射目录仅支持只读操作`
+
+### `POST /api/fs/create-file`
+
+新建一个**空文件**（或带初始内容），供右键「新建…」使用（1.2.1 起）。
+
+- 权限：`upload`（与上传同一个开关）
+- 请求体：
+
+| 字段 | 必填 | 说明 |
+|:-------- |:--- |:--------------------------------------- |
+| `path` | 否 | 所在目录（相对网盘根，根目录传 `""` 或省略） |
+| `name` | 是 | 文件名，走与上传相同的名称校验（非法字符返回 400） |
+| `content` | 否 | 初始文本内容，默认空串；上限 **1 MB**，超出返回 413 |
+| `unique` | 否 | `true` 时同名自动改名（`新建文本文档 (1).txt`）；默认 `false`，同名直接 **409**（**绝不覆盖**） |
+
+- 成功：**201** `{ "name": "新建文本文档.txt", "path": "资料/新建文本文档.txt" }`
+- 错误：`400` 名称校验失败的说明、`403 外部映射目录仅支持只读操作`、`404 目录不存在`、
+  `409 同名文件已存在`（`errorKey: api.fs.create_file_exists`）、`413 初始内容过大`
+- 说明：写入用 `wx`（不存在才创建），所以**不会**"再点一次就把别人的文件清空"；
+  只读映射目录同样不能新建。
 
 ### `POST /api/fs/upload`
 
@@ -629,7 +657,7 @@ X-ZS-Group: <小组 id>
 
 - 权限：`compressZip`
 - 查询参数：`job`
-- 响应（任务状态对象，见 [§8](#8-任务状态对象)）；
+- 响应（任务状态对象，见 [§9](#9-任务状态对象)）；
   任务不存在或不属于调用者时返回 `{ "id": "...", "state": "gone" }`。
 
 ### `POST /api/fs/extract`
@@ -1069,7 +1097,8 @@ X-ZS-Group: <小组 id>
     `logRetentionDays`（1–3650）、`metricsRetentionDays`（1–365）、`metricsMemMinutes`（1–1440）、
     `slowRequestMs`（1–600000）；未标注的默认区间是 1–1048576
   - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、
-    `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`
+    `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`、
+    **`shareEnabled`**、**`sharePublicAccess`**（分享的两个开关，见 [§8](#8-分享链接)）
   - 对象：`memberPerms`、`guestPerms`（只覆盖传入的键，值统一按布尔处理）
   - 对象：`defaultVisibility`——传 `{ "whitelist": [...], "blacklist": [...] }` 整体替换
     （数组会按可见性规则清洗：去首尾 `/`、`\`→`/`、丢弃空串 / `.` / `..` / 含 `..` 的段，最多 200 条）
@@ -1234,13 +1263,13 @@ X-ZS-Group: <小组 id>
 ### `GET /api/admin/backups`
 
 - 响应：`{ "backups": { "config.json": [ { "id": "20260101-120000-ab12", "mtime": 1767225600000, "size": 2048 } ], "…": [] } }`
-- 受管文件只有四个：`config.json`、`users.json`、`groups.json`、`todos.json`。
+- 受管文件有五个：`config.json`、`users.json`、`groups.json`、`todos.json`、`shares.json`。
 
 ### `POST /api/admin/backups`
 
-立即对四个受管文件做一次快照。
+立即对五个受管文件做一次快照。
 
-- 响应：`{ "ok": true, "count": 4, "backups": { …同 GET… } }`（`count` 是实际创建了几份，
+- 响应：`{ "ok": true, "count": 5, "backups": { …同 GET… } }`（`count` 是实际创建了几份，
   文件不存在时不会创建）
 
 ### `POST /api/admin/backups/restore`
@@ -1250,7 +1279,7 @@ X-ZS-Group: <小组 id>
 - 请求体：`{ "name": "config.json", "id": "20260101-120000-ab12" }`
 - 响应：`{ "ok": true, "name": "config.json", "id": "…" }`
 - 说明：**回滚前会先给当前文件自动快照一份**（`snapshotFileAbs`），所以改错了还能再退回来；
-  `config.json` / `users.json` / `groups.json` / `todos.json` 回滚后会立即重载内存态（无需重启）。
+  `config.json` / `users.json` / `groups.json` / `todos.json` / `shares.json` 回滚后会立即重载内存态（无需重启）。
 - 错误：`400 不支持恢复该文件`（`name` 不在受管列表里）、`400 备份标识无效`（`id` 含路径分隔符或不以 `.json` 结尾）、
   `404 备份不存在`、`400 该备份已损坏，无法恢复`（快照本身不是合法 JSON）
 
@@ -1401,7 +1430,278 @@ X-ZS-Group: <小组 id>
 
 ---
 
-## 8. 任务状态对象
+## 8. 分享链接
+
+分享把**单个文件或文件夹**暴露成一条公开链接 `https://<站点>/s/<token>`（1.2.1 起）。
+涉及三组前缀 —— `/api/shares`（登录用户管理）、`/api/share`（公开访问）、`/api/admin/shares`（超管总览），
+权限边界完全不同：
+
+| 前缀 | 谁在用 | 认证 |
+|:------------------ |:--------------------------------------- |:--------------------------------------- |
+| `/api/shares` | 登录用户创建 / 列出自己创建的 / 取消 | `superadmin` 或 `member`（访客 401） |
+| `/api/share` | 拿到链接的**任何人**（受管理员开关约束） | 默认匿名；`sharePublicAccess = false` 时要求登录 |
+| `/api/admin/shares` | 超管看全站、强制取消 | 仅超级管理员 |
+
+几条贯穿全章的规则：
+
+- **有效期只有 9 档**（见 `GET /api/shares/options`），服务端白名单校验，不认任意秒数；
+- **密码 6~10 位、不能含空格**；路径被设为"对访客隐藏"时**必须**设密码（`precheck.needPassword`）；
+  密码与有效期**创建后不能改**（没有 `PATCH`，只能删了重建）；
+- 密码通过后发一枚 **JWT 票据**（不是 Cookie）：有效期最长 **2 小时**且**绑定该分享的 token**，
+  后续请求用查询参数 `t=` 或请求头 `X-Share-Ticket` 带回；
+- 分享页与下载接口**不使用网盘会话身份**，也不受权限矩阵 / 小组上下文影响
+  （唯一例外：`sharePublicAccess = false` 时会检查调用者是否已登录）；
+- 失效语义：**404** = 不存在或已取消、**410** = 已过期、**403** = 功能被关闭或需要密码、
+  **401** = 该分享被收成"仅登录可访问"而调用者是访客。
+
+### `GET /api/shares/options`
+
+创建对话框要用的档位与规则，避免前后端各维护一份。
+
+- 认证：已登录
+- 响应：
+
+```json
+{
+  "enabled": true,
+  "publicAccess": true,
+  "expiry": [ { "key": "30m", "seconds": 1800 }, { "key": "1h", "seconds": 3600 } ],
+  "password": { "min": 6, "max": 10 }
+}
+```
+
+`expiry` 共 9 档（`30m` / `1h` / `6h` / `12h` / `1d` / `3d` / `7d` / `14d` / `21d`），`key` 是前端
+i18n 键的后缀（`ui.share.expire.<key>`）。
+
+### `GET /api/shares/precheck`
+
+创建前判断"这一项要不要密码"。
+
+- 认证：已登录　限流：是
+- 查询参数：`path`（**必填**，相对网盘根）
+- 响应：
+
+```json
+{
+  "path": "内部资料", "name": "内部资料", "isFolder": true, "size": 10485760, "files": 12,
+  "guestHidden": true, "needPassword": true, "softReadOnly": false
+}
+```
+
+| 字段 | 说明 |
+|:------------- |:--------------------------------------- |
+| `guestHidden` / `needPassword` | 该路径是否"对访客隐藏" —— 为真时创建分享必须带密码 |
+| `size` / `files` | 体积与文件数（目录会递归统计，最多 2 万个条目） |
+| `softReadOnly` | 是否来自 `FILES_SOFT_DIR` 只读映射目录（可以分享，但内容只读） |
+
+- 错误：`400 不能分享网盘根目录`、`403 分享功能已被管理员关闭`、
+  `404 文件或目录不存在`（含"不在自己的可见范围内"——刻意用 404，不泄露存在性）、`429` 限流
+
+### `POST /api/shares`
+
+创建分享。
+
+- 认证：已登录；**只能分享自己有权下载的路径**（文件夹看 `downloadFolder`、文件看 `downloadFile`），
+  且必须位于当前小组 / 默认上下文的可见范围内
+- 请求体：
+
+```json
+{ "path": "资料/报告.pdf", "expireSeconds": 604800, "password": "a1b2c3" }
+```
+
+| 字段 | 必填 | 说明 |
+|:---------------- |:--- |:--------------------------------------- |
+| `path` | 是 | 要分享的文件或文件夹（不能是根目录） |
+| `expireSeconds` | 是 | 必须是 9 档之一：`1800` / `3600` / `21600` / `43200` / `86400` / `259200` / `604800` / `1209600` / `1814400` |
+| `password` | 视情况 | 6~10 位、不含空格；对访客隐藏的路径**必填**，其余可留空 |
+
+- 成功：**201**
+
+```json
+{
+  "id": "shr_m3k2x_9Fq2b", "token": "cQ7…（24 字符）", "name": "报告.pdf", "isFolder": false,
+  "path": "资料/报告.pdf", "createdAt": 1767225600000, "expiresAt": 1767830400000,
+  "requirePassword": true, "url": "/s/cQ7…"
+}
+```
+
+- `url` 是**站内相对路径**，完整链接由前端拼上当前站点地址（`https://<站点>/s/<token>`）；
+- 错误：`400 不能分享网盘根目录`、`400 分享有效期只能从固定档位中选择`、
+  `400 分享密码需为 6~10 位`、`400 分享密码不能包含空格`、
+  `400 该内容对访客不可见，必须设置 6~10 位分享密码`、
+  `403 分享功能已被管理员关闭`、`403 没有权限分享该内容`、`404 文件或目录不存在`、
+  `429 分享数量已达上限（5000），请先清理旧分享`
+
+### `GET /api/shares`
+
+列出**我创建的**分享（创建对话框里的「我创建的分享」）。
+
+- 认证：已登录
+- 响应：
+
+```json
+{
+  "shares": [
+    { "id": "shr_…", "token": "cQ7…", "name": "报告.pdf", "path": "资料/报告.pdf",
+      "isFolder": false, "createdAt": 1767225600000, "expiresAt": 1767830400000,
+      "expired": false, "requirePassword": true, "downloads": 3,
+      "lastAccessAt": 1767226000000, "url": "/s/cQ7…" }
+  ],
+  "publicAccess": true
+}
+```
+
+- 只返回调用者自己创建的；`downloads` 是成功下载次数，`lastAccessAt` 是最近一次访问时间；
+- 过期记录仍在列表里（`expired: true`），方便创建者手动清理。
+
+### `DELETE /api/shares/:id`
+
+取消自己创建的分享（链接**立即**失效）。
+
+- 认证：已登录；成员**只能取消自己创建的**，超管不受此限制（也可用下一节的强制取消）
+- 响应：`{ "ok": true }`
+- 错误：`404 分享不存在`、`403 只能取消自己创建的分享`
+
+### `GET /api/admin/shares`
+
+全站分享总览（「设置 → 分享」）。
+
+- 认证：仅超级管理员
+- 查询参数：
+
+| 参数 | 默认 | 说明 |
+|:-------- |:-------- |:--------------------------------------- |
+| `q` | 空 | 在**名称 / 路径 / 创建者 / token** 里做不区分大小写的包含匹配 |
+| `status` | `all` | `all` / `active`（未过期）/ `expired`（已过期） |
+
+- 响应：
+
+```json
+{
+  "shares": [
+    { "id": "shr_…", "token": "cQ7…", "name": "报告.pdf", "path": "资料/报告.pdf", "isFolder": false,
+      "owner": "alice", "ownerRole": "member", "createdAt": 1767225600000, "expiresAt": 1767830400000,
+      "expired": false, "requirePassword": true, "downloads": 3, "lastAccessAt": 1767226000000,
+      "url": "/s/cQ7…" }
+  ],
+  "total": 1, "active": 1, "expired": 0, "enabled": true, "publicAccess": true
+}
+```
+
+- **包含已过期记录**（管理员仍能看到，直到过期 30 天后被自动清理）；
+- `enabled` / `publicAccess` 就是 `data/config.json` 的两个分享开关。
+
+### `DELETE /api/admin/shares/:id`
+
+超管强制取消任意分享（不需要是创建者）。
+
+- 认证：仅超级管理员
+- 响应：`{ "ok": true }`
+- 错误：`404 分享不存在`
+
+### `GET /api/share/:token`
+
+分享元信息（分享页的第一个请求）。
+
+- 认证：**无**（匿名可访问）；但 `sharePublicAccess = false` 时访客会拿到 401
+- 查询参数：`t`（可选，票据；带密码的分享解锁后才需要）
+- 响应：
+
+```json
+{
+  "token": "cQ7…", "name": "报告.pdf", "isFolder": false, "exists": true,
+  "size": 336890, "files": 1, "dirs": 0, "partial": false,
+  "createdAt": 1767225600000, "expiresAt": 1767830400000, "expired": false,
+  "requirePassword": true, "unlocked": false, "ownerRole": "member",
+  "downloads": 3, "publicAccess": true, "mode": "public"
+}
+```
+
+| 字段 | 说明 |
+|:------------------ |:--------------------------------------- |
+| `unlocked` | 当前请求是否已通过密码（带了有效票据） |
+| `mode` | `public`（匿名可访问）/ `login`（仅登录可访问） |
+| `ownerRole` | **只给角色不给用户名**：分享者名字对匿名访问者也属于敏感信息 |
+| `partial` | 目录统计是否因条目过多而提前结束 |
+
+- 错误：`401 该分享仅限登录用户访问`、`403 分享功能已被管理员关闭`、
+  `404 分享不存在或已被取消`、`410 分享链接已过期`
+
+### `POST /api/share/:token/verify`
+
+用密码换票据。
+
+- 认证：无（同样受上面两个开关约束）
+- 请求体：`{ "password": "a1b2c3" }`（**要带 `X-Requested-With: XMLHttpRequest`**，
+  这是 `/api` 下非 GET 请求的 CSRF 要求）
+- 成功响应：
+
+```json
+{ "ok": true, "ticket": "<JWT>", "expiresAt": 1767232800000 }
+```
+
+- 没设密码的分享直接返回 `{ "ok": true, "ticket": null, "expiresAt": <分享到期时间> }`；
+- 票据有效期**最长 2 小时**，且**绑定当前分享的 token**：换一个分享、或把票据挪用到别的 token 上都会验签失败；
+- 错误：
+
+| 状态 | error | 原因 |
+|:-------- |:--------------------------------------- |:--------------------------------------- |
+| 403 | 分享密码不正确 | 密码不匹配（每次失败都会计数） |
+| 429 | 密码尝试次数过多，请 N 分钟后再试 | 命中下面的限速 |
+| 404 / 410 / 401 / 403 | 同 `GET /api/share/:token` | 不存在 / 已过期 / 需登录 / 功能关闭 |
+
+- 限速按 **IP + 单个分享** 双维度：同一 IP 对同一分享 **15 分钟内错 8 次锁 15 分钟**；
+  同一 IP 对**所有**分享合计 **15 分钟内错 20 次**同样会被锁（防止换 token 刷）。
+
+### `GET /api/share/:token/list`
+
+浏览文件夹分享（**仅文件夹**）。
+
+- 认证：无；带密码的分享需要有效票据（`t=` 或 `X-Share-Ticket`）
+- 查询参数：`path`（**相对分享根**的子路径，默认分享根）、`t`（票据）
+- 响应：
+
+```json
+{
+  "path": "2026",
+  "entries": [
+    { "name": "子目录", "type": "dir", "size": 0, "mtime": 1767225600000 },
+    { "name": "报告.pdf", "type": "file", "size": 102400, "mtime": 1767225600000 }
+  ]
+}
+```
+
+- 目录在前、文件在后，各自按名称排序，单层最多 **2000** 条；
+- **路径永远锁在分享根之内**：`path` 先 `normRel` 挡掉 `..` 与空字节，拼好后还要再过一次边界断言；
+- **无密码分享按"访客视角"过滤**：分享根里那些"对访客隐藏"的子目录不会出现在列表里
+  （否则一条匿名链接就能把隐藏目录翻出来）；有密码的分享视为已验证身份，按完整视角列出；
+- 错误：`400 该分享不是文件夹`、`400 非法路径`、`403 需要分享密码`、
+  `410 分享的内容已被移动或删除`、`404 分享不存在`、`410 分享链接已过期`
+
+### `GET /api/share/:token/download`
+
+下载 / 内联预览分享里的单个文件。
+
+- 认证：无；带密码的分享需要有效票据
+- 查询参数：
+
+| 参数 | 说明 |
+|:-------- |:--------------------------------------------------------------- |
+| `path` | **相对分享根**的文件路径（省略 = 分享的那一个文件） |
+| `inline` | 传 `1` 且扩展名在可内联白名单里时以 `Content-Disposition: inline` 返回（图片 / 视频 / 音频 / PDF / 文本等） |
+| `t` | 票据 |
+
+- 响应：文件流，带 `Content-Type`、`Content-Disposition`、`Cache-Control: no-store`；
+  内联返回 `.html` / `.svg` 时额外带 `Content-Security-Policy: sandbox allow-scripts`，
+  与 `/api/fs/download` 同一条规则 —— 上传内容不会在网盘自身的源里执行脚本；
+- 每次成功下载会把该分享的 `downloads + 1`、`lastAccessAt` 更新为当前时间；
+- 错误：`400 文件夹请进入分享页面浏览下载`、`400 非法路径`、`403 需要分享密码`、
+  `404 文件不存在`、`410 分享链接已过期`
+- **文件夹分享不支持打包下载**：服务端没有对应的 zip 接口，分享页也只能逐个下载。
+
+---
+
+## 9. 任务状态对象
 
 `/api/fs/compress/status`、`/api/fs/extract/status`、`/api/fs/download-url/status` 返回同一结构：
 
@@ -1432,7 +1732,7 @@ X-ZS-Group: <小组 id>
 
 ---
 
-## 9. 调用示例
+## 10. 调用示例
 
 ### PowerShell
 
@@ -1493,20 +1793,23 @@ while True:
 
 ---
 
-## 10. 路径与状态码速查
+## 11. 路径与状态码速查
 
 | 前缀 | 覆盖内容 | 认证要求 |
 |:-------------- |:--------------------------------------------------- |:----------------------------- |
 | `/ping` | 健康检查 | 无 |
 | `/api/meta` | 名称与版本 | 无 |
 | `/api/auth` | 登录、改密、登出、查身份、可切换的小组清单 | 部分 |
-| `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、链接下载 | 按权限点 |
+| `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、**新建空文件**、链接下载 | 按权限点 |
+| `/api/shares` | 登录用户：创建分享、列出自己创建的、取消 | 已登录（超管 / 成员） |
+| `/api/share` | **公开的分享访问**：元信息、验密码换票据、目录浏览、下载 | 默认匿名（可被管理员收成仅登录） |
 | `/api/avatars` | 头像列表、读取、上传、删除 | 已登录（超管 / 成员） |
 | `/api/todos` | 团队待办 | 已登录（超管 / 成员） |
 | `/api/groups` | 组长自助：本组成员与可见范围 | 已登录，且受组长能力约束 |
-| `/api/admin` | 配置、成员、小组、日志（含导出）、指标、备份、**回收站**、状态、隧道 | **仅超级管理员** |
+| `/api/admin` | 配置、成员、小组、日志（含导出）、指标、备份、**回收站**、**全站分享**、状态、隧道 | **仅超级管理员** |
 | `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
 | `/dav`（可配） | **WebDAV（实验性，默认关闭）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话** | 成员账号（Basic） |
+| `/s/<token>` | **分享页**（前端路由，非接口）。不是接口前缀，直接由 SPA 渲染 | 由 `sharePublicAccess` 决定 |
 | 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 未启用时 `/dav*` 返回 404 并提示如何开启，不会被 SPA 接住 | — |
 
 <p align="right"><a href="开发者指南.md">← 开发者指南</a> · <a href="README.md">文档中心 →</a></p>

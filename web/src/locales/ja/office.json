@@ -1,0 +1,21 @@
+{
+  "ui.office.loading": "ドキュメントを解析中…",
+  "ui.office.error.invalid": "文書の構造が壊れているため解析できません",
+  "ui.office.error.encrypted": "この文書は暗号化されているため、オンラインプレビューに対応していません",
+  "ui.office.error.unsupported": "この文書形式のプレビューには対応していません",
+  "ui.office.error.too_large": "文書が大きすぎるため、オンラインプレビューに対応していません",
+  "ui.office.error.empty": "文書の内容が空です",
+  "ui.office.error.network": "ファイルのダウンロードに失敗しました。しばらくしてから再試行してください",
+  "ui.office.error.generic": "プレビューに失敗しました。ダウンロードして確認してください",
+  "ui.office.image_alt": "文書内の画像",
+  "ui.office.docx.page_break": "改ページ",
+  "ui.office.xlsx.sheet_tabs": "ワークシート",
+  "ui.office.xlsx.truncated": "データが多いため、先頭 {rows} 行のみ表示しています",
+  "ui.office.xlsx.empty": "このワークシートには内容がありません",
+  "ui.office.xlsx.formula": "数式：{formula}",
+  "ui.office.pptx.prev": "前のページ",
+  "ui.office.pptx.next": "次のページ",
+  "ui.office.pptx.counter": "{index} / {total} ページ",
+  "ui.office.pptx.slides": "スライド",
+  "ui.office.pptx.empty": "このページに表示できる内容はありません"
+}

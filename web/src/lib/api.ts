@@ -456,3 +456,202 @@ export function logsExportUrl(opts: { format: "jsonl" | "csv"; days?: number; au
   if (opts.q) params.set("q", opts.q)
   return `/api/admin/logs/export?${params.toString()}`
 }
+
+// ------------------------------------------------------------------ 新建 --
+/**
+ * 新建空文件（v1.2.1）。只创建空文件；默认在已存在同名时返回 409。
+ * `unique = true` 时由服务端自动改名（`新建文本文档 (1).txt`），用于"新建文本文档"这类
+ * 反复点击也不该报错的场景。`path` 是所在目录（相对网盘根，根目录传 ""）。
+ */
+export function createEmptyFile(path: string, name: string, content = "", unique = false) {
+  return api.post<{ name: string; path: string }>("/fs/create-file", { path, name, content, unique })
+}
+
+// ------------------------------------------------------------------ 分享 --
+
+export interface ShareExpiryOption {
+  /** i18n 键后缀：`ui.share.expire.<key>` */
+  key: string
+  seconds: number
+}
+
+export interface ShareOptions {
+  enabled: boolean
+  publicAccess: boolean
+  expiry: ShareExpiryOption[]
+  password: { min: number; max: number }
+}
+
+export interface SharePrecheck {
+  path: string
+  name: string
+  isFolder: boolean
+  size: number
+  files: number
+  /** 对访客不可见 → 必须设密码 */
+  guestHidden: boolean
+  needPassword: boolean
+  softReadOnly: boolean
+}
+
+export interface ShareRow {
+  id: string
+  token: string
+  name: string
+  path: string
+  isFolder: boolean
+  createdAt: number
+  expiresAt: number
+  expired: boolean
+  requirePassword: boolean
+  downloads: number
+  lastAccessAt: number | null
+  url: string
+}
+
+export interface AdminShareRow extends ShareRow {
+  owner: string
+  ownerRole: string
+}
+
+export interface AdminSharesResponse {
+  shares: AdminShareRow[]
+  total: number
+  active: number
+  expired: number
+  enabled: boolean
+  publicAccess: boolean
+}
+
+export function fetchShareOptions() {
+  return api.get<ShareOptions>("/shares/options")
+}
+
+export function precheckShare(path: string) {
+  return api.get<SharePrecheck>("/shares/precheck", { path })
+}
+
+export function createShare(body: { path: string; expireSeconds: number; password?: string }) {
+  return api.post<ShareRow>("/shares", body)
+}
+
+export function fetchMyShares() {
+  return api.get<{ shares: ShareRow[]; publicAccess: boolean }>("/shares")
+}
+
+export function deleteShare(id: string) {
+  return api.del<{ ok: boolean }>(`/shares/${encodeURIComponent(id)}`)
+}
+
+export function fetchAllShares(query?: { q?: string; status?: string }) {
+  return api.get<AdminSharesResponse>("/admin/shares", query)
+}
+
+export function adminDeleteShare(id: string) {
+  return api.del<{ ok: boolean }>(`/admin/shares/${encodeURIComponent(id)}`)
+}
+
+// ---------------------------------------------------------- 公开分享访问 --
+/**
+ * 公开分享页用的一组请求。
+ *
+ * 刻意**不走** `request()`：那个函数在 401/403 时会触发 onPermissionDenied
+ * （把当前会话当成失效、跳登录），而分享页的 403 是"需要密码"，属于正常分支。
+ */
+async function publicShareRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`/api/share${path}`, {
+      method,
+      credentials: "same-origin",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch {
+    throw new ApiError(0, translate("ui.common.network_error"))
+  }
+  let data: unknown = null
+  try {
+    data = await res.json()
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok) {
+    const detail = (data && typeof data === "object" ? data : {}) as {
+      error?: string
+      errorKey?: string
+      errorParams?: Record<string, string | number>
+      code?: string
+    }
+    const message = detail.errorKey
+      ? translate(detail.errorKey, detail.errorParams)
+      : detail.error || translate("ui.common.request_failed", { status: res.status })
+    const err = new ApiError(res.status, message) as ApiError & { code?: string }
+    err.code = detail.code
+    throw err
+  }
+  return data as T
+}
+
+export interface PublicShareMeta {
+  token: string
+  name: string
+  isFolder: boolean
+  exists: boolean
+  size: number
+  files: number
+  dirs: number
+  partial: boolean
+  createdAt: number
+  expiresAt: number
+  expired: boolean
+  requirePassword: boolean
+  unlocked: boolean
+  ownerRole: string
+  downloads: number
+  publicAccess: boolean
+  mode: "public" | "login"
+}
+
+export interface PublicShareEntry {
+  name: string
+  type: "file" | "dir"
+  size: number
+  mtime: number
+}
+
+export function fetchPublicShare(token: string) {
+  return publicShareRequest<PublicShareMeta>("GET", `/${encodeURIComponent(token)}`)
+}
+
+export function verifySharePassword(token: string, password: string) {
+  return publicShareRequest<{ ok: boolean; ticket: string | null; expiresAt: number }>(
+    "POST",
+    `/${encodeURIComponent(token)}/verify`,
+    { password }
+  )
+}
+
+export function fetchPublicShareList(token: string, path: string, ticket: string) {
+  const params = new URLSearchParams()
+  if (path) params.set("path", path)
+  if (ticket) params.set("t", ticket)
+  const qs = params.toString()
+  return publicShareRequest<{ path: string; entries: PublicShareEntry[] }>(
+    "GET",
+    `/${encodeURIComponent(token)}/list${qs ? `?${qs}` : ""}`
+  )
+}
+
+/** 分享下载直链（票据走查询参数，<a download> 也能带） */
+export function shareDownloadUrl(token: string, path: string, ticket: string, inline = false) {
+  const params = new URLSearchParams()
+  if (path) params.set("path", path)
+  if (ticket) params.set("t", ticket)
+  if (inline) params.set("inline", "1")
+  return `/api/share/${encodeURIComponent(token)}/download?${params.toString()}`
+}
+

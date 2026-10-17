@@ -1,0 +1,16 @@
+{
+  "api.common.not_found": "介面不存在",
+  "api.common.server_error": "伺服器內部錯誤",
+  "api.auth.login_required": "請先登入",
+  "api.auth.forbidden": "沒有權限執行此操作",
+  "api.auth.csrf_failed": "請求驗證失敗",
+  "api.i18n.unknown_lang": "沒有這個語言檔案",
+  "api.admin.default_lang_invalid": "defaultLang 必須是目前可用的語言代碼",
+  "api.fs.version_conflict": "這個檔案在您開啟之後已被其他人修改。為避免覆蓋對方的改動，本次儲存未執行。請重新開啟（或重新整理頁面）檢視最新內容後再決定怎麼合併。",
+  "ui.api.upload_failed": "上傳失敗 ({status})",
+  "ui.api.upload_network_error": "網路錯誤，上傳中斷",
+  "ui.api.upload_cancelled": "已取消上傳",
+  "ui.api.download_failed": "下載失敗 ({status})",
+  "ui.api.avatar_fetch_failed": "頭像取得失敗 ({status})",
+  "ui.api.avatar_upload_failed": "頭像上傳失敗 ({status})"
+}

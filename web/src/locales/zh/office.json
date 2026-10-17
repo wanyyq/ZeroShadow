@@ -1,0 +1,21 @@
+{
+  "ui.office.loading": "正在解析文档…",
+  "ui.office.error.invalid": "文档结构损坏，无法解析",
+  "ui.office.error.encrypted": "该文档已加密，暂不支持在线预览",
+  "ui.office.error.unsupported": "暂不支持该文档格式的预览",
+  "ui.office.error.too_large": "文档过大，暂不支持在线预览",
+  "ui.office.error.empty": "文档内容为空",
+  "ui.office.error.network": "文件下载失败，请稍后重试",
+  "ui.office.error.generic": "预览失败，请下载后查看",
+  "ui.office.image_alt": "文档图片",
+  "ui.office.docx.page_break": "分页",
+  "ui.office.xlsx.sheet_tabs": "工作表",
+  "ui.office.xlsx.truncated": "数据较多，仅显示前 {rows} 行",
+  "ui.office.xlsx.empty": "此工作表没有内容",
+  "ui.office.xlsx.formula": "公式：{formula}",
+  "ui.office.pptx.prev": "上一页",
+  "ui.office.pptx.next": "下一页",
+  "ui.office.pptx.counter": "第 {index} / {total} 页",
+  "ui.office.pptx.slides": "幻灯片",
+  "ui.office.pptx.empty": "此页没有可显示的内容"
+}

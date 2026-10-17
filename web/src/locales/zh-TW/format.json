@@ -1,0 +1,21 @@
+{
+  "ui.format.uptime_days_hours": "{days} 天 {hours} 小時",
+  "ui.format.uptime_hours_minutes": "{hours} 小時 {minutes} 分鐘",
+  "ui.format.uptime_minutes_seconds": "{minutes} 分鐘 {seconds} 秒",
+  "ui.format.kind.image": "圖片",
+  "ui.format.kind.video": "影片",
+  "ui.format.kind.audio": "音訊",
+  "ui.format.kind.archive": "壓縮檔",
+  "ui.format.kind.pdf": "PDF",
+  "ui.format.kind.document": "文件",
+  "ui.format.kind.spreadsheet": "試算表",
+  "ui.format.kind.presentation": "簡報",
+  "ui.format.kind.text": "文字",
+  "ui.format.kind.code": "程式碼",
+  "ui.format.kind.script": "指令碼",
+  "ui.format.kind.config": "設定檔",
+  "ui.format.kind.app": "程式",
+  "ui.format.kind.disc": "映像檔",
+  "ui.format.kind.shortcut": "捷徑",
+  "ui.format.kind.folder_readonly": "外部資料夾（唯讀）"
+}

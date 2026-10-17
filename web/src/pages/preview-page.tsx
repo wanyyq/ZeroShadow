@@ -5,11 +5,21 @@ import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/icon"
 import { downloadUrl, triggerDownload } from "@/lib/api"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { previewType } from "@/lib/format"
+import { officePreviewKind, parentOf, previewType } from "@/lib/format"
 import { isMarkdown, renderMarkdown } from "@/lib/markdown"
 import { translate, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/state/auth"
+
+/**
+ * Office 文档（OOXML 容器）走独立的懒加载预览器。
+ * 这里只做扩展名判断 —— 真正的解析器在 `components/preview/office-preview.tsx`
+ * 里动态 import，不会进主 chunk。`.doc/.xls/.ppt` 是二进制老格式，不在此列。
+ *
+ * 扩展名清单统一放在 `lib/format.ts`（`officePreviewKind`），
+ * 文件列表的"能不能双击预览"用的是同一个函数，两边不会漂移。
+ */
+const OfficePreview = React.lazy(() => import("@/components/preview/office-preview"))
 
 /**
  * 复制纯文本并给反馈。
@@ -38,10 +48,12 @@ export default function PreviewPage() {
   // 只认 format.ts 的 previewType：未知扩展名（docx / zip / exe …）返回 null，
   // 绝不能当文本抓取 —— 二进制会被渲染成一大片乱码，还没有任何兜底提示。
   const previewKind = previewType(name)
-  const supported = !!entryPath && previewKind !== null
+  // Office 文档是二进制 ZIP：绝不能被当成文本抓取（会渲染成一大片乱码）
+  const officeKind = officePreviewKind(name)
+  const supported = !!entryPath && (previewKind !== null || officeKind !== null)
   // html/htm 在 previewType 里就是 "text"：正常走 /html-preview 专用路由；
   // 若因权限被路由到这里，按文本预览（否则没有分支匹配会得到空白页）
-  const kind: string = previewKind ?? "text"
+  const kind: string = officeKind ? "office" : previewKind ?? "text"
   const url = supported ? downloadUrl(entryPath, true) : ""
   const [text, setText] = React.useState<string | null>(null)
   // Markdown 文件默认渲染，可切回源码；其余文本文件只有源码视图
@@ -57,8 +69,14 @@ export default function PreviewPage() {
 
   const displayScale = scale || fitScale
 
-  // 渲染结果只跟正文有关，切换视图/缩放时不必重算
-  const html = React.useMemo(() => (markdown && text ? renderMarkdown(text) : ""), [markdown, text])
+  // 渲染结果只跟正文有关，切换视图/缩放时不必重算。
+  // baseDir 必须传：.md 里的相对图片 / 链接要按「该文件所在目录」解析，
+  // 否则 `![](./a.png)` 会被浏览器当站点根相对地址 → 404（图片、链接全打不开）。
+  const baseDir = React.useMemo(() => parentOf(entryPath), [entryPath])
+  const html = React.useMemo(
+    () => (markdown && text ? renderMarkdown(text, { baseDir }) : ""),
+    [markdown, text, baseDir]
+  )
   // 渲染器把原始 HTML 当纯文本（安全前提），命中时给个提示，免得用户以为是渲染坏了
   const rawHtml = React.useMemo(
     () => markdown && !!text && /<(?:[a-z!/][^>]*)>/i.test(text),
@@ -235,6 +253,18 @@ export default function PreviewPage() {
         )}
         {kind === "pdf" && (
           <iframe src={url} title={name} className="h-full w-full" />
+        )}
+        {kind === "office" && officeKind && (
+          // Suspense 只负责「解析器 chunk 还没下载完」这一段，解析本身在组件内部有 loading 态
+          <React.Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
+                {t("ui.common.loading")}
+              </div>
+            }
+          >
+            <OfficePreview url={url} name={name} kind={officeKind} />
+          </React.Suspense>
         )}
         {!supported && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">

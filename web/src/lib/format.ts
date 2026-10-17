@@ -166,6 +166,44 @@ export function previewType(name: string): "image" | "video" | "audio" | "pdf" |
   return "text"
 }
 
+/**
+ * Office（OOXML）预览种类。
+ *
+ * 注意：这里**刻意只维护一份小扩展名表**，不从 `lib/office/` 里 import ——
+ * 那个模块会连带把 docx/xlsx/pptx 解析器（约 19KB）拖进主 chunk，
+ * 而本文件是首屏路径（文件列表要用）。一份 Map 的重复远比首屏变胖划算。
+ * `.doc/.xls/.ppt` 是 OLE2 二进制老格式，不在此列（不预览，明确提示另存）。
+ */
+const OFFICE_PREVIEW: Record<string, "docx" | "xlsx" | "pptx"> = {
+  docx: "docx",
+  docm: "docx",
+  dotx: "docx",
+  dotm: "docx",
+  xlsx: "xlsx",
+  xlsm: "xlsx",
+  xltx: "xlsx",
+  xltm: "xlsx",
+  pptx: "pptx",
+  pptm: "pptx",
+  potx: "pptx",
+  potm: "pptx",
+}
+
+export function officePreviewKind(name: string): "docx" | "xlsx" | "pptx" | null {
+  return OFFICE_PREVIEW[ext(name)] ?? null
+}
+
+/**
+ * 这个文件能否进预览页。
+ *
+ * 必须用它（而不是只判 `previewType`）来决定"双击 / 右键预览"走向：
+ * 旧代码只认 previewType，于是 `.docx/.xlsx/.pptx` 返回 null →
+ * 双击直接触发下载，Office 预览页根本走不到（v1.2.1 的真实缺陷）。
+ */
+export function canPreview(name: string): boolean {
+  return previewType(name) !== null || officePreviewKind(name) !== null
+}
+
 export function parentOf(path: string): string {
   const i = path.lastIndexOf("/")
   return i > 0 ? path.slice(0, i) : ""

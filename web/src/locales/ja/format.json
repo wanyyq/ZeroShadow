@@ -1,0 +1,21 @@
+{
+  "ui.format.uptime_days_hours": "{days} 日 {hours} 時間",
+  "ui.format.uptime_hours_minutes": "{hours} 時間 {minutes} 分",
+  "ui.format.uptime_minutes_seconds": "{minutes} 分 {seconds} 秒",
+  "ui.format.kind.image": "画像",
+  "ui.format.kind.video": "動画",
+  "ui.format.kind.audio": "音声",
+  "ui.format.kind.archive": "圧縮ファイル",
+  "ui.format.kind.pdf": "PDF",
+  "ui.format.kind.document": "文書",
+  "ui.format.kind.spreadsheet": "表計算",
+  "ui.format.kind.presentation": "プレゼンテーション",
+  "ui.format.kind.text": "テキスト",
+  "ui.format.kind.code": "コード",
+  "ui.format.kind.script": "スクリプト",
+  "ui.format.kind.config": "設定",
+  "ui.format.kind.app": "プログラム",
+  "ui.format.kind.disc": "イメージ",
+  "ui.format.kind.shortcut": "ショートカット",
+  "ui.format.kind.folder_readonly": "外部フォルダー（読み取り専用）"
+}

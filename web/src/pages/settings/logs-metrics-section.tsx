@@ -130,16 +130,16 @@ export function LogsMetricsSection() {
             <Metric label="5xx" value={req ? String(req.lastMinute.s5) : "—"} />
             <Metric label={t("ui.settings.logs.slow_requests")} value={req ? String(req.lastMinute.slow) : "—"} />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="mb-2 text-xs text-muted-foreground">{t("ui.settings.logs.slow_requests_recent", { n: req?.slow.length ?? 0 })}</p>
-            <ScrollArea className="h-40 rounded-md border border-border">
+            <ScrollArea className="h-40 min-w-0 rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-16">{t("ui.settings.logs.col_method")}</TableHead>
+                    <TableHead className="w-14 sm:w-16">{t("ui.settings.logs.col_method")}</TableHead>
                     <TableHead>{t("ui.common.path")}</TableHead>
-                    <TableHead className="w-16">{t("ui.common.status")}</TableHead>
-                    <TableHead className="w-20">{t("ui.settings.logs.col_duration")}</TableHead>
+                    <TableHead className="w-12 sm:w-16">{t("ui.common.status")}</TableHead>
+                    <TableHead className="w-16 sm:w-20">{t("ui.settings.logs.col_duration")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -206,14 +206,14 @@ export function LogsMetricsSection() {
             <Input placeholder={t("ui.settings.logs.search_placeholder")} className="h-8 w-48 text-sm" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadLogs()} />
             <Button size="sm" variant="ghost" onClick={loadLogs}><Icon name="refresh-cw" /> {t("ui.common.refresh")}</Button>
           </div>
-          <ScrollArea className="h-96 rounded-md border border-border">
+          <ScrollArea className="h-96 min-w-0 rounded-md border border-border">
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-40">{t("ui.common.time")}</TableHead>
-                  <TableHead className="w-28">{t("ui.settings.logs.col_event")}</TableHead>
-                  <TableHead className="w-24">{t("ui.settings.logs.col_user")}</TableHead>
-                  <TableHead className="w-32">IP</TableHead>
+                  <TableHead className="w-24 sm:w-40">{t("ui.common.time")}</TableHead>
+                  <TableHead className="w-24 sm:w-28">{t("ui.settings.logs.col_event")}</TableHead>
+                  <TableHead className="hidden w-24 sm:table-cell">{t("ui.settings.logs.col_user")}</TableHead>
+                  <TableHead className="hidden w-32 md:table-cell">IP</TableHead>
                   <TableHead>{t("ui.settings.logs.col_detail")}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -226,8 +226,8 @@ export function LogsMetricsSection() {
                       {row.audit && <Icon name="shield" className="mr-1 inline size-3 text-muted-foreground" />}
                       {row.ev}
                     </TableCell>
-                    <TableCell className="truncate text-xs" title={row.user || undefined}>{row.user || "-"}</TableCell>
-                    <TableCell className="truncate font-mono text-xs" title={row.ip || undefined}>{row.ip || "-"}</TableCell>
+                    <TableCell className="hidden truncate text-xs sm:table-cell" title={row.user || undefined}>{row.user || "-"}</TableCell>
+                    <TableCell className="hidden truncate font-mono text-xs md:table-cell" title={row.ip || undefined}>{row.ip || "-"}</TableCell>
                     <TableCell className="truncate text-xs" title={row.msg}>{row.msg || "-"}</TableCell>
                   </TableRow>
                 ))}

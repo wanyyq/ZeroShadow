@@ -36,6 +36,11 @@ const DEFAULTS = {
   metricsMemMinutes: 15,
   requestMetricsEnabled: true,
   slowRequestMs: 1000,
+  // ===== 分享链接（v1.2.1）=====
+  /** 分享总开关：关掉后既有链接一律 403，也不能新建 */
+  shareEnabled: true,
+  /** 匿名可访问；设为 false 则分享链接必须登录网盘账号才能打开 */
+  sharePublicAccess: true,
   // ===== 界面语言 =====
   /** 站点默认界面语言；用户在自己浏览器里选过的语言会覆盖它 */
   defaultLang: "zh",

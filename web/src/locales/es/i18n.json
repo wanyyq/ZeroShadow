@@ -1,0 +1,11 @@
+{
+  "ui.i18n.language": "Idioma de la interfaz",
+  "ui.i18n.language_hint": "Se aplica al instante y solo afecta a este navegador; el idioma predeterminado del sitio es «{name}»",
+  "ui.i18n.custom_tag": "Desde data/lang",
+  "ui.i18n.follow_default": "Seguir el del sitio",
+  "ui.i18n.export_template": "Exportar plantilla",
+  "ui.i18n.export_template_hint": "Exporta todas las claves (con el texto en chino como valor). Traduce los valores, añade una _meta.name y colócalo en data/lang/ del servidor para añadir un idioma",
+  "ui.i18n.exported": "Plantilla exportada",
+  "ui.i18n.loading": "Cargando el archivo de idioma…",
+  "ui.i18n.template_name_placeholder": "(cambia esto al nombre de este idioma)"
+}

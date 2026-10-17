@@ -1,0 +1,48 @@
+{
+  "ui.preview.source_code": "Código",
+  "ui.preview.unsupported_format": "Este formato aún no se puede previsualizar",
+  "ui.preview.raw_html_notice": "El archivo contiene etiquetas HTML sin procesar; por seguridad se muestra como texto plano. Cambia a «Código» para ver el original.",
+  "ui.preview.download_original": "Descargar original",
+  "ui.preview.link_copied": "Enlace copiado",
+
+  "ui.shortcut.type_dir": "Carpeta",
+  "ui.shortcut.type_soft_dir": "Carpeta externa asignada",
+  "ui.shortcut.type_soft_file": "Archivo externo asignado",
+  "ui.shortcut.default_name": "Acceso directo a {name}",
+  "ui.shortcut.name_target_required": "El nombre y el destino no pueden estar vacíos",
+  "ui.shortcut.saved_old_not_deleted": "Acceso directo guardado, pero no se pudo eliminar el archivo anterior con el mismo nombre",
+  "ui.shortcut.updated": "Acceso directo actualizado",
+  "ui.shortcut.created": "Acceso directo creado",
+  "ui.shortcut.name_label": "Nombre visible",
+  "ui.shortcut.name_placeholder": "Nombre visible del acceso directo",
+  "ui.shortcut.target_path_label": "Ruta de destino",
+  "ui.shortcut.target_placeholder": "Ruta relativa o ruta asignada externa",
+  "ui.shortcut.target_type_label": "Tipo de destino",
+  "ui.shortcut.icon_label": "Icono",
+  "ui.shortcut.create": "Crear",
+
+  "ui.dest_picker.copy_here": "Copiar aquí",
+  "ui.dest_picker.move_here": "Mover aquí",
+
+  "ui.picker.parent": "Subir un nivel",
+  "ui.picker.no_subfolders": "No hay subcarpetas",
+
+  "ui.path_picker.title": "Elegir carpeta",
+  "ui.path_picker.pick": "Elegir esta carpeta",
+
+  "ui.conflict.title": "Archivos con el mismo nombre",
+  "ui.conflict.description": "En el destino ya existen {count} elementos con el mismo nombre; elige cómo tratarlos:",
+  "ui.conflict.rename_to": "Renombrar a {name}",
+  "ui.conflict.skip": "Omitir",
+  "ui.conflict.overwrite": "Sobrescribir",
+  "ui.conflict.merge": "Combinar",
+  "ui.conflict.apply_to_all": "Aplicar a todos los siguientes elementos con el mismo nombre",
+
+  "ui.ops.processing_n": "Procesando {n} elementos",
+  "ui.ops.done": "Proceso completado",
+
+  "ui.upload.uploading_n": "Subiendo {n} elementos",
+  "ui.upload.done": "Subida completada",
+
+  "ui.progress.clear_finished": "Quitar completados"
+}

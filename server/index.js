@@ -26,6 +26,9 @@ import todoRoutes from "./src/routes/todos.js"
 import groupRoutes from "./src/routes/groups.js"
 import i18nRoutes from "./src/routes/i18n.js"
 import { customLangCodes, ensureLangDir } from "./src/i18n.js"
+import { flushShareStats, pruneShares, reloadShares } from "./src/shares.js"
+import { createStaticCompressor } from "./src/compress.js"
+import { adminShareRouter, manageShareRouter, publicShareRouter } from "./src/routes/shares.js"
 
 // 启动自检：隔离损坏的 JSON、清理 tmp 残留，然后重载内存态
 const integrity = runIntegrityCheck()
@@ -33,10 +36,13 @@ reloadConfig()
 reloadUsers()
 reloadGroups()
 reloadTodos()
+reloadShares()
 const avatarInit = initAvatars()
 // 界面语言目录（data/lang）：首次运行时建目录并写入格式说明
 ensureLangDir()
 runDailySnapshot()
+// 分享记录：过期 30 天以上的物理清理（失败不影响启动）
+pruneShares().catch(() => {})
 
 const app = express()
 app.disable("x-powered-by")
@@ -92,11 +98,17 @@ app.use(attachContext)
 app.use("/api", csrfGuard)
 
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "ZeroShadow", version: "1.2.0" })
+  res.json({ name: "ZeroShadow", version: "1.2.1" })
 })
 
 app.use("/api/auth", authRoutes)
 app.use("/api/fs", fsRoutes)
+// 分享：公开访问（/api/share）与登录用户管理（/api/shares）分开挂载，
+// 管理员总览（/api/admin/shares）必须放在 /api/admin 之前，否则会被超管守卫拦下后
+// 落进 adminRoutes 的 404 分支（Router 里没有匹配的路由并不会自动继续往下找）。
+app.use("/api/share", publicShareRouter)
+app.use("/api/shares", manageShareRouter)
+app.use("/api/admin/shares", adminShareRouter)
 app.use("/api/admin", adminRoutes)
 app.use("/api/avatars", avatarRoutes)
 app.use("/api/todos", todoRoutes)
@@ -153,6 +165,10 @@ if (fs.existsSync(WEB_DIST)) {
       .type("text/plain; charset=utf-8")
       .send("兼容模式页面尚未生成：请先运行 pnpm build（会把 web/public/robustness/ 复制到 web/dist/），然后重启服务。")
   })
+
+  // 文本资源压缩（gzip / brotli）：必须挂在 express.static 之前。
+  // 只接管"能压缩的静态文件"，其余请求 next() 交回静态托管，既有行为不变。
+  app.use(createStaticCompressor(WEB_DIST))
 
   app.use(
     express.static(WEB_DIST, {
@@ -239,6 +255,7 @@ const server = app.listen(env.port, env.host, () => {
   const maintenance = setInterval(() => {
     sweepLogs().catch(() => {})
     sweepTrash().catch(() => {})
+    pruneShares().catch(() => {})
     runDailySnapshot()
   }, 6 * 60 * 60 * 1000)
   maintenance.unref?.()
@@ -309,6 +326,8 @@ process.on("uncaughtException", (err) => {
 function shutdown() {
   stopTunnel()
   stopMetrics()
+  // 分享访问统计是节流落盘的：退出前补一次，避免最后几十秒的计数丢失
+  void flushShareStats()
   server.close(() => process.exit(0))
   setTimeout(() => process.exit(0), 3000).unref()
 }

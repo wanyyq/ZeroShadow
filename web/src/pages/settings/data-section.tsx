@@ -252,23 +252,23 @@ export function DataSection() {
             <Button size="sm" onClick={() => patch({ backupKeep: Number(backupKeep) }, t("ui.settings.data.backup_keep_updated"))}>{t("ui.common.save")}</Button>
           </div>
           <Separator />
-          <ScrollArea className="h-72 rounded-md border border-border">
+          <ScrollArea className="h-72 min-w-0 rounded-md border border-border">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>{t("ui.common.file")}</TableHead>
-                  <TableHead className="w-40">{t("ui.common.time")}</TableHead>
-                  <TableHead className="w-20">{t("ui.common.size")}</TableHead>
-                  <TableHead className="w-20 text-right">{t("ui.common.actions")}</TableHead>
+                  <TableHead className="w-28 sm:w-40">{t("ui.common.time")}</TableHead>
+                  <TableHead className="hidden w-20 sm:table-cell">{t("ui.common.size")}</TableHead>
+                  <TableHead className="w-16 text-right sm:w-20">{t("ui.common.actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {Object.entries(backups).flatMap(([name, rows]) =>
                   rows.map((row) => (
                     <TableRow key={`${name}-${row.id}`}>
-                      <TableCell className="text-xs">{fileLabel(name)}</TableCell>
-                      <TableCell className="font-mono text-xs">{new Date(row.mtime).toLocaleString(currentLang())}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatBytes(row.size)}</TableCell>
+                      <TableCell className="max-w-32 truncate text-xs sm:max-w-none">{fileLabel(name)}</TableCell>
+                      <TableCell className="truncate font-mono text-xs">{new Date(row.mtime).toLocaleString(currentLang())}</TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">{formatBytes(row.size)}</TableCell>
                       <TableCell className="text-right">
                         <Button size="xs" variant="ghost" onClick={() => setRestoreTarget({ name, id: row.id })}>{t("ui.settings.data.restore")}</Button>
                       </TableCell>

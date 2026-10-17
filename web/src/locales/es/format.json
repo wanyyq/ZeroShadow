@@ -1,0 +1,21 @@
+{
+  "ui.format.uptime_days_hours": "{days} d {hours} h",
+  "ui.format.uptime_hours_minutes": "{hours} h {minutes} min",
+  "ui.format.uptime_minutes_seconds": "{minutes} min {seconds} s",
+  "ui.format.kind.image": "Imagen",
+  "ui.format.kind.video": "Vídeo",
+  "ui.format.kind.audio": "Audio",
+  "ui.format.kind.archive": "Comprimido",
+  "ui.format.kind.pdf": "PDF",
+  "ui.format.kind.document": "Documento",
+  "ui.format.kind.spreadsheet": "Hoja de cálculo",
+  "ui.format.kind.presentation": "Presentación",
+  "ui.format.kind.text": "Texto",
+  "ui.format.kind.code": "Código",
+  "ui.format.kind.script": "Script",
+  "ui.format.kind.config": "Configuración",
+  "ui.format.kind.app": "Programa",
+  "ui.format.kind.disc": "Imagen de disco",
+  "ui.format.kind.shortcut": "Acceso directo",
+  "ui.format.kind.folder_readonly": "Carpeta externa (solo lectura)"
+}

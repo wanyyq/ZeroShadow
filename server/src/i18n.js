@@ -35,7 +35,14 @@ import { warn } from "./logger.js"
 /** 内置语言：随前端产物一起发布，data/lang 里同名文件不会覆盖它们 */
 export const BUILTIN_LANGS = [
   { code: "zh", name: "简体中文", builtin: true },
+  { code: "zh-TW", name: "繁體中文（台灣）", builtin: true },
+  { code: "zh-HK", name: "繁體中文（香港）", builtin: true },
+  // zh-MO 与 zh-HK 共用同一份译文（构建期派生，见 web/vite.config.ts 的 LOCALE_ALIASES）
+  { code: "zh-MO", name: "繁體中文（澳門）", builtin: true },
   { code: "en", name: "English", builtin: true },
+  { code: "ja", name: "日本語", builtin: true },
+  { code: "es", name: "Español", builtin: true },
+  { code: "fr", name: "Français", builtin: true },
 ]
 
 const CODE_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/

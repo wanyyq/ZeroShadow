@@ -254,19 +254,19 @@ export function AboutPage() {
               {[[t("ui.about.group_backend"), backend], [t("ui.about.group_frontend"), frontend]].map(([title, list]) => (
                 <div key={title as string} className="flex flex-col gap-2">
                   <h3 className="text-sm font-medium">{title as string}</h3>
-                  <div className="overflow-hidden rounded-lg border border-border">
+                  <div className="min-w-0 overflow-hidden rounded-lg border border-border">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>{t("ui.about.table_component")}</TableHead>
-                          <TableHead className="w-28">{t("ui.about.table_version")}</TableHead>
-                          <TableHead className="w-36">{t("ui.about.license")}</TableHead>
+                          <TableHead className="w-20 sm:w-28">{t("ui.about.table_version")}</TableHead>
+                          <TableHead className="hidden w-36 sm:table-cell">{t("ui.about.license")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {(list as typeof DEPENDENCIES).map((d) => (
                           <TableRow key={`${d.scope}-${d.name}`}>
-                            <TableCell className="font-mono text-xs">
+                            <TableCell className="max-w-40 truncate font-mono text-xs sm:max-w-none">
                               {d.name}
                               {d.unused && (
                                 <Badge variant="outline" className="ml-2 text-[10px] text-muted-foreground">
@@ -275,7 +275,7 @@ export function AboutPage() {
                               )}
                             </TableCell>
                             <TableCell className="text-xs text-muted-foreground">{d.version}</TableCell>
-                            <TableCell>
+                            <TableCell className="hidden sm:table-cell">
                               <Badge variant={d.license === "MIT" ? "secondary" : "outline"} className="text-[10px]">
                                 {d.license}
                               </Badge>

@@ -51,6 +51,9 @@ logs/
 # ---- 临时备份（统一 .env/data 时产生，可随时删除）----
 .migration-backup/
 
+# ---- 语言目录里的临时脚本（只应存在 *.json；下划线开头的脚本可随时删除）----
+web/src/locales/*/_*.js
+
 # ---- 编辑器与操作系统 ----
 .vs/
 .vscode/

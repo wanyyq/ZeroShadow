@@ -23,6 +23,7 @@ import { deleteAvatar, ownerForUser } from "../avatars.js"
 import { listBackups, restoreBackup, snapshotAll } from "../backup.js"
 import { emptyTrash, getTrash, listTrash, purgeTrash, restoreTrash, trashAvailable, trashStats } from "../trash.js"
 import { getMetrics, readMetricsHistory } from "../metrics.js"
+import { reloadShares } from "../shares.js"
 
 const router = Router()
 
@@ -63,6 +64,9 @@ const BOOLEAN_KEYS = [
   "backupEnabled",
   "trashEnabled",
   "requestMetricsEnabled",
+  // v1.2.1 分享（分享板块里的两个开关）
+  "shareEnabled",
+  "sharePublicAccess",
 ]
 
 function cleanVisibilityPathList(value) {
@@ -402,6 +406,7 @@ const RESTORE_RELOAD = {
   "users.json": reloadUsers,
   "groups.json": reloadGroups,
   "todos.json": reloadTodos,
+  "shares.json": reloadShares,
 }
 
 router.post("/backups/restore", async (req, res, next) => {

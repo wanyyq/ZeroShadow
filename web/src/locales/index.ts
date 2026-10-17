@@ -55,7 +55,13 @@ export const BUILTIN: Record<string, Dict> = {
 /** 内置语言清单（服务端 /api/i18n 会在它之上追加 data/lang 里的语言） */
 export const BUILTIN_META: LangMeta[] = [
   { code: "zh", name: "简体中文", builtin: true },
+  { code: "zh-TW", name: "繁體中文（台灣）", builtin: true },
+  { code: "zh-HK", name: "繁體中文（香港）", builtin: true },
+  { code: "zh-MO", name: "繁體中文（澳門）", builtin: true },
   { code: "en", name: "English", builtin: true },
+  { code: "ja", name: "日本語", builtin: true },
+  { code: "es", name: "Español", builtin: true },
+  { code: "fr", name: "Français", builtin: true },
 ]
 
 export function isBuiltinLang(code: string): boolean {

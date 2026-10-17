@@ -1,0 +1,21 @@
+{
+  "ui.office.loading": "Analyse du document…",
+  "ui.office.error.invalid": "Structure du document endommagée, analyse impossible",
+  "ui.office.error.encrypted": "Ce document est chiffré, aperçu en ligne non disponible",
+  "ui.office.error.unsupported": "Aperçu non disponible pour ce type de document",
+  "ui.office.error.too_large": "Document trop volumineux pour un aperçu en ligne",
+  "ui.office.error.empty": "Le document est vide",
+  "ui.office.error.network": "Échec du téléchargement du fichier, réessayez plus tard",
+  "ui.office.error.generic": "Échec de l'aperçu, téléchargez le fichier pour le consulter",
+  "ui.office.image_alt": "Image du document",
+  "ui.office.docx.page_break": "Saut de page",
+  "ui.office.xlsx.sheet_tabs": "Feuilles",
+  "ui.office.xlsx.truncated": "Feuille volumineuse : seules les {rows} premières lignes sont affichées",
+  "ui.office.xlsx.empty": "Cette feuille est vide",
+  "ui.office.xlsx.formula": "Formule : {formula}",
+  "ui.office.pptx.prev": "Diapositive précédente",
+  "ui.office.pptx.next": "Diapositive suivante",
+  "ui.office.pptx.counter": "Diapositive {index} / {total}",
+  "ui.office.pptx.slides": "Diapositives",
+  "ui.office.pptx.empty": "Cette diapositive n'a rien à afficher"
+}

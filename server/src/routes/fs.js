@@ -527,6 +527,54 @@ router.post("/mkdir", requirePerm("mkdir"), async (req, res, next) => {
 // 且只发一次 filesLimit 事件，因此前端必须按这个值分片，否则文件会静默丢失。
 const MAX_FILES_PER_REQUEST = 100
 
+/**
+ * 新建空文件（v1.2.1）。
+ *
+ * 用于右键「新建 → 新建文本文档 / 新建自定义后缀文件」：只创建**空文件**，
+ * 内容一律为空（要写字就走在线编辑器）。刻意不提供"覆盖"语义：
+ * 已存在同名时返回 409，让前端提示换名字，避免误删别人的文件。
+ *
+ * 权限沿用上传（`upload`）：能够新增内容的角色才应该能新增文件。
+ */
+const CREATE_FILE_MAX_BYTES = 1024 * 1024
+
+router.post("/create-file", requirePerm("upload"), async (req, res, next) => {
+  try {
+    const { abs, rel } = resolveSafe(req.body?.path)
+    blockSoft(rel)
+    assertContextVisible(req, rel)
+    await assertDir(abs)
+    const name = String(req.body?.name || "").trim()
+    const invalid = validateName(name)
+    if (invalid) throw httpError(400, invalid, { errorKey: nameErrorKey(invalid) })
+    const content = typeof req.body?.content === "string" ? req.body.content : ""
+    if (Buffer.byteLength(content, "utf8") > CREATE_FILE_MAX_BYTES) {
+      throw httpError(413, "初始内容过大", { errorKey: "api.fs.create_file_too_large" })
+    }
+    // unique=true：自动改名（新建文本文档 (1).txt），反复点击不报错；
+    // 否则同名一律 409，避免"再点一次就把别人的文件清空"这种事。
+    const unique = req.body?.unique === true
+    const finalName = unique ? await uniqueName(abs, name) : name
+    const target = path.join(abs, finalName)
+    // 先用 lstat 判断，既给出友好提示，也避免 "wx" 的 EEXIST 被当成 500
+    if (!unique && (await statSafe(target))) {
+      throw httpError(409, "同名文件已存在", { errorKey: "api.fs.create_file_exists" })
+    }
+    try {
+      await fs.promises.writeFile(target, content, { encoding: "utf8", flag: "wx" })
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        throw httpError(409, "同名文件已存在", { errorKey: "api.fs.create_file_exists" })
+      }
+      throw err
+    }
+    info("create_file", { msg: joinRel(rel, finalName), ...actor(req) })
+    res.status(201).json({ name: finalName, path: joinRel(rel, finalName) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 router.post("/upload", requirePerm("upload"), async (req, res, next) => {
   let destAbs
   let destRel
