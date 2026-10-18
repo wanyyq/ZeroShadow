@@ -158,6 +158,11 @@ export interface Entry {
   hiddenFromGuest?: boolean
   softReadOnly?: boolean
   shortcut?: ShortcutInfo
+  /**
+   * 完整路径（相对网盘根）。普通目录列表里不需要，按「当前目录 + name」推导即可；
+   * 搜索结果来自不同目录，必须带上它，否则右键 / 下载 / 重命名都会作用到错误路径。
+   */
+  fullPath?: string
 }
 
 export interface SearchResult {

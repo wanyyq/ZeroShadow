@@ -44,5 +44,12 @@
   "ui.upload.uploading_n": "正在上傳 {n} 項",
   "ui.upload.done": "上傳完成",
 
+  "ui.tasks.title": "檔案任務",
+  "ui.tasks.empty": "尚無檔案任務",
+  "ui.tasks.upload": "上傳",
+  "ui.tasks.compress": "壓縮",
+  "ui.tasks.extract": "解壓",
+  "ui.tasks.download": "連結下載",
+
   "ui.progress.clear_finished": "清除已完成"
 }

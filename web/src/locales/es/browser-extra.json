@@ -44,5 +44,12 @@
   "ui.upload.uploading_n": "Subiendo {n} elementos",
   "ui.upload.done": "Subida completada",
 
+  "ui.tasks.title": "Tareas de archivos",
+  "ui.tasks.empty": "No hay tareas de archivos",
+  "ui.tasks.upload": "Subidas",
+  "ui.tasks.compress": "Compresión",
+  "ui.tasks.extract": "Extracción",
+  "ui.tasks.download": "Descargas por enlace",
+
   "ui.progress.clear_finished": "Quitar completados"
 }

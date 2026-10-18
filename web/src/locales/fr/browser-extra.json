@@ -44,5 +44,12 @@
   "ui.upload.uploading_n": "Import de {n} éléments",
   "ui.upload.done": "Import terminé",
 
+  "ui.tasks.title": "Tâches de fichiers",
+  "ui.tasks.empty": "Aucune tâche de fichier",
+  "ui.tasks.upload": "Imports",
+  "ui.tasks.compress": "Compression",
+  "ui.tasks.extract": "Extraction",
+  "ui.tasks.download": "Téléchargements par lien",
+
   "ui.progress.clear_finished": "Effacer les terminés"
 }

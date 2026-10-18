@@ -36,5 +36,12 @@
   "ui.ops.done": "処理が完了しました",
   "ui.upload.uploading_n": "{n} 項目をアップロード中",
   "ui.upload.done": "アップロードが完了しました",
+  "ui.tasks.title": "ファイルタスク",
+  "ui.tasks.empty": "ファイルタスクはありません",
+  "ui.tasks.upload": "アップロード",
+  "ui.tasks.compress": "圧縮",
+  "ui.tasks.extract": "解凍",
+  "ui.tasks.download": "リンクのダウンロード",
+
   "ui.progress.clear_finished": "完了した項目をクリア"
 }

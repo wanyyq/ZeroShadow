@@ -44,5 +44,12 @@
   "ui.upload.uploading_n": "Uploading {n} item(s)",
   "ui.upload.done": "Upload complete",
 
+  "ui.tasks.title": "File tasks",
+  "ui.tasks.empty": "No file tasks yet",
+  "ui.tasks.upload": "Uploads",
+  "ui.tasks.compress": "Compression",
+  "ui.tasks.extract": "Extraction",
+  "ui.tasks.download": "Link downloads",
+
   "ui.progress.clear_finished": "Clear completed"
 }

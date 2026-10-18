@@ -310,7 +310,7 @@ function GroupSwitcher() {
       // 打开时重拉一次列表：否则在「设置 → 小组」里刚建/删的小组，要刷新整页才会出现在这里
       onOpenChange={(open) => { if (open) void refreshGroups() }}
     >
-      <SelectTrigger className="h-8 w-28 text-xs sm:w-32" size="sm" title={t("ui.shell.switch_group_title")}>
+      <SelectTrigger className="watch-group h-8 w-28 text-xs sm:w-32" size="sm" title={t("ui.shell.switch_group_title")}>
         <Icon name="layers" className="size-3.5 shrink-0" />
         <SelectValue render={(_p, s) => <>{s.value === "default" ? t("ui.shell.group_default") : groups.find((g) => g.id === s.value)?.name || t("ui.shell.group_default")}</>}>{label}</SelectValue>
       </SelectTrigger>
@@ -466,13 +466,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* 右侧内容 */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* 顶栏 */}
-          <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border/30 px-3">
+          <header className="app-header flex h-12 shrink-0 items-center gap-3 border-b border-border/30 px-3">
             <Button size="icon-sm" variant="ghost" className="sm:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
               <Icon name={mobileOpen ? "x" : "menu"} className="size-5" />
             </Button>
 
             {/* 手机端搜索 */}
-            <div className="relative flex-1 sm:hidden">
+            <div className="app-header-search relative flex-1 sm:hidden">
               <Icon name="search" className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchText} placeholder={t("ui.shell.search_placeholder")} className="h-8 pl-8 text-sm bg-muted/50 border-transparent"
                 onChange={(e) => setSearchText(e.target.value)}
@@ -493,8 +493,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </button>
               <GroupSwitcher />
               {me.role === "guest" ? (
-                <Button size="sm" variant="ghost" onClick={() => navigate("/login")}>
-                  <Icon name="log-in" className="size-3.5" /> {t("ui.shell.login")}
+                <Button size="sm" variant="ghost" title={t("ui.shell.login")} onClick={() => navigate("/login")}>
+                  <Icon name="log-in" className="size-3.5" /> <span className="watch-hide">{t("ui.shell.login")}</span>
                 </Button>
               ) : (
                 <ContextMenu>
@@ -532,7 +532,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* 手机抽屉 */}
           {mobileOpen && <div className="fixed inset-0 z-50 bg-black/20 sm:hidden" onClick={() => setMobileOpen(false)} />}
-          <div className={cn("fixed inset-y-0 left-0 z-50 w-52 border-r border-border/30 bg-background transition-transform duration-200 ease-out sm:hidden",
+          <div className={cn("app-drawer fixed inset-y-0 left-0 z-50 w-52 border-r border-border/30 bg-background transition-transform duration-200 ease-out sm:hidden",
             mobileOpen ? "translate-x-0" : "-translate-x-full")}>
             <div className="flex h-12 items-center gap-2.5 border-b border-border/30 px-3">
               <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"><Icon name="hard-drive" className="size-3.5" /></span>
