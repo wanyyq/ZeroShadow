@@ -1,0 +1,12 @@
+{
+  "ui.settings.perms.guest_write": "Autoriser l'écriture aux invités",
+  "ui.settings.perms.guest_write_hint": "Interrupteur principal, désactivé par défaut. S'il est désactivé, compression, extraction et édition ne s'appliquent pas aux invités.",
+  "ui.settings.perms.html_preview_denied": "Votre compte n'est pas autorisé à prévisualiser les fichiers HTML.",
+  "ui.settings.groups.leader_caps_manage_visibility": "Ajuster la visibilité du groupe (restriction uniquement)",
+  "api.fs.read_forbidden": "Vous n'avez pas la permission de lire ce fichier",
+  "api.fs.overwrite_needs_delete": "Écraser supprime l'élément existant : le droit de suppression est requis",
+  "api.groups.visibility_widen_denied": "Les chefs de groupe peuvent uniquement restreindre la visibilité",
+  "api.webdav.body_consumed": "Le corps a déjà été consommé par l'analyseur JSON ; utilisez application/octet-stream pour WebDAV",
+  "api.webdav.source_missing": "Le fichier ou dossier source n'existe pas",
+  "api.webdav.destination_ancestor_denied": "La destination ne peut pas être un dossier parent de la source"
+}

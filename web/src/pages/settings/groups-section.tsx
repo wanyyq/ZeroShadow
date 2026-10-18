@@ -80,6 +80,7 @@ const CAP_ITEMS: [string, string][] = [
   ["manageTodo", "ui.settings.groups.leader_caps_manage_todo"],
   ["editMemberAvatar", "ui.settings.groups.leader_caps_edit_member_avatar"],
   ["manageMembers", "ui.settings.groups.leader_caps_manage_members"],
+  ["manageVisibility", "ui.settings.groups.leader_caps_manage_visibility"],
 ]
 
 interface GroupsData {
@@ -280,7 +281,13 @@ function GroupEditor({ group, members, onClose, onSaved }: {
     group?.perms || Object.fromEntries(PERM_GROUPS.flatMap((g) => g.items).map(([k]) => [k, true]))
   )
   const [leaderCaps, setLeaderCaps] = React.useState(
-    group?.leaderCaps || { viewMembers: true, manageTodo: true, editMemberAvatar: false, manageMembers: false }
+    group?.leaderCaps || {
+      viewMembers: true,
+      manageTodo: true,
+      editMemberAvatar: false,
+      manageMembers: false,
+      manageVisibility: false,
+    }
   )
   const [whitelist, setWhitelist] = React.useState((group?.whitelist || []).join("\n"))
   const [blacklist, setBlacklist] = React.useState((group?.blacklist || []).join("\n"))

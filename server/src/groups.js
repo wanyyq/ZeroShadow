@@ -2,7 +2,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { DATA_DIR } from "./env.js"
 import { readJsonTyped, withLock, writeJsonAtomic } from "./store.js"
-import { getConfig, MEMBER_PERM_KEYS } from "./config.js"
+import { getConfig, MEMBER_PERM_KEYS, effectivePerms, narrowPerms } from "./config.js"
 import { isSameOrInside } from "./safety.js"
 import { httpError } from "./http.js"
 
@@ -22,13 +22,21 @@ const MAX_MEMBERS_PER_GROUP = 500
 const NAME_RE = /^[\w\u4e00-\u9fff\u3400-\u4dbf .-]{1,40}$/
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
-export const LEADER_CAPS = ["viewMembers", "manageTodo", "editMemberAvatar", "manageMembers"]
+/**
+ * 组长能力。
+ *
+ * `manageVisibility` 是单独一项，**默认关**：它曾经混在 `manageMembers` 里，
+ * 于是"能增删成员"顺手就获得了"改本组可见范围"的权力 —— 组长把自己组的白名单
+ * 清空就等于放宽了全组的可见范围，超管划定的边界被绕开。
+ */
+export const LEADER_CAPS = ["viewMembers", "manageTodo", "editMemberAvatar", "manageMembers", "manageVisibility"]
 
 const DEFAULT_LEADER_CAPS = {
   viewMembers: true,
   manageTodo: true,
   editMemberAvatar: false,
   manageMembers: false,
+  manageVisibility: false,
 }
 
 function defaultPerms() {
@@ -275,6 +283,95 @@ export function visibilityFor(group) {
 }
 
 /**
+ * 合并多个小组的可见范围（**并集**语义）。
+ *
+ * 为什么"缺省上下文"用并集而不是交集：小组的本质是"分区"——一个成员可以同时在
+ * 「项目 A」组（白名单 ["projA"]）和「项目 B」组（["projB"]），他本来就该同时看到
+ * 两个项目。取交集会让这种常见用法直接变成"什么都看不到"。
+ * 而"去掉请求头就能看到全盘"才是要堵的洞：并集保证他最多只能看到**所属组能看到的
+ * 范围之和**，看不到任何没被任何组授予的目录。
+ *
+ * 黑名单同组内是 deny 优先，跨组同样取并集（任何一个组禁掉的目录就不可见）。
+ * 只要有一个组不限制白名单（留空 = 不限），合并结果也不限制 —— 这与"该组允许全部"
+ * 一致。
+ */
+export function unionVisibility(list = []) {
+  const whitelist = []
+  const blacklist = []
+  let unrestricted = false
+  for (const group of list) {
+    if (!group) continue
+    const w = cleanPathList(group.whitelist)
+    const b = cleanPathList(group.blacklist)
+    if (!w.length) unrestricted = true
+    for (const p of w) if (!whitelist.includes(p)) whitelist.push(p)
+    for (const p of b) if (!blacklist.includes(p)) blacklist.push(p)
+  }
+  return { whitelist: unrestricted ? [] : whitelist, blacklist }
+}
+
+/**
+ * 某身份的可见范围。
+ * @returns {{whitelist:string[],blacklist:string[]}|null} null 表示不受限（超管/访客）
+ *
+ * 小组上下文是**自选**的：指定了小组就用该组；没指定（或指定了不属于自己的组）时，
+ * 不能回落到"默认不限"，而是取所属各组的并集 —— 否则成员不发 X-ZS-Group 就能
+ * 绕开小组可见范围（WebDAV 客户端默认就不发这个头）。
+ */
+export function visibilityForContext(role, userId, group) {
+  if (role !== "member") return null
+  if (group) return visibilityFor(group)
+  const mine = userId ? groupsForUser(userId) : []
+  if (!mine.length) return visibilityFor(null)
+  return unionVisibility(mine)
+}
+
+/**
+ * 某身份的有效权限（与 visibilityForContext 同一套"缺省上下文"规则）。
+ *
+ * 权限与可见范围的取舍不同：权限是**交集**（deny 优先）—— 少给权限只会让成员
+ * 更安全，而"缺省上下文拿到全局权限"正是原来的绕过点。
+ */
+export function permsForContext(role, userId, group) {
+  const base = effectivePerms(role, group)
+  if (role !== "member" || group || !userId) return base
+  const mine = groupsForUser(userId)
+  if (!mine.length) return base
+  return narrowPerms(base, mine.map((g) => g.perms))
+}
+
+/**
+ * 新的可见范围是否**只收窄**了旧的（组长自助修改时必须满足）。
+ *
+ * 收窄 = 新白名单内的目录都能被旧白名单覆盖（旧不限则恒真），且新黑名单包含
+ * 旧黑名单的所有条目。反过来（清空白名单、删掉黑名单、加白名单）一律拒绝。
+ */
+export function isVisibilityNarrower(next, prev) {
+  const nextWhite = cleanPathList(next?.whitelist)
+  const prevWhite = cleanPathList(prev?.whitelist)
+  const nextBlack = cleanPathList(next?.blacklist)
+  const prevBlack = cleanPathList(prev?.blacklist)
+  // 白名单：旧的为空（不限）时新的可以任意；旧的有内容时**不能清空**
+  // （清空 = 从"只能看这几个目录"变成"不限"，是放宽的极端情形），
+  // 且新加的每一项都必须落在旧范围内。
+  if (prevWhite.length) {
+    if (!nextWhite.length) return false
+    for (const p of nextWhite) {
+      if (!prevWhite.some((base) => isSameOrInside(p, base))) return false
+    }
+  }
+  // 黑名单：旧的每一条都必须还在（删掉一条就是放宽）
+  for (const p of prevBlack) {
+    if (!nextBlack.some((item) => samePathish(item, p))) return false
+  }
+  return true
+}
+
+function samePathish(a, b) {
+  return isSameOrInside(String(a), String(b)) && isSameOrInside(String(b), String(a))
+}
+
+/**
  * 相对路径在给定可见范围下是否可见。
  * 规则：黑名单优先；白名单为空表示不限制；否则必须落在白名单内。
  */
@@ -295,7 +392,11 @@ export function isVisibleForContext(rel, ctx) {
   if (!ctx) return true
   if (ctx.role === "superadmin") return true
   if (ctx.role !== "member") return true // 访客走 guestHiddenPaths，不套用小组规则
-  return isVisibleInVisibility(rel, visibilityFor(ctx.group))
+  // ctx.visibility 由 attachContext 预先算好（列目录时每个条目都要判一次，
+  // 反复合并小组范围没有必要）；没有预计算时按同一套规则现算。
+  const vis = ctx.visibility !== undefined ? ctx.visibility : visibilityForContext(ctx.role, ctx.userId, ctx.group)
+  if (!vis) return true
+  return isVisibleInVisibility(rel, vis)
 }
 
 /** 判断某成员是否属于给定小组（含超管视为可切换任意组） */

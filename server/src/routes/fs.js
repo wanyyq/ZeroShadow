@@ -250,8 +250,16 @@ router.get("/download", async (req, res, next) => {
     // downloadFile/preview 后这里仍然按全局权限放行。
     const perms = req.perms || effectivePerms(req.auth.role, req.group)
 
+    // HTML/SVG 的"内联渲染"受独立权限点 htmlPreview 约束（默认访客为 false）。
+    // 管理员关掉它的用意就是"不要在网盘里把上传的网页当页面打开"，而旧实现只在
+    // 前端拦（browser-page 里判 htmlPreview 才跳预览页），直接构造
+    // `/api/fs/download?path=x.html&inline=1` 就绕过去了。这里改成服务端强判：
+    // 没有该权限就一律按附件下发（连"只能预览不能下载"的角色也不再内联）。
+    const scriptable = SCRIPTABLE_EXT.has(extKey)
+    const inlineAllowed = !scriptable || !!perms.htmlPreview
+
     if (!perms.downloadFile) {
-      if (!perms.preview || !INLINE_TYPES.has(extKey)) {
+      if (!perms.preview || !INLINE_TYPES.has(extKey) || !inlineAllowed) {
         if (req.auth.role === "guest") {
           return res.status(401).json({ error: "请先登录", errorKey: "api.auth.login_required" })
         }
@@ -259,8 +267,8 @@ router.get("/download", async (req, res, next) => {
       }
     }
 
-    const inline = req.query.inline === "1" && INLINE_TYPES.has(extKey)
-    const forceInline = !perms.downloadFile && perms.preview
+    const inline = req.query.inline === "1" && INLINE_TYPES.has(extKey) && inlineAllowed
+    const forceInline = !perms.downloadFile && perms.preview && inlineAllowed
     const useInline = inline || forceInline
     const mime = useInline ? INLINE_TYPES.get(extKey) : "application/octet-stream"
     res.setHeader("Content-Type", mime)
@@ -269,7 +277,8 @@ router.get("/download", async (req, res, next) => {
     // 上传的 HTML/SVG 属于用户内容，绝不能让它在网盘自身的源下执行：CSP 的
     // sandbox 指令把它强制为不透明源，即使被直接打开（新标签页/第三方内嵌）
     // 也拿不到本站 Cookie、父页面与 /api 会话；脚本仍可运行，静态页面不受影响。
-    if (useInline && SCRIPTABLE_EXT.has(extKey)) {
+    // 这是 htmlPreview **之外**的第二道防线，两道都要保留。
+    if (useInline && scriptable) {
       res.setHeader("Content-Security-Policy", "sandbox allow-scripts")
     }
     if (!useInline) info("download", { msg: resolved.rel, ...actor(req) })
@@ -640,7 +649,9 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
         let finalName
         if (shouldOverwrite) {
           const targetPath = path.join(item.uploadDir, item.name)
-          await fs.promises.rm(targetPath, { force: true })
+          // 「覆盖上传」同样是删除：与 rename/copy 走同一条规则（delete 权限 + 回收站），
+          // 否则只有 upload 权限的成员也能直接抹掉别人的文件，且无从恢复。
+          await removeForOverwrite(req, targetPath, item.relDir ? `${item.relDir}/${item.name}` : item.name)
           await moveEntry(item.tmp, targetPath)
           finalName = item.name
         } else {
@@ -650,8 +661,11 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
         const savedRel = item.relDir ? `${item.relDir}/${finalName}` : finalName
         saved.push(savedRel)
         results.push({ name: displayName, ok: true, savedAs: savedRel })
-      } catch {
-        results.push({ name: displayName, ok: false, error: "保存失败" })
+      } catch (err) {
+        // 4xx 是"能解释的拒绝"（没有 delete 权限、目标非法…），把原因透给用户；
+        // 其余一律按"保存失败"处理，不泄露内部错误。
+        const status = Number(err?.status) || 0
+        results.push({ name: displayName, ok: false, error: status >= 400 && status < 500 ? err.message : "保存失败" })
         await fs.promises.rm(item.tmp, { force: true }).catch(() => {})
       }
     }
@@ -696,6 +710,20 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
     const tmp = path.join(TMP_DIR, `up-${crypto.randomBytes(8).toString("hex")}`)
     const item = { name, uploadDir, relDir, tmp, tooLarge: false, saveError: null }
     tmpFiles.push(item)
+    // 「上传文件夹」是独立权限点，旧实现从未校验过它（除 config.js 外全库没有引用），
+    // 于是关掉它的角色照样能把整棵目录树塞进一个 multipart 请求传上来。
+    // 这里不落盘、但必须把流读完，否则 busboy 会卡住整个请求。
+    if (relDir && !req.perms.uploadFolders) {
+      item.saveError = "没有上传文件夹的权限"
+      stream.resume()
+      pending.push(
+        new Promise((resolve) => {
+          stream.on("end", resolve)
+          stream.on("error", resolve)
+        })
+      )
+      return
+    }
     const ws = fs.createWriteStream(tmp)
     let writeFailed = false
     // 目标流出错（磁盘写满 ENOSPC、权限不足、TMP_DIR 被删）必须在这里吞掉：
@@ -743,6 +771,31 @@ router.post("/upload", requirePerm("upload"), async (req, res, next) => {
   req.pipe(bb)
 })
 
+/**
+ * 「覆盖」写操作在删除已存在目标时统一走这里。
+ *
+ * 覆盖的本质就是把目标删掉，因此它必须和 `/api/fs/delete` 用同一套规则：
+ *   1. 需要 **delete** 权限 —— 否则只有 rename / move / copy 权限的成员也能
+ *      递归销毁任意目录树（`rename` 到已存在的目录 + overwrite 即可）；
+ *   2. 目标要进**回收站** —— 旧实现直接 `fs.rm`，一次误覆盖就永久丢失。
+ * 回收站不可用（目录建不出来 / 跨设备复制失败）时才退回彻底删除；但那种情况下
+ * moveToTrash 会抛 TRASH_FAILED，这里不会静默降级（与 /delete 的承诺一致）。
+ */
+async function removeForOverwrite(req, targetAbs, targetRel) {
+  const perms = req.perms || effectivePerms(req.auth.role, req.group)
+  if (!perms.delete) {
+    throw httpError(403, "覆盖会删除已有的同名项目，需要「删除」权限", {
+      errorKey: "api.fs.overwrite_needs_delete",
+    })
+  }
+  const useTrash = getConfig().trashEnabled !== false && trashAvailable()
+  if (useTrash) {
+    const meta = await moveToTrash({ abs: targetAbs, rel: targetRel }, actor(req))
+    if (meta) return
+  }
+  await fs.promises.rm(targetAbs, { recursive: true, force: true })
+}
+
 router.post("/rename", requirePerm("rename"), async (req, res, next) => {
   try {
     const { abs, rel } = resolveSafe(req.body?.path)
@@ -754,16 +807,17 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
     const invalid = validateName(newName)
     if (invalid) throw httpError(400, invalid, { errorKey: nameErrorKey(invalid) })
     const parentAbs = path.dirname(abs)
+    const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""
     const target = path.join(parentAbs, newName)
     const existing = await statSafe(target)
     let merged = false
     if (existing && path.basename(abs).toLowerCase() !== newName.toLowerCase()) {
       const sourceStat = await statSafe(abs)
       if (req.body?.merge && sourceStat?.isDirectory() && existing.isDirectory()) {
-        await mergeFolder(abs, target, "move")
+        await mergeFolder(abs, target, "move", req, joinRel(parentRel, newName))
         merged = true
       } else if (req.body?.overwrite) {
-        await fs.promises.rm(target, { recursive: true, force: true })
+        await removeForOverwrite(req, target, joinRel(parentRel, newName))
       } else {
         throw httpError(409, "已存在同名文件或文件夹", { errorKey: "api.fs.name_conflict" })
       }
@@ -771,7 +825,6 @@ router.post("/rename", requirePerm("rename"), async (req, res, next) => {
     if (!merged) {
       await fs.promises.rename(abs, target)
     }
-    const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""
     await remapHiddenPaths(rel, joinRel(parentRel, newName))
     info("rename", { msg: `${rel} → ${newName}`, ...actor(req) })
     res.json({ name: newName })
@@ -849,23 +902,31 @@ router.post("/delete", requirePerm("delete"), async (req, res, next) => {
   }
 })
 
-async function mergeFolder(srcAbs, destAbs, mode) {
+/**
+ * 合并两个同名目录（移动/复制）。
+ *
+ * 冲突项同样是"覆盖"：一律走 removeForOverwrite（delete 权限 + 回收站），
+ * 否则「合并」就成了绕过 delete 权限递归删文件的第二条路。
+ * @param {string} destRel 目标目录在网盘内的相对路径（供回收站记录原路径）
+ */
+async function mergeFolder(srcAbs, destAbs, mode, req, destRel) {
   const entries = await fs.promises.readdir(srcAbs, { withFileTypes: true })
   for (const dirent of entries) {
     const srcChild = path.join(srcAbs, dirent.name)
     const destChild = path.join(destAbs, dirent.name)
+    const childRel = joinRel(destRel, dirent.name)
     if (dirent.isDirectory()) {
       const destStat = await statSafe(destChild)
       if (destStat && destStat.isDirectory()) {
-        await mergeFolder(srcChild, destChild, mode)
+        await mergeFolder(srcChild, destChild, mode, req, childRel)
       } else {
-        if (destStat) await fs.promises.rm(destChild, { recursive: true, force: true })
+        if (destStat) await removeForOverwrite(req, destChild, childRel)
         if (mode === "copy") await copyEntry(srcChild, destChild)
         else await moveEntry(srcChild, destChild)
       }
     } else if (dirent.isFile()) {
       if (await statSafe(destChild)) {
-        await fs.promises.rm(destChild, { force: true })
+        await removeForOverwrite(req, destChild, childRel)
       }
       if (mode === "copy") await copyEntry(srcChild, destChild)
       else await moveEntry(srcChild, destChild)
@@ -928,12 +989,12 @@ async function transfer(req, res, next, mode) {
       }
       const destStat = await statSafe(target)
       if (merge && stat.isDirectory() && destStat && destStat.isDirectory()) {
-        await mergeFolder(src.abs, target, mode)
+        await mergeFolder(src.abs, target, mode, req, joinRel(dest.rel, wanted))
         done.push(wanted)
         continue
       }
       if (overwrite) {
-        await fs.promises.rm(target, { recursive: true, force: true })
+        await removeForOverwrite(req, target, joinRel(dest.rel, wanted))
       }
       const finalName = overwrite ? wanted : await uniqueName(dest.abs, wanted)
       const finalTarget = path.join(dest.abs, finalName)
@@ -1328,11 +1389,21 @@ export const SAVE_FILE_MAX_BYTES = 16 * 1024 * 1024
  * 于是 GBK/Big5 的文件打开就是乱码。这里改成服务端识别编码后回 JSON，
  * 同时把原始换行风格一起带回，保存时再还原。
  */
-router.get("/file", requirePerm("browse"), async (req, res, next) => {
+router.get("/file", requirePerm("browse"), rateLimit, async (req, res, next) => {
   try {
     const { abs, rel, isSoft } = resolveSafe(req.query?.path)
     assertContextVisible(req, rel)
     if (!rel) throw httpError(400, "非法路径", { errorKey: "api.fs.path_invalid" })
+    // 「能看目录」不等于「能读全文」。旧实现只要 browse 就把整个文件（最大 8MB
+    // 文本）作为 JSON 返回，于是管理员关掉访客的 downloadFile / preview 之后，
+    // 访客仍能通过 /api/fs/file 读到任意文本文件的正文 —— 权限等于没关。
+    const perms = req.perms || effectivePerms(req.auth.role, req.group)
+    if (!perms.preview && !perms.downloadFile) {
+      if (req.auth.role === "guest") {
+        return res.status(401).json({ error: "请先登录", errorKey: "api.auth.login_required" })
+      }
+      return res.status(403).json({ error: "没有权限读取文件内容", errorKey: "api.fs.read_forbidden" })
+    }
     const stat = await fs.promises.stat(abs).catch(() => null)
     if (!stat || !stat.isFile()) throw httpError(404, "文件不存在", { errorKey: "api.fs.file_not_found" })
     if (stat.size > EDITOR_MAX_BYTES) {
@@ -1383,7 +1454,7 @@ router.get("/file", requirePerm("browse"), async (req, res, next) => {
   }
 })
 
-router.post("/save-file", requirePerm("editFiles"), async (req, res, next) => {
+router.post("/save-file", requirePerm("editFiles"), rateLimit, async (req, res, next) => {
   let tmp = null
   try {
     const { abs, rel } = resolveSafe(req.body?.path)

@@ -159,6 +159,24 @@ export async function batchMembers(action, ids) {
 }
 
 /**
+ * 吊销某成员的全部会话（tokenVersion +1）。
+ *
+ * JWT 是无状态的：只清 Cookie 的话，已经发出去的令牌在有效期内（默认 72 小时）
+ * 仍然可用。登出、改密、禁用都走这条路径，保证"我现在要下线"是真的下线。
+ * 代价是同一账号在其他设备/标签页上的会话也会一起失效 —— 对网盘这种场景
+ * 这反而是期望行为（"登出所有设备"）。
+ */
+export async function revokeSessions(id) {
+  return withLock("users", async () => {
+    const user = findById(id)
+    if (!user) return false
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1
+    await persist()
+    return true
+  })
+}
+
+/**
  * 重置成员密码。
  *
  * 失败时返回 `{ key, message }`：`message` 是中文原文（调用方照搬进 error 字段），

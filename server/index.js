@@ -79,11 +79,6 @@ app.use((_req, res, next) => {
 })
 
 app.use(cookieParser())
-// 在线编辑（/api/fs/save-file）提交的是整个文件正文，1MB 显然不够：该端点单独放宽。
-// body-parser 解析成功后会标记 req._body，后面的全局解析器不会再重复解析，
-// 其余接口仍然保持 1MB 上限。
-app.use("/api/fs/save-file", express.json({ limit: SAVE_FILE_MAX_BYTES }))
-app.use(express.json({ limit: "1mb" }))
 
 // 全局限流：防止隧道代理场景下的 TCP 缓冲问题
 app.use((req, _res, next) => {
@@ -94,12 +89,33 @@ app.use((req, _res, next) => {
 // 请求指标采集（不阻塞请求，异常一律吞掉）
 app.use(metricsMiddleware)
 
+// ===== WebDAV（实验性，默认关闭；只能在 .env 里用 WEBDAV=1 打开）=====
+// 位置很关键，两个约束同时成立：
+//   1. 必须挂在 body parser **之前**。WebDAV 的 PUT 是原始请求体，而 body-parser
+//      对 PUT 同样生效：一旦被 express.json() 读完，req 流就到底了，DAV 的
+//      `req.pipe(ws)` 只会写出 0 字节并以 204 成功返回 —— 用户看到"保存成功"，
+//      文件却被清空（静默数据丢失）。
+//   2. 必须挂在静态托管与 SPA fallback **之前**，否则 /dav/ 会被 fallback 吞掉、
+//      返回前端首页（浏览器里表现为"打开 /dav/ 看到网盘界面"）。
+// 未启用时完全不挂载，/dav/ 会正常 404。
+const webdav = createWebdavRouter()
+if (webdav) {
+  app.use(env.webdavPath, webdav)
+}
+
 app.use(attachAuth)
 app.use(attachContext)
 app.use("/api", csrfGuard)
 
+// body 解析刻意放在鉴权与 CSRF 之后：否则任何**未登录**者都能强迫服务把 16MB
+// 请求体解析成 JSON（/api/fs/save-file 是单独放宽的端点），几个并发请求就能把
+// 单核 CPU 打满。放到 csrfGuard 之后，未带自定义头的跨站请求连解析都触发不了。
+// body-parser 解析成功后会标记 req._body，后面的解析器不会重复解析。
+app.use("/api/fs/save-file", express.json({ limit: SAVE_FILE_MAX_BYTES }))
+app.use(express.json({ limit: "1mb" }))
+
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "ZeroShadow", version: "1.2.1" })
+  res.json({ name: "ZeroShadow", version: "1.2.3" })
 })
 
 app.use("/api/auth", authRoutes)
@@ -121,14 +137,8 @@ app.use("/api", (_req, res) => {
   res.status(404).json({ error: "接口不存在", errorKey: "api.common.not_found" })
 })
 
-// ===== WebDAV（实验性，默认关闭；只能在 .env 里用 WEBDAV=1 打开）=====
-// 必须挂在静态托管与 SPA fallback **之前**：否则 /dav/ 会被 fallback 吞掉、
-// 返回前端首页（浏览器里表现为"打开 /dav/ 看到网盘界面"，DAV 客户端则报
-// 协议错误）。未启用时完全不挂载，/dav/ 会正常 404。
-const webdav = createWebdavRouter()
-if (webdav) {
-  app.use(env.webdavPath, webdav)
-}
+// ===== WebDAV 已在上方（body parser 之前）挂载 =====
+// 之所以不在这个位置挂：见前面对 "PUT 被 body parser 吃掉" 的说明。
 
 // 应用外壳的 CSP：脚本只允许同源文件（构建产物 index.html 无内联脚本），样式
 // 保留 inline 以兼容 UI 库注入的 <style>；允许本站把预览页放进 iframe。

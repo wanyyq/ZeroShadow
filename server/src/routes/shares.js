@@ -6,7 +6,7 @@ import { requireRole } from "../auth.js"
 import { contentDisposition, httpError } from "../http.js"
 import { isHiddenFromGuest, isSameOrInside, joinRel, normRel, resolveAny } from "../safety.js"
 import { assertDir, assertExists, dirStats, listDir, statSafe } from "../files.js"
-import { isVisibleForContext } from "../groups.js"
+import { isVisibleForContext, isVisibleInVisibility } from "../groups.js"
 import { info, warn } from "../logger.js"
 import { rateLimit } from "../ratelimit.js"
 import {
@@ -120,6 +120,25 @@ function assertUnlocked(req, share) {
 }
 
 /**
+ * 分享内容的可见范围快照判定。
+ *
+ * 创建分享时我们把创建者当时的可见范围（小组白名单 / 黑名单）记了一份。
+ * 访问时必须按它再判一次 —— 只在创建时判会留下一个越权口子：成员在某个小组
+ * 里被黑名单挡在 `proj/HR` 之外，却可以分享父目录 `proj`，再通过
+ * `/api/share/<t>/download?path=HR/salaries.xlsx` 读到自己也看不到的文件，
+ * 并且把它公开给任何持链接的人（安全审计 M8）。
+ */
+function shareVisible(share, rel) {
+  const vis = share.visibility
+  if (!vis) return true
+  return isVisibleInVisibility(rel, vis)
+}
+
+function assertShareVisible(share, rel) {
+  if (!shareVisible(share, rel)) throw shareError(404, "文件或目录不存在", "api.fs.not_found")
+}
+
+/**
  * 把"相对分享根的子路径"解析成绝对路径，并断言仍在分享范围内。
  * @returns {{abs:string, rel:string, sub:string, isSoft:boolean}}
  */
@@ -140,7 +159,35 @@ function resolveSharePath(share, requested) {
   if (!share.requirePassword && isHiddenFromGuest(rel)) {
     throw shareError(404, "文件或目录不存在", "api.fs.not_found")
   }
+  // 创建者的可见范围快照同样要生效（与密码无关：那是"他能看到什么"，
+  // 不是"谁能访问"）
+  assertShareVisible(share, rel)
   return { ...resolved, sub }
+}
+
+/**
+ * 目录体积/条目数统计带 10 秒缓存。
+ *
+ * `GET /api/share/:token` 是完全开放的接口，而 shareMeta 会对目录做一次
+ * `dirStats`（上限 2 万条目）。没有缓存时，任何人循环请求这一个 URL 就能让
+ * 服务反复走磁盘树 —— 匿名可达的放大器（安全审计 L12）。
+ */
+const META_STATS_TTL_MS = 10 * 1000
+const metaStatsCache = new Map()
+
+async function cachedDirStats(share) {
+  const hit = metaStatsCache.get(share.id)
+  const now = Date.now()
+  if (hit && now - hit.at < META_STATS_TTL_MS) return hit.value
+  const { abs } = resolveSharePath(share, "")
+  const value = await dirStats(abs, { maxEntries: 20000 }).catch(() => ({ files: 0, dirs: 0, bytes: 0, partial: true }))
+  metaStatsCache.set(share.id, { at: now, value })
+  if (metaStatsCache.size > 500) {
+    for (const [key, entry] of metaStatsCache) {
+      if (now - entry.at > META_STATS_TTL_MS) metaStatsCache.delete(key)
+    }
+  }
+  return value
 }
 
 async function shareMeta(share, req) {
@@ -156,7 +203,7 @@ async function shareMeta(share, req) {
   let dirs = 0
   let partial = false
   if (stat.isDirectory()) {
-    const stats = await dirStats(abs, { maxEntries: 20000 }).catch(() => ({ files: 0, dirs: 0, bytes: 0, partial: true }))
+    const stats = await cachedDirStats(share)
     size = stats.bytes
     files = stats.files
     dirs = stats.dirs
@@ -193,7 +240,10 @@ async function shareMeta(share, req) {
 
 export const publicShareRouter = Router()
 
-publicShareRouter.get("/:token", async (req, res, next) => {
+// 公开接口全部挂限流：它们匿名可达，其中 meta 会走目录统计、list 会走一次
+// readdir + lstat，是最容易被"循环请求"放大的两个（安全审计 L12）。
+// download 也挂上：正常下载一页图片不会超过默认 120/分钟，但可以挡住脚本刷流量。
+publicShareRouter.get("/:token", rateLimit, async (req, res, next) => {
   try {
     assertPublicAccess(req)
     const share = loadShare(req)
@@ -236,7 +286,7 @@ publicShareRouter.post("/:token/verify", async (req, res, next) => {
 })
 
 /** 目录浏览（仅文件夹分享）。path 是相对分享根的子路径。 */
-publicShareRouter.get("/:token/list", async (req, res, next) => {
+publicShareRouter.get("/:token/list", rateLimit, async (req, res, next) => {
   try {
     assertPublicAccess(req)
     const share = loadShare(req)
@@ -252,6 +302,8 @@ publicShareRouter.get("/:token/list", async (req, res, next) => {
     // 无密码分享按访客视角过滤（隐藏目录不外泄）；有密码分享是已验证的，全量列出
     const forGuest = !share.requirePassword
     const entries = (await listDir(abs, rel, { forGuest }))
+      // 逐条应用创建者的可见范围快照（M8）：父目录可见不代表子目录可见
+      .filter((e) => shareVisible(share, joinRel(rel, e.name)))
       .slice(0, PUBLIC_ROOT_MAX)
       .map((e) => ({
         name: e.name,
@@ -269,7 +321,7 @@ publicShareRouter.get("/:token/list", async (req, res, next) => {
 })
 
 /** 单文件下载 / 内联预览。path 是相对分享根的子路径。 */
-publicShareRouter.get("/:token/download", async (req, res, next) => {
+publicShareRouter.get("/:token/download", rateLimit, async (req, res, next) => {
   try {
     assertPublicAccess(req)
     const share = loadShare(req)
@@ -292,11 +344,16 @@ publicShareRouter.get("/:token/download", async (req, res, next) => {
       res.setHeader("Content-Security-Policy", "sandbox allow-scripts")
     }
     info("share_download", { msg: `${share.name}: ${rel}`, ip: req.ip, user: req.auth.username || "guest" })
-    touchShare(share.id, { download: true }).catch(() => {})
     res.sendFile(abs, { dotfiles: "deny", cacheControl: false }, (err) => {
-      if (!err) return
-      if (res.headersSent) res.destroy()
-      else next(err)
+      if (err) {
+        if (res.headersSent) res.destroy()
+        else next(err)
+        return
+      }
+      // 只统计"确实把内容发出去了"的整份下载：Range 请求（视频拖进度条）与失败
+      // 请求都不计 —— 旧实现是在 sendFile 之前无条件 +1，任何第三方页面放一张
+      // `<img src="…/download?path=big.bin">` 就能把下载次数刷上去（安全审计 L12）。
+      if (!req.headers.range) touchShare(share.id, { download: true }).catch(() => {})
     })
   } catch (err) {
     next(err)
@@ -402,13 +459,19 @@ manageShareRouter.post("/", rateLimit, async (req, res, next) => {
       name: path.basename(resolved.abs),
       isFolder: stat.isDirectory(),
       owner: req.auth.username,
+      // 归属用 userId（用户名可改、可被重建）；老记录由 shares.js 在加载时回填
+      ownerId: req.auth.userId || "",
       ownerRole: req.auth.role,
+      // 创建者此刻的可见范围快照，访问时按它复判（见 shareVisible）
+      visibility: req.visibility || null,
       expireSeconds: req.body?.expireSeconds,
       password,
       requirePassword: hidden,
     })
+    // 日志里**不要**写 token：它就是匿名访问凭据，写进 data/logs 后会被导出接口
+    // 带出去，而且日志的保留期（默认 30 天）比分享本身还长。记分享 id 即可。
     info("share_create", {
-      msg: `${share.name} → ${share.token}`,
+      msg: `${share.name} (${share.id})`,
       user: req.auth.username,
       role: req.auth.role,
       ip: req.ip,
@@ -430,7 +493,7 @@ manageShareRouter.post("/", rateLimit, async (req, res, next) => {
 })
 
 manageShareRouter.get("/", (req, res) => {
-  const list = listSharesByOwner(req.auth.username)
+  const list = listSharesByOwner(req.auth.username, req.auth.userId || "")
     .sort((a, b) => b.createdAt - a.createdAt)
     .map((s) => ({
       id: s.id,
@@ -451,7 +514,11 @@ manageShareRouter.get("/", (req, res) => {
 
 manageShareRouter.delete("/:id", async (req, res, next) => {
   try {
-    const ok = await revokeShare(String(req.params.id), { owner: req.auth.username, role: req.auth.role })
+    const ok = await revokeShare(String(req.params.id), {
+      owner: req.auth.username,
+      ownerId: req.auth.userId || "",
+      role: req.auth.role,
+    })
     if (!ok) throw shareError(404, "分享不存在", "api.share.not_found")
     info("share_revoke", { msg: String(req.params.id), user: req.auth.username, role: req.auth.role, ip: req.ip })
     res.json({ ok: true })

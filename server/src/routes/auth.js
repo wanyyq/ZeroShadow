@@ -3,6 +3,7 @@ import { env } from "../env.js"
 import {
   COOKIE_NAME,
   cookieOptions,
+  isSuperUser,
   loginLocked,
   recordLoginFail,
   recordLoginSuccess,
@@ -11,9 +12,9 @@ import {
   signToken,
   verifySuperPassword,
 } from "../auth.js"
-import { effectivePerms, uploadLimitMB } from "../config.js"
+import { effectivePerms, saveConfig, uploadLimitMB } from "../config.js"
 import bcrypt from "bcryptjs"
-import { verifyLogin, findById, resetPassword } from "../users.js"
+import { verifyLogin, findById, resetPassword, revokeSessions } from "../users.js"
 import { groupsForUser, listGroups } from "../groups.js"
 import { filesystemCaseInsensitive } from "../safety.js"
 import { rateLimit } from "../ratelimit.js"
@@ -36,19 +37,38 @@ router.post("/login", rateLimit, async (req, res) => {
     return res.status(400).json({ error: "用户名或密码格式不正确", errorKey: "api.auth.login_format_invalid" })
   }
 
-  const lockedMinutes = loginLocked(req.ip, username)
-  if (lockedMinutes) {
-    return res.status(429).json({
-      error: `尝试次数过多，请约 ${lockedMinutes} 分钟后再试`,
+  const lockedResponse = (minutes) =>
+    res.status(429).json({
+      error: `尝试次数过多，请约 ${minutes} 分钟后再试`,
       errorKey: "api.auth.login_locked",
-      errorParams: { minutes: lockedMinutes },
+      errorParams: { minutes },
     })
+
+  // ---- 超管：先验口令，再判锁定 ----
+  // 顺序反过来的话，任何人用**错误的**密码打 10 次就能把唯一的超管账号锁死
+  // 5→30 分钟且可无限续期，而超管是唯一能改配置的人 —— 一次匿名 DoS 就让后台
+  // 彻底不可用（安全审计 M9）。先验口令保证"口令正确永远能进"，猜错的照旧会被
+  // IP 与账号两个维度锁定（账号维度与 IP 无关，伪造 X-Forwarded-For 也绕不过）。
+  // 注意这里只对超管调整顺序：成员路径若先跑 bcrypt，锁定期间每个请求都会
+  // 触发一次 cost-10 哈希，反而成了 CPU DoS 放大器。
+  const superUser = isSuperUser(username)
+  if (superUser) {
+    if (!verifySuperPassword(password)) {
+      const lockedMinutes = loginLocked(req.ip, username)
+      if (lockedMinutes) return lockedResponse(lockedMinutes)
+      recordLoginFail(req.ip, username)
+      warn("login_fail", { msg: "超管口令错误", user: username, ip: req.ip })
+      return res.status(401).json({ error: "用户名或密码错误", errorKey: "api.auth.login_invalid_credentials" })
+    }
+  } else {
+    const lockedMinutes = loginLocked(req.ip, username)
+    if (lockedMinutes) return lockedResponse(lockedMinutes)
   }
 
   let auth = null
-  if (username === env.superUser && verifySuperPassword(password)) {
+  if (superUser) {
     auth = { role: "superadmin", username: env.superUser }
-  } else if (username !== env.superUser) {
+  } else {
     const result = await verifyLogin(username, password)
     if (result.ok) {
       auth = {
@@ -108,10 +128,25 @@ router.post("/change-password", requireRole("superadmin", "member"), requirePerm
   }
 })
 
-router.post("/logout", requireRole("superadmin", "member"), (req, res) => {
-  res.clearCookie(COOKIE_NAME, { path: "/" })
-  info("logout", { user: req.auth.username, role: req.auth.role, ip: req.ip })
-  res.json({ ok: true })
+router.post("/logout", requireRole("superadmin", "member"), async (req, res, next) => {
+  try {
+    // 只清 Cookie 是不够的：JWT 是无状态的，已经发出去的令牌在有效期内
+    // （默认 72 小时）仍然可用，被窃取后"登出"等于无效操作。这里做真正的吊销：
+    //   - 成员：tokenVersion + 1（与改密/禁用共用同一条吊销路径）；
+    //   - 超管：会话代次 + 1，旧令牌的 `se` 对不上即失效。
+    if (req.auth.role === "superadmin") {
+      await saveConfig((draft) => {
+        draft.superSessionEpoch = (Number(draft.superSessionEpoch) || 0) + 1
+      })
+    } else if (req.auth.userId) {
+      await revokeSessions(req.auth.userId)
+    }
+    res.clearCookie(COOKIE_NAME, { path: "/" })
+    info("logout", { user: req.auth.username, role: req.auth.role, ip: req.ip })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
 })
 
 function publicGroup(g) {

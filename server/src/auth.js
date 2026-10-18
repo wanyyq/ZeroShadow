@@ -7,11 +7,32 @@ import { warn } from "./logger.js"
 
 export const COOKIE_NAME = "zs_token"
 
+/**
+ * 超管口令的"版本标识"，用来在改密码后让旧会话失效。
+ *
+ * 旧实现是 `sha256(口令)[:16]` 直接写进 JWT 载荷 —— 而 JWT 载荷是 Base64Url
+ * 编码、客户端可解码的，等于把一个"离线猜口令的校验值"随着登录态发给了浏览器。
+ * 现在改成以 JWT_SECRET 为密钥的 HMAC：没有密钥就算拿到载荷也无法离线验证猜测。
+ */
 const superPasswordVersion = crypto
-  .createHash("sha256")
-  .update(env.superPassword)
+  .createHmac("sha256", JWT_SECRET)
+  .update(`zs-super-pwd:${env.superPassword}`)
   .digest("hex")
   .slice(0, 16)
+
+/** 超管是否有会话代次（登出一次全部失效，见 routes/auth.js 的 logout） */
+function superSessionEpoch() {
+  try {
+    return Number(getConfig().superSessionEpoch) || 0
+  } catch {
+    return 0
+  }
+}
+
+/** 是否是超管账号（用户名比较不区分大小写，与登录逻辑保持一致） */
+export function isSuperUser(name) {
+  return String(name || "").toLowerCase() === String(env.superUser).toLowerCase()
+}
 
 export function cookieOptions(req) {
   return {
@@ -26,7 +47,7 @@ export function cookieOptions(req) {
 export function signToken(auth) {
   const payload =
     auth.role === "superadmin"
-      ? { role: "superadmin", sub: env.superUser, pv: superPasswordVersion }
+      ? { role: "superadmin", sub: env.superUser, pv: superPasswordVersion, se: superSessionEpoch() }
       : { role: "member", sub: auth.username, uid: auth.userId, tv: auth.tokenVersion }
   return jwt.sign(payload, JWT_SECRET, { expiresIn: `${env.sessionHours}h` })
 }
@@ -37,7 +58,7 @@ export function attachAuth(req, _res, next) {
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] })
-      if (payload.role === "superadmin" && payload.pv === superPasswordVersion) {
+      if (payload.role === "superadmin" && payload.pv === superPasswordVersion && (payload.se || 0) === superSessionEpoch()) {
         req.auth = { role: "superadmin", username: env.superUser, userId: null }
       } else if (payload.role === "member" && payload.uid) {
         const user = findById(payload.uid)

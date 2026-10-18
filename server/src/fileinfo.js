@@ -24,6 +24,12 @@ const HEAD_BYTES = 64 * 1024
 const HASH_MAX_BYTES = 64 * 1024 * 1024
 /** 文本类信息（行数 / 字数）最多读这么多，避免为了数行把大日志读爆 */
 const TEXT_SCAN_BYTES = 8 * 1024 * 1024
+/**
+ * 单个 ZIP 条目（docProps/*.xml）解压后允许的最大字节数。
+ * 压缩后体积上限挡不住压缩炸弹：deflate 极限压缩比约 1032:1，
+ * 4MB 的输入能解出 4GB，而 docProps 里的 XML 正常只有几 KB。
+ */
+const MAX_INFLATED_BYTES = 1024 * 1024
 
 /* ============================== 读文件 ============================== */
 
@@ -894,7 +900,11 @@ async function readZipEntry(abs, buf, name) {
   if (entry.method === 0) return data
   if (entry.method !== 8) return null
   try {
-    return zlib.inflateRawSync(data)
+    // 上面的 4MB 限制的是**压缩后**体积，解压后的输出仍然是攻击者说了算：
+    // deflate 极限压缩比约 1032:1，4MB 输入可以解出 4GB —— 而 inflateRawSync
+    // 是同步的，会把事件循环钉死几十秒并吃光内存（整个局域网同时断线）。
+    // docProps 里的 core.xml / app.xml 正常只有几 KB，1MB 足够；超了就当解析失败。
+    return zlib.inflateRawSync(data, { maxOutputLength: MAX_INFLATED_BYTES })
   } catch {
     return null
   }

@@ -4,10 +4,10 @@ import crypto from "node:crypto"
 import { WEBDAV_PATH } from "./env.js"
 import { verifyLogin } from "./users.js"
 import { loginLocked, recordLoginFail, recordLoginSuccess } from "./auth.js"
-import { effectivePerms, getConfig, uploadLimitBytes } from "./config.js"
+import { getConfig, uploadLimitBytes } from "./config.js"
 import { normRel, resolveAny, joinRel, isSameOrInside } from "./safety.js"
 import { copyEntry, listDir, moveEntry, statSafe } from "./files.js"
-import { resolveGroupContext, isVisibleForContext } from "./groups.js"
+import { permsForContext, resolveGroupContext, visibilityForContext, isVisibleForContext } from "./groups.js"
 import { moveToTrash } from "./trash.js"
 import { versionOf } from "./version.js"
 import { info, warn } from "./logger.js"
@@ -137,7 +137,10 @@ async function basicAuth(req, res, next) {
     username: user.username,
     userId: user.id,
     group: groupCtx.group,
-    perms: effectivePerms("member", groupCtx.group),
+    // 与 Web 端同一套"缺省上下文"规则：没带小组头时权限取所属组交集，
+    // 而不是回落到全局 memberPerms（DAV 客户端默认就不发这个头）
+    perms: permsForContext("member", user.id, groupCtx.group),
+    visibility: visibilityForContext("member", user.id, groupCtx.group),
   }
   next()
 }
@@ -177,7 +180,27 @@ function visible(req, rel) {
     role: "member",
     group: req.dav.group,
     userId: req.dav.userId,
+    visibility: req.dav.visibility,
   })
+}
+
+/**
+ * 计算某文件的 ETag。
+ *
+ * 小文件用内容哈希（与在线编辑器的 baseVersion 同一套算法，客户端可据 If-Match
+ * 做乐观锁）；大文件退化为 `mtime-size` —— 旧实现无论多大都 `readFile` 整份再
+ * sha1，于是对一个 4GB 视频连发几个 HEAD 就能把整个服务的内存打爆。
+ */
+const ETAG_HASH_MAX_BYTES = 8 * 1024 * 1024
+
+async function etagFor(abs, stat) {
+  if (stat.size > ETAG_HASH_MAX_BYTES) return `"s-${Math.trunc(stat.mtimeMs)}-${stat.size}"`
+  try {
+    const buf = await fs.promises.readFile(abs)
+    return `"${versionOf(buf, stat)}"`
+  } catch {
+    return `"s-${Math.trunc(stat.mtimeMs)}-${stat.size}"`
+  }
 }
 
 function deny(res, perm) {
@@ -299,13 +322,7 @@ async function handleGet(req, res, headOnly) {
 
   // ETag = 内容版本（与在线编辑器的 baseVersion 同一套计算），
   // 客户端因此可以用 If-Match 做乐观锁，条件不满足时得到 412。
-  let etag = null
-  try {
-    const buf = await fs.promises.readFile(resolved.abs)
-    etag = `"${versionOf(buf, stat)}"`
-  } catch {
-    etag = `"s-${Math.trunc(stat.mtimeMs)}-${stat.size}"`
-  }
+  const etag = await etagFor(resolved.abs, stat)
   res.setHeader("ETag", etag)
   // 强制下载：DAV 内容里包含用户上传的 HTML/SVG，不该在浏览器里当作页面执行
   res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(path.basename(resolved.abs))}"`)
@@ -321,6 +338,15 @@ async function handleGet(req, res, headOnly) {
 
 async function handlePut(req, res) {
   if (!req.dav.perms.fileWrite || !req.dav.perms.upload) return deny(res, "upload")
+  // 请求体若已被 express.json() 解析过，流已经到底了：继续 pipe 只会在目标位置
+  // 写出一份 0 字节文件并返回 204（静默数据丢失）。这里明确拒绝，逼客户端换
+  // Content-Type（真正的修法是把 DAV 挂在 body parser 之前，见 index.js）。
+  if (req._body) {
+    return res.status(415).json({
+      error: "该 Content-Type 的请求体已被应用层解析，WebDAV 无法读取；请改用 application/octet-stream",
+      errorKey: "api.webdav.body_consumed",
+    })
+  }
   const resolved = resolveOrReply(req, res)
   if (!resolved) return
   if (resolved.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
@@ -337,9 +363,8 @@ async function handlePut(req, res) {
   const existing = await statSafe(resolved.abs)
   // If-Match 不一致 → 412；这让支持它的客户端能做乐观并发控制
   if (existing && req.headers["if-match"]) {
-    const buf = await fs.promises.readFile(resolved.abs).catch(() => null)
-    const current = buf ? `"${versionOf(buf, existing)}"` : null
-    if (current && req.headers["if-match"] !== current) {
+    const current = await etagFor(resolved.abs, existing)
+    if (req.headers["if-match"] !== current) {
       return res.status(412).json({ error: "文件已被其他人修改", errorKey: "api.webdav.version_conflict" })
     }
   }
@@ -466,12 +491,32 @@ async function handleCopyMove(req, res, isMove) {
   if (isSameOrInside(destRel, resolved.rel)) {
     return res.status(400).json({ error: "目标不能是自身或其子目录", errorKey: "api.webdav.destination_self_denied" })
   }
+  // 反向也要拦：把子目录搬到它自己的祖先位置（MOVE a/b → a）时，下面的"目标已存在"
+  // 会先把 a 连同源一起删掉。旧实现只查了"目标在源内部"这一个方向。
+  if (isSameOrInside(resolved.rel, destRel)) {
+    return res.status(400).json({ error: "目标不能是自身的上级目录", errorKey: "api.webdav.destination_ancestor_denied" })
+  }
+
+  // 来源必须先真实存在。旧实现只做词法解析（resolveAny 不访问磁盘），于是
+  // `COPY /dav/__nope__ → Destination: /dav/projects, Overwrite: T` 会先删掉
+  // projects 再报 ENOENT —— 一次请求永久销毁一整个目录树。
+  const srcStat = await statSafe(resolved.abs)
+  if (!srcStat) {
+    return res.status(404).json({ error: "源文件或目录不存在", errorKey: "api.webdav.source_missing" })
+  }
 
   const overwrite = String(req.headers.overwrite || "").toUpperCase() === "T"
   const destExisting = await statSafe(dest.abs)
   if (destExisting) {
     if (!overwrite) return res.status(412).json({ error: "目标已存在", errorKey: "api.webdav.destination_exists" })
-    await fs.promises.rm(dest.abs, { recursive: true, force: true })
+    // 覆盖 = 删除目标。DELETE 需要 delete 权限、且进回收站，这里必须一致：
+    // 否则只有 copy/move 权限的成员也能用 COPY+MOVE 递归销毁数据，且无从恢复。
+    if (!req.dav.perms.delete) return deny(res, "delete")
+    const trashed = await moveToTrash({ abs: dest.abs, rel: destRel }, { user: req.dav.username, role: "member", ip: req.ip })
+    // 回收站不可用（或该条目入站失败）时才退回彻底删除 —— 与 /api/fs/delete 一致
+    if (!trashed && (await statSafe(dest.abs))) {
+      await fs.promises.rm(dest.abs, { recursive: true, force: true })
+    }
   }
   await fs.promises.mkdir(path.dirname(dest.abs), { recursive: true })
 

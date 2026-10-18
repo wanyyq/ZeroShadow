@@ -11,11 +11,54 @@
 
 ---
 
-## [未发布]
+## [1.2.3] - 2026-10-18
 
-本次以「安全审计回归 + Office 预览正确性 + 右键菜单」为主，版本号仍未改动。
+本次以**第二轮安全审计修复**为主，同时包含上一轮「安全审计回归 + Office 预览正确性 + 右键菜单」的未发布改动。
 
-### 安全
+### 安全（第二轮审计）
+
+- **路径判定一律先规范化**：`resolveAny()` 现在用 `realpathSync.native` 把 Windows 8.3 短名与符号链接解析成真实路径后，
+  再做边界 / 可见性 / 敏感名判定 —— 修掉 `path=CONFID~1/…` 能读「对访客隐藏」目录、`path=ENV~1` 能读 `.env` 的问题；
+  NTFS 备用数据流（`name::$DATA`）在 Windows 上直接拒绝。
+- **覆盖即删除，必须过 `delete` 权限并进回收站**：`rename` / `move` / `copy` / 合并 / 覆盖上传，
+  以及 WebDAV `COPY` / `MOVE` 的覆盖分支，以前只校验各自权限点且直接 `fs.rm`；
+  现在需要 `delete` 权限并走回收站。WebDAV 另补「源必须先存在」「目标不能是源的上级目录」。
+- **超管账号不再能被匿名锁死**：登录改为「超管先验口令、口令错才判锁定」—— 错误口令仍会被 IP + 账号双维度锁定，
+  但正确口令永远能进（旧实现任何人打 10 次错密码就能把唯一的管理员挡在门外 5~30 分钟，且可无限续期）。
+- **登出即吊销**：成员 `tokenVersion + 1`、超管会话代次 `+ 1`，已发出的 JWT 立刻失效
+  （此前只清 Cookie，被窃令牌在 72 小时内仍然可用）。
+- **OOXML 元数据解压加上限**：`docProps` 的 deflate 解压限制输出 1 MB，
+  堵住「4 MB 压缩包解出 GB 级内存」的单请求 DoS。
+- **WebDAV 两个数据面问题**：PUT 不再被全局 `express.json()` 提前读空
+  （此前 `Content-Type: application/json` 的 PUT 会静默写成 0 字节）；GET / HEAD 的 ETag 对大文件改用 `mtime-size`，
+  不再把整文件读进内存。
+- **请求体解析移到鉴权之后**：未认证者不能再强迫服务解析 16 MB 请求体；`/save-file`、`/file` 补了速率限制。
+- **分享不能越权暴露子树**：创建时记录创建者的可见范围快照，访问 `list` / `download` 时逐条复判；
+  公开分享接口补限流、目录统计加 10 秒缓存、下载计数只在成功且非 Range 时累加。
+- **分享归属改按账号**：记录 `ownerId`（老数据自动回填），改名不再让分享变「无主」，同名新账号也不能继承旧链接；
+  禁用成员一并吊销其分享。
+- **凭据类文件名一律拦截**：`.env`、`*.env`、`.env.*`、`.jwt-secret*` 在网盘内（含软目录映射）一律 404，
+  覆盖 `.migration-backup/server.env` 这类历史副本；`data/lang` 也加入敏感条目表。
+- **`htmlPreview` 服务端生效**：无该权限时 HTML / SVG 按附件下发（仍保留 `CSP: sandbox` 第二道防线），
+  不再只靠前端拦。
+- **`/api/fs/file` 需要 `preview` 或 `downloadFile`**：只给 `browse` 的角色不能再读文件全文。
+- **只读角色真正只读**：`compressZip` / `extractZip` / `downloadUrl` 与 `fileWrite` 取与；`uploadFolders` 开始真正校验。
+- **访客写权限加总开关** `guestWrite`（默认关）：`editFiles` / `compressZip` / `extractZip` 只有在它打开时才生效。
+- **其他**：备份快照副本补 `chmod 600`；原子写的临时文件不再能被 `dotfiles:"allow"` 下载；
+  限流补「按 TCP 对端」兜底桶（伪造 `X-Forwarded-For` 不再能无限换桶）；
+  超管 JWT 里的口令指纹改为以 `JWT_SECRET` 为密钥的 HMAC。
+
+### 变更（v1.2.3 行为变化）
+
+- **小组「默认上下文」语义收紧**：成员未指定小组（或指定了不属于自己的小组）时，
+  有效权限取**所属各组权限的交集**（deny 优先），可见范围取**所属各组范围的并集** ——
+  以前去掉 `X-ZS-Group` 头就能拿回全局权限、绕开小组可见范围（WebDAV 客户端默认就不发这个头）。
+- **组长能力拆出 `manageVisibility`**（默认关），且只能**收窄**本组可见范围：清空白名单、删黑名单、加白名单一律拒绝。
+- **覆盖类操作需要 `delete` 权限**：因此「只有重命名 / 上传、没有删除」的角色不能再覆盖同名项目。
+- **登出会吊销该账号的全部会话**（同一账号的多设备一起下线）。
+- **升级后需重新登录一次超管**（口令指纹算法变更，旧会话失效）。
+
+### 安全（第一轮回归）
 
 - **只读映射目录打通 ZIP 递归**：`/api/fs/zip` 的递归打包（`scanDirForZip` /
   `addDirToArchive`）补上 `isSensitiveAbs` 判定。此前映射项目根时，匿名访客一个请求
@@ -443,6 +486,7 @@
 
 ---
 
+[1.2.3]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.3
 [1.2.1]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.1
 [1.2.0]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.0
 [1.1.2]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.1.2

@@ -1,0 +1,12 @@
+{
+  "ui.settings.perms.guest_write": "允许访客写入",
+  "ui.settings.perms.guest_write_hint": "总开关，默认关闭。关闭时下面三项（压缩、解压、在线编辑）对访客一律无效；开启后仍需逐项勾选。",
+  "ui.settings.perms.html_preview_denied": "你的账号没有 HTML 预览权限，无法打开该文件。",
+  "ui.settings.groups.leader_caps_manage_visibility": "调整本组可见范围（只能收窄）",
+  "api.fs.read_forbidden": "没有权限读取文件内容",
+  "api.fs.overwrite_needs_delete": "覆盖会删除已有的同名项目，需要「删除」权限",
+  "api.groups.visibility_widen_denied": "组长只能收窄本组可见范围，不能放宽",
+  "api.webdav.body_consumed": "该 Content-Type 的请求体已被应用层解析，WebDAV 无法读取；请改用 application/octet-stream",
+  "api.webdav.source_missing": "源文件或目录不存在",
+  "api.webdav.destination_ancestor_denied": "目标不能是自身的上级目录"
+}

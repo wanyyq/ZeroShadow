@@ -1,0 +1,12 @@
+{
+  "ui.settings.perms.guest_write": "Allow guests to write",
+  "ui.settings.perms.guest_write_hint": "Master switch, off by default. When off, compress / extract / online edit never apply to guests; when on, each still has to be enabled.",
+  "ui.settings.perms.html_preview_denied": "Your account is not allowed to preview HTML files.",
+  "ui.settings.groups.leader_caps_manage_visibility": "Adjust this group's visibility (narrow only)",
+  "api.fs.read_forbidden": "You don't have permission to read this file",
+  "api.fs.overwrite_needs_delete": "Overwriting deletes the existing item, which requires the delete permission",
+  "api.groups.visibility_widen_denied": "Group leaders can only narrow visibility, never widen it",
+  "api.webdav.body_consumed": "The request body was already consumed by the JSON parser; use application/octet-stream for WebDAV uploads",
+  "api.webdav.source_missing": "The source file or folder does not exist",
+  "api.webdav.destination_ancestor_denied": "The destination cannot be an ancestor of the source"
+}

@@ -93,6 +93,10 @@ export function snapshotFileAbs(absFile) {
     ensureDir(dir)
     const dest = path.join(dir, `${stamp()}.json`)
     fs.copyFileSync(absFile, dest)
+    // 快照里是 users.json（bcrypt 口令哈希）/ config.json 的完整副本，
+    // 权限必须与原文件一致。旧实现只给原文件 chmod，备份目录里却是一份
+    // 按 umask（常见 0644）落盘的副本 —— 越权可读的面反而在备份里。
+    restrictFileMode(dest)
     rotate(name)
     return true
   } catch {

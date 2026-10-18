@@ -59,12 +59,19 @@ export interface Group {
     manageTodo: boolean
     editMemberAvatar: boolean
     manageMembers: boolean
+    /** 调整本组可见范围（且只能收窄）；从 manageMembers 里独立出来的能力 */
+    manageVisibility: boolean
   }
   createdAt: string
   updatedAt: string
 }
 
-export type LeaderCapKey = "viewMembers" | "manageTodo" | "editMemberAvatar" | "manageMembers"
+export type LeaderCapKey =
+  | "viewMembers"
+  | "manageTodo"
+  | "editMemberAvatar"
+  | "manageMembers"
+  | "manageVisibility"
 
 export interface Todo {
   id: string
@@ -129,6 +136,8 @@ export interface LeaderGroup {
   isLeader: boolean
   canViewMembers: boolean
   canManageMembers: boolean
+  /** 能否调整本组可见范围（独立能力，且只能收窄；默认关） */
+  canManageVisibility: boolean
   canManageTodo: boolean
   whitelist: string[]
   blacklist: string[]
@@ -339,6 +348,14 @@ export interface AdminConfig {
     compressZip: boolean
     extractZip: boolean
   }
+  /**
+   * 访客写权限总开关（默认 false）。
+   * 关掉时 guestPerms 里的 editFiles / compressZip / extractZip 一律不生效
+   * （访客没有 fileWrite，这三个子权限都靠它兜底）。
+   */
+  guestWrite: boolean
+  /** 超管会话代次：登出会 +1，用于让旧令牌立即失效（服务端内部使用） */
+  superSessionEpoch?: number
   guestHiddenPaths: string[]
   tunnel: TunnelConfig
 }

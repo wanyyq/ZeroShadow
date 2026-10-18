@@ -23,7 +23,7 @@ import { deleteAvatar, ownerForUser } from "../avatars.js"
 import { listBackups, restoreBackup, snapshotAll } from "../backup.js"
 import { emptyTrash, getTrash, listTrash, purgeTrash, restoreTrash, trashAvailable, trashStats } from "../trash.js"
 import { getMetrics, readMetricsHistory } from "../metrics.js"
-import { reloadShares, removeSharesByOwner } from "../shares.js"
+import { reloadShares, removeSharesByOwner, renameShareOwner } from "../shares.js"
 import { availableLangs } from "../i18n.js"
 
 const router = Router()
@@ -68,6 +68,9 @@ const BOOLEAN_KEYS = [
   // v1.2.1 分享（分享板块里的两个开关）
   "shareEnabled",
   "sharePublicAccess",
+  // 访客写权限总开关（默认关）：关掉时 guestPerms 里的 editFiles / compressZip /
+  // extractZip 一律不生效，防止"顺手勾一个子项"就给了匿名访客写盘能力
+  "guestWrite",
 ]
 
 function cleanVisibilityPathList(value) {
@@ -201,8 +204,14 @@ router.post("/members/batch", async (req, res, next) => {
       throw httpError(400, "参数格式错误", { errorKey: "api.admin.invalid_params" })
     }
     const idList = ids.map(String)
-    // 删除前先记下用户名：batchMembers 之后 findById 就查不到了，而分享是按用户名归属的
-    const owners = action === "delete" ? idList.map((id) => findById(id)?.username).filter(Boolean) : []
+    // 删除与禁用都要先记下身份：分享改按 userId 归属（用户名可能被改名或重建），
+    // 删除/禁用之后 findById 就查不到了，必须提前取。
+    const affected =
+      action === "delete" || action === "disable"
+        ? idList
+            .map((id) => ({ id, username: findById(id)?.username || "" }))
+            .filter((u) => u.username)
+        : []
     const count = await batchMembers(action, idList)
     if (action === "delete") {
       for (const id of idList) {
@@ -210,9 +219,10 @@ router.post("/members/batch", async (req, res, next) => {
         await removeUserFromTodos(id)
         deleteAvatar(ownerForUser(id))
       }
-      // 离职成员的分享链接必须同时失效，否则链接会一直有效到过期
-      for (const owner of owners) await removeSharesByOwner(owner)
     }
+    // 离职成员的分享链接必须同时失效，否则链接会一直有效到过期；
+    // 被禁用的账号同理（禁用的意思就是"停用这个人的一切访问"）。
+    for (const u of affected) await removeSharesByOwner(u.username, u.id)
     info("members_batch", { msg: `${action} × ${count}`, ...actor(req) })
     res.json({ count })
   } catch (err) {
@@ -253,6 +263,8 @@ router.patch("/members/:id", async (req, res, next) => {
       }
       user.username = newName
       await persist()
+      // 分享记录上的所有者名字同步更新：链接继续有效，创建者仍然能列出/取消它
+      await renameShareOwner(user.id, newName)
       info("members_rename", { msg: `${req.params.id} → ${newName}`, ...actor(req) })
     }
     res.json({ ok: true })

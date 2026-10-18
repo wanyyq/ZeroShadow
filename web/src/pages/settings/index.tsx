@@ -699,6 +699,7 @@ function PermsSection() {
   const m = config.memberPerms
   const g = config.guestPerms
   const fw = m.fileWrite
+  const gw = !!config.guestWrite
 
   return (
     <div className="edge-highlight rounded-xl border border-border bg-card p-5">
@@ -819,15 +820,27 @@ function PermsSection() {
 
       {/* ===== 访客权限 ===== */}
       <h3 className="mb-4 text-sm font-medium">{t("ui.settings.perms.guest_perms_title")}</h3>
+      {/* 访客写权限总开关：访客没有 fileWrite，下面三个写子权限只有在总开关打开时才
+          生效（服务端 effectivePerms 也是这么算的）。这样"允许匿名访客改文件"
+          必须是单独一次明确决定，而不是顺手勾了一个看起来无害的子项。 */}
+      <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{t("ui.settings.perms.guest_write")}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("ui.settings.perms.guest_write_hint")}</p>
+          </div>
+          <Switch checked={!!config.guestWrite} onCheckedChange={(v) => patch({ guestWrite: !!v })} />
+        </div>
+      </div>
       <div className="mb-4 grid gap-px sm:grid-cols-2">
         {permItem(t("ui.settings.perms.browse"), g.browse, (v) => patch({ guestPerms: { browse: !!v } }))}
         {permItem(t("ui.settings.perms.download_file"), g.downloadFile, (v) => patch({ guestPerms: { downloadFile: !!v } }))}
         {permItem(t("ui.settings.perms.download_folder"), g.downloadFolder, (v) => patch({ guestPerms: { downloadFolder: !!v } }))}
         {permItem(t("ui.settings.perms.preview"), g.preview, (v) => patch({ guestPerms: { preview: !!v } }))}
-        {permItem(t("ui.settings.perms.compress_zip"), g.compressZip, (v) => patch({ guestPerms: { compressZip: !!v } }))}
-        {permItem(t("ui.settings.perms.extract_zip"), g.extractZip, (v) => patch({ guestPerms: { extractZip: !!v } }))}
         {permItem(t("ui.settings.perms.html_preview"), g.htmlPreview, (v) => patch({ guestPerms: { htmlPreview: !!v } }))}
-        {permItem(t("ui.settings.perms.edit_files"), g.editFiles, (v) => patch({ guestPerms: { editFiles: !!v } }))}
+        {permItem(t("ui.settings.perms.compress_zip"), gw && g.compressZip, (v) => patch({ guestPerms: { compressZip: !!v } }), !gw)}
+        {permItem(t("ui.settings.perms.extract_zip"), gw && g.extractZip, (v) => patch({ guestPerms: { extractZip: !!v } }), !gw)}
+        {permItem(t("ui.settings.perms.edit_files"), gw && g.editFiles, (v) => patch({ guestPerms: { editFiles: !!v } }), !gw)}
       </div>
 
       {/* 隐藏文件夹 */}
@@ -861,11 +874,11 @@ function PermsSection() {
   )
 }
 
-function permItem(label: string, checked: boolean, onChange: (v: boolean) => void) {
+function permItem(label: string, checked: boolean, onChange: (v: boolean) => void, disabled = false) {
   return (
-    <div className="flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/30">
+    <div className={"flex items-center justify-between rounded-md px-3 py-1.5 hover:bg-muted/30" + (disabled ? " opacity-50" : "")}>
       <span className="text-sm">{label}</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
     </div>
   )
 }

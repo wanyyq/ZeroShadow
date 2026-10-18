@@ -1,0 +1,12 @@
+{
+  "ui.settings.perms.guest_write": "Permitir escritura a invitados",
+  "ui.settings.perms.guest_write_hint": "Interruptor principal, desactivado por defecto. Si está desactivado, comprimir, extraer y editar no se aplican a los invitados.",
+  "ui.settings.perms.html_preview_denied": "Tu cuenta no tiene permiso para previsualizar archivos HTML.",
+  "ui.settings.groups.leader_caps_manage_visibility": "Ajustar la visibilidad del grupo (solo restringir)",
+  "api.fs.read_forbidden": "No tienes permiso para leer este archivo",
+  "api.fs.overwrite_needs_delete": "Sobrescribir elimina el elemento existente y requiere el permiso de borrado",
+  "api.groups.visibility_widen_denied": "Los líderes solo pueden restringir la visibilidad, nunca ampliarla",
+  "api.webdav.body_consumed": "El cuerpo ya fue consumido por el analizador JSON; usa application/octet-stream para WebDAV",
+  "api.webdav.source_missing": "El archivo o la carpeta de origen no existe",
+  "api.webdav.destination_ancestor_denied": "El destino no puede ser un directorio superior al origen"
+}

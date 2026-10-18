@@ -1,0 +1,12 @@
+{
+  "ui.settings.perms.guest_write": "ゲストの書き込みを許可",
+  "ui.settings.perms.guest_write_hint": "マスタースイッチ（既定はオフ）。オフのとき、下の 3 項目（圧縮・解凍・オンライン編集）はゲストには適用されません。",
+  "ui.settings.perms.html_preview_denied": "このアカウントには HTML プレビューの権限がありません。",
+  "ui.settings.groups.leader_caps_manage_visibility": "このグループの表示範囲を調整（縮小のみ）",
+  "api.fs.read_forbidden": "ファイルの内容を読み取る権限がありません",
+  "api.fs.overwrite_needs_delete": "上書きは既存項目の削除を伴うため「削除」権限が必要です",
+  "api.groups.visibility_widen_denied": "グループ長は表示範囲を狭めることしかできません",
+  "api.webdav.body_consumed": "この Content-Type の本文はアプリ側で消費済みのため WebDAV では読み取れません。application/octet-stream を使用してください",
+  "api.webdav.source_missing": "コピー元のファイルまたはフォルダーが存在しません",
+  "api.webdav.destination_ancestor_denied": "移動先をコピー元の親ディレクトリにすることはできません"
+}

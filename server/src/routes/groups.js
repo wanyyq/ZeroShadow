@@ -1,7 +1,7 @@
 import { Router } from "express"
 import { requireRole } from "../auth.js"
 import { findById, listMembers } from "../users.js"
-import { addMembers, getGroup, groupsForUser, leaderHasCap, listGroups, updateGroup } from "../groups.js"
+import { addMembers, getGroup, groupsForUser, isVisibilityNarrower, leaderHasCap, listGroups, updateGroup } from "../groups.js"
 import { info } from "../logger.js"
 import { httpError } from "../http.js"
 
@@ -34,7 +34,9 @@ function publicMember(id) {
 function manageableGroups(req) {
   if (req.auth.role === "superadmin") return listGroups()
   const led = groupsForUser(req.auth.userId).filter((g) => g.leaders.includes(req.auth.userId))
-  return led.filter((g) => g.leaderCaps.viewMembers || g.leaderCaps.manageMembers || g.leaderCaps.manageTodo)
+  return led.filter(
+    (g) => g.leaderCaps.viewMembers || g.leaderCaps.manageMembers || g.leaderCaps.manageTodo || g.leaderCaps.manageVisibility
+  )
 }
 
 function serialize(req, group) {
@@ -49,6 +51,7 @@ function serialize(req, group) {
     isLeader: isLeader(req, group),
     canViewMembers: canView,
     canManageMembers: canManage,
+    canManageVisibility: isSuper || !!group.leaderCaps.manageVisibility,
     canManageTodo: isSuper || !!group.leaderCaps.manageTodo,
     whitelist: group.whitelist,
     blacklist: group.blacklist,
@@ -117,7 +120,10 @@ router.patch("/:id", async (req, res, next) => {
     const group = getGroup(String(req.params.id))
     if (!group) throw httpError(404, "小组不存在", { errorKey: "api.groups.not_found" })
     const isSuper = req.auth.role === "superadmin"
-    if (!isSuper && !(isLeader(req, group) && group.leaderCaps.manageMembers)) {
+    // 组长改可见范围需要**独立**能力 manageVisibility（默认关）。旧实现把它混在
+    // manageMembers 里，「能增删成员」顺手就获得了「改全组可见范围」的权力 ——
+    // 组长把自己组的白名单清空就等于放宽了全组的可见范围。
+    if (!isSuper && !(isLeader(req, group) && group.leaderCaps.manageVisibility)) {
       throw httpError(403, "没有权限调整该小组可见范围", { errorKey: "api.groups.visibility_denied" })
     }
     // 组长只能改可见范围；名称/颜色/权限等仍归超管
@@ -126,6 +132,19 @@ router.patch("/:id", async (req, res, next) => {
     if (req.body?.blacklist !== undefined) patch.blacklist = req.body.blacklist
     if (!Object.keys(patch).length) {
       throw httpError(400, "没有可更新的字段", { errorKey: "api.groups.no_fields_to_update" })
+    }
+    // 即便有 manageVisibility，组长也只能**收窄**：清空白名单、删掉黑名单、把新目录
+    // 加进白名单都属于放宽，等于绕过超管划定的边界。
+    if (!isSuper) {
+      const next = {
+        whitelist: patch.whitelist !== undefined ? patch.whitelist : group.whitelist,
+        blacklist: patch.blacklist !== undefined ? patch.blacklist : group.blacklist,
+      }
+      if (!isVisibilityNarrower(next, { whitelist: group.whitelist, blacklist: group.blacklist })) {
+        throw httpError(403, "组长只能收窄本组可见范围，不能放宽", {
+          errorKey: "api.groups.visibility_widen_denied",
+        })
+      }
     }
     const updated = await updateGroup(group.id, patch)
     info("group_update", { msg: `${updated.name} 可见范围调整`, ...actor(req) })

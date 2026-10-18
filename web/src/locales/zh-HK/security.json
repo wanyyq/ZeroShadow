@@ -1,0 +1,12 @@
+{
+  "ui.settings.perms.guest_write": "允許訪客寫入",
+  "ui.settings.perms.guest_write_hint": "總開關，預設關閉。關閉時下面三項（壓縮、解壓、線上編輯）對訪客一律無效；開啟後仍需逐項勾選。",
+  "ui.settings.perms.html_preview_denied": "你的帳號沒有 HTML 預覽權限，無法開啟該檔案。",
+  "ui.settings.groups.leader_caps_manage_visibility": "調整本組可見範圍（只能收窄）",
+  "api.fs.read_forbidden": "沒有權限讀取檔案內容",
+  "api.fs.overwrite_needs_delete": "覆蓋會刪除已有的同名項目，需要「刪除」權限",
+  "api.groups.visibility_widen_denied": "組長只能收窄本組可見範圍，不能放寬",
+  "api.webdav.body_consumed": "該 Content-Type 的請求本文已被應用層解析，WebDAV 無法讀取；請改用 application/octet-stream",
+  "api.webdav.source_missing": "來源檔案或目錄不存在",
+  "api.webdav.destination_ancestor_denied": "目標不能是自身的上級目錄"
+}

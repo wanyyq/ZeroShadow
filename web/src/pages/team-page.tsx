@@ -528,6 +528,9 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
   const whiteCount = white.split("\n").map((l) => l.trim()).filter(Boolean).length
   const blackCount = black.split("\n").map((l) => l.trim()).filter(Boolean).length
   const canManage = group.canManageMembers
+  // 「调整本组可见范围」是独立能力（manageVisibility，默认关）：只有它能改白/黑名单，
+  // 而且服务端只接受"收窄"，放宽会被 403。
+  const canVisibility = group.canManageVisibility
 
   const add = async (id: string) => {
     setBusyId(id)
@@ -654,7 +657,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                           {whiteCount ? whiteCount : t("ui.team.unlimited")}
                         </Badge>
                       </FieldLabel>
-                      {canManage && (
+                      {canVisibility && (
                         <Button size="xs" variant="ghost" onClick={() => setPicking("white")}>
                           <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.team.pick_from_browser")}
                         </Button>
@@ -663,7 +666,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                     <Textarea
                       id="lg-white"
                       rows={5}
-                      disabled={!canManage}
+                      disabled={!canVisibility}
                       className="resize-none font-mono text-xs"
                       placeholder={t("ui.team.whitelist_placeholder")}
                       value={white}
@@ -680,7 +683,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                           {blackCount ? blackCount : t("ui.common.none")}
                         </Badge>
                       </FieldLabel>
-                      {canManage && (
+                      {canVisibility && (
                         <Button size="xs" variant="ghost" onClick={() => setPicking("black")}>
                           <Icon name="folder-tree" data-icon="inline-start" /> {t("ui.team.pick_from_browser")}
                         </Button>
@@ -689,7 +692,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                     <Textarea
                       id="lg-black"
                       rows={5}
-                      disabled={!canManage}
+                      disabled={!canVisibility}
                       className="resize-none font-mono text-xs"
                       placeholder={t("ui.team.blacklist_placeholder")}
                       value={black}
@@ -700,7 +703,7 @@ function LeaderGroupDialog({ group, allMembers, onClose, onChanged }: {
                 </FieldGroup>
 
                 <div className="mt-auto flex justify-end">
-                  <Button size="sm" disabled={saving || !canManage} onClick={saveVisibility}>
+                  <Button size="sm" disabled={saving || !canVisibility} onClick={saveVisibility}>
                     {saving && <Icon name="loader-2" className="animate-spin" data-icon="inline-start" />} {t("ui.team.save_visibility")}
                   </Button>
                 </div>

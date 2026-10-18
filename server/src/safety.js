@@ -5,6 +5,7 @@ import { getConfig } from "./config.js"
 import { httpError } from "./http.js"
 
 const CASE_INSENSITIVE = process.platform === "win32" || process.platform === "darwin"
+const WIN = process.platform === "win32"
 
 /**
  * 本机文件系统是否不区分大小写。
@@ -23,8 +24,62 @@ export function normRel(input = "") {
   const parts = raw.split("/").filter((p) => p !== "" && p !== ".")
   for (const part of parts) {
     if (part === "..") throw badPath()
+    // Windows 上 `:` 同时代表 NTFS 备用数据流（`notes.txt::$DATA` / `:hidden`）与
+    // 驱动器前缀，而这两个都是"同一个文件名、不同字符串"的绕过手段：
+    // 判定逻辑按字符串比较，`path.resolve(".env::$DATA")` 不等于 `.env`，
+    // 于是 isSensitiveAbs / isHiddenFromGuest 全部失效，但 OS 打开的仍是同一个文件。
+    // Windows 文件名本身不允许 `:`，因此在这里一律拒绝不会误伤任何合法文件。
+    if (WIN && part.includes(":")) throw badPath()
   }
   return parts.join("/")
+}
+
+/**
+ * 把绝对路径换成**文件系统真实路径**。
+ *
+ * 这是所有"按路径字符串做安全判定"的前提：Windows 的 8.3 短名（`PRIVAT~1`）、
+ * 符号链接 / junction、大小写变体都会让同一个文件拥有多个不同的字符串表示，
+ * 而 `isHiddenFromGuest` / `isSensitiveAbs` 是按字符串比较的 —— 不规范化就等于
+ * 用字符串黑名单挡文件系统，一绕就过。
+ *
+ * - 路径存在：直接 `realpathSync.native`（短名会被展开成长名，链接会被解开）；
+ * - 路径不存在（新建/上传目标）：向上找到最近的已存在祖先做 realpath，再把
+ *   余下的段拼回去，因此"在隐藏目录里新建文件"也会被规范化到真实目录名下；
+ * - 全部失败：原样返回（调用方的边界检查依然有效，绝不因此放行）。
+ */
+function realpathish(abs) {
+  const original = path.resolve(abs)
+  let current = original
+  const tail = []
+  for (let i = 0; i < 64; i += 1) {
+    try {
+      const real = fs.realpathSync.native(current)
+      return tail.length ? path.join(real, ...[...tail].reverse()) : real
+    } catch {
+      const parent = path.dirname(current)
+      if (parent === current) return original
+      tail.push(path.basename(current))
+      current = parent
+    }
+  }
+  return original
+}
+
+/** Windows 分隔符 → 网盘相对路径使用的 `/` */
+function toPosix(value) {
+  return path.sep === "/" ? value : value.split(path.sep).join("/")
+}
+
+/**
+ * 服务自身的临时文件（原子写的中间产物）。它们落在被服务托管的目录里，
+ * 内容就是用户正在保存的正文，绝不能出现在列表里、也不能被下载。
+ * 命名由 store.js / routes/fs.js / webdav.js / avatars.js 统一生成：
+ *   `.<名字>.<pid>.<13 位时间戳>.tmp` / `.davtmp`、`<名字>.restore-<时间戳>`
+ */
+const INTERNAL_TEMP_RE = /^.+\.\d{1,7}\.\d{10,}\.(?:tmp|davtmp)$|^.+\.restore-\d{10,}$/
+
+export function isInternalTempName(name) {
+  return INTERNAL_TEMP_RE.test(String(name || ""))
 }
 
 // 错误提示带 errorKey（命名键）供前端本地化，中文原文照旧回传（见 http.js）
@@ -34,7 +89,8 @@ function badPath() {
 
 export function resolveSafe(input = "") {
   const rel = normRel(input)
-  if (!rel) return { abs: FILES_DIR, rel: "", isSoft: false }
+  // 空路径也要走 resolveAny：网盘根目录本身可能是符号链接或位于 8.3 路径下，
+  // 这里必须拿到规范化后的根，后续 `abs + 子名` 的拼接才与真实路径一致。
   return resolveAny(rel)
 }
 
@@ -44,27 +100,36 @@ export function resolveAny(rel) {
   // 之类的继承属性；再做一次类型校验作为双保险
   const softDirAbs = typeof SOFT_DIRS[first] === "string" ? SOFT_DIRS[first] : null
   if (softDirAbs) {
-    const base = path.resolve(softDirAbs)
+    // 基准目录也规范化：映射目录本身可能就是链接（或路径里带 8.3 短名）
+    const base = realpathish(path.resolve(softDirAbs))
     const sub = rel.slice(first.length)
     const subRel = sub.startsWith("/") ? sub.slice(1) : sub
-    const resolved = subRel ? path.resolve(base, subRel) : base
-    // 必须按路径分隔符判断边界，否则 "D:\soft" 会误认为 "D:\soft-secret" 在内部
+    const resolved = subRel ? realpathish(path.join(base, ...subRel.split("/"))) : base
+    // 必须按路径分隔符判断边界，否则 "D:\soft" 会误认为 "D:\soft-secret" 在内部。
+    // 这里判断的是**规范化之后**的路径，因此中间层符号链接指向根外时也会被拦下。
     if (resolved !== base && !resolved.startsWith(base + path.sep)) throw badPath()
+    const canonicalRel = resolved === base ? first : joinRel(first, toPosix(path.relative(base, resolved)))
+    if (isInternalTempName(path.basename(resolved))) throw notFound()
     // 软目录常被用来映射项目目录（模板里甚至给过 "./"），那里放着 .env（超管明文
     // 密码）与 data/（会话签名密钥、口令哈希、日志、备份）。这些属于服务自身，
     // 永远不能通过网盘接口读写 —— 与访客/成员身份无关。
     if (isSensitiveAbs(resolved)) throw notFound()
-    return { abs: resolved, rel, isSoft: true, softName: first, softBase: base }
+    return { abs: resolved, rel: canonicalRel, isSoft: true, softName: first, softBase: base }
   }
-  const abs = rel ? path.join(FILES_DIR, ...rel.split("/")) : FILES_DIR
-  const resolved = path.resolve(abs)
-  const root = path.resolve(FILES_DIR)
+  // 同理：网盘根目录本身也可能是链接，先规范化再拼接与比较
+  const root = realpathish(path.resolve(FILES_DIR))
+  const abs = rel ? path.join(root, ...rel.split("/")) : root
+  const resolved = realpathish(abs)
   if (resolved !== root && !resolved.startsWith(root + path.sep)) throw badPath()
+  const canonicalRel = resolved === root ? "" : toPosix(path.relative(root, resolved))
+  if (isInternalTempName(path.basename(resolved))) throw notFound()
   // 同样的拦截也要作用在网盘本体这一侧：如果有人把 FILES_DIR 设成项目根目录，
   // 那么 .env 与 data/ 就都落在"网盘里"了，凭据与运行数据必须依然拿不到。
   // 默认布局（FILES_DIR=data/files）下这条永远不成立，因此不影响正常使用。
   if (isSensitiveAbs(resolved)) throw notFound()
-  return { abs: resolved, rel, isSoft: false }
+  // 返回**规范化**后的相对路径：后续所有判定（访客隐藏、小组可见范围、敏感名）
+  // 都基于它，因此 8.3 短名 / 符号链接无法再让同一个文件出现两种说法。
+  return { abs: resolved, rel: canonicalRel, isSoft: false }
 }
 
 function notFound() {
@@ -88,6 +153,9 @@ const SENSITIVE_DATA_ENTRIES = new Set([
   "tmp",
   "trash",
   "avatars",
+  // 界面语言文件同样属于"服务自身可读写的数据"：写进去的译文会直接渲染到所有
+  // 使用该语言的界面上，不该由网盘用户（哪怕是成员）随意改动
+  "lang",
 ])
 
 /**
@@ -111,6 +179,15 @@ export function isSensitiveAbs(abs) {
   // Windows / macOS 的文件系统不区分大小写：`.ENV`、`Data\Config.json` 与真实文件
   // 是同一个。比较前统一归一，否则一个大小写变形就能把这条防线整个绕开。
   const norm = CASE_INSENSITIVE ? resolved.toLowerCase() : resolved
+  // ---- 第一条：按**文件名**拦住凭据类文件，与它放在哪个目录无关 ----
+  // 只知道"项目根下的 .env"是不够的：迁移备份目录里放着旧 .env 副本
+  // （`.migration-backup/xxx/server.env`）、旧会话密钥（`server-data/.jwt-secret`），
+  // 一旦软目录映射到项目根，这些就是现成的口令与签发密钥。
+  // 也要覆盖常见的备份命名（`.env.bak` / `.env.local` / `.env.old` / `prod.env`），
+  // 它们的内容同样是明文口令。
+  const baseName = CASE_INSENSITIVE ? path.basename(norm) : path.basename(resolved)
+  if (baseName === ".env" || baseName.endsWith(".env") || /^\.env[.\-_]/.test(baseName)) return true
+  if (baseName === ".jwt-secret" || baseName.startsWith(".jwt-secret")) return true
   const envFile = path.resolve(ENV_FILE)
   if (norm === (CASE_INSENSITIVE ? envFile.toLowerCase() : envFile)) return true
   const dataRoot = path.resolve(DATA_DIR)

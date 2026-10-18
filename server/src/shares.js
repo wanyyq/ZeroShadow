@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken"
 import { DATA_DIR, JWT_SECRET } from "./env.js"
 import { readJsonSync, withLock, writeJsonAtomic } from "./store.js"
 import { httpError } from "./http.js"
+import { findByUsername } from "./users.js"
 
 // ============================================================================
 //  shares.js —— 分享链接（v1.2.1 新增）
@@ -86,6 +87,29 @@ let state = null
  * 归一化单个条目：旧数据/手改数据缺字段时补默认值，未知字段原样保留。
  * 返回 null 表示这条记录无法使用（没有 token 或 path 就没法定位资源）。
  */
+function cleanVisibilityPathList(value) {
+  if (!Array.isArray(value)) return []
+  const out = []
+  for (const item of value) {
+    const rel = String(item || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+|\/+$/g, "")
+      .trim()
+    if (!rel || rel.split("/").some((p) => p === "..")) continue
+    if (!out.includes(rel)) out.push(rel)
+    if (out.length >= 200) break
+  }
+  return out
+}
+
+function cleanVisibility(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
+  const whitelist = cleanVisibilityPathList(raw.whitelist)
+  const blacklist = cleanVisibilityPathList(raw.blacklist)
+  // 空快照等价于"当时没设可见范围"，保留对象即可（判定时 unrestricted）
+  return { whitelist, blacklist }
+}
+
 function normalizeShare(raw, index) {
   if (!raw || typeof raw !== "object") return null
   const token = typeof raw.token === "string" ? raw.token.trim() : ""
@@ -101,7 +125,13 @@ function normalizeShare(raw, index) {
     name: typeof raw.name === "string" && raw.name ? raw.name : rel.split("/").pop() || rel,
     isFolder: !!raw.isFolder,
     owner: typeof raw.owner === "string" ? raw.owner : "",
+    // 归属真正的键：用户名可以被改名、也可以被"重新注册"，userId 不会
+    ownerId: typeof raw.ownerId === "string" ? raw.ownerId : "",
     ownerRole: typeof raw.ownerRole === "string" ? raw.ownerRole : "member",
+    // 创建时创建者所处上下文的可见范围快照。访问时按它再判一次，防止
+    // "分享一个父目录 → 越权读到创建者自己也看不到的子目录"（安全审计 M8）。
+    // null 表示老记录/未记录，等同"当时不限制"。
+    visibility: cleanVisibility(raw.visibility),
     createdAt,
     expiresAt,
     // 访客不可见的路径必须带密码；老数据没有这个标记时按"有密码就算需要"推断
@@ -122,7 +152,14 @@ function load() {
   const shares = []
   list.forEach((item, index) => {
     const normalized = normalizeShare(item, index)
-    if (normalized) shares.push(normalized)
+    if (!normalized) return
+    // 老记录只有用户名、没有 userId：启动时按当前账号表补一次，
+    // 免得"改名后分享变无主"或"同名新账号继承旧链接"。
+    if (!normalized.ownerId && normalized.owner) {
+      const user = findByUsername(normalized.owner)
+      if (user) normalized.ownerId = user.id
+    }
+    shares.push(normalized)
   })
   state = { version: 1, shares }
   return state
@@ -145,26 +182,54 @@ export function listAllShares() {
   return [...load().shares]
 }
 
-export function listSharesByOwner(owner) {
-  return load().shares.filter((s) => s.owner === owner)
+/**
+ * 某用户名下的分享。
+ *
+ * 优先按 userId 匹配：用户名可以被改名，也可以被"删掉再重新创建同名账号"，
+ * 只按名字匹配会出现"改名后分享无主（无法取消、但链接仍然有效）"以及
+ * "同名新账号继承旧分享（连 token 一起）"两类问题（安全审计 L13）。
+ */
+export function listSharesByOwner(owner, ownerId = "") {
+  const name = String(owner || "")
+  const id = String(ownerId || "")
+  return load().shares.filter((s) => (id && s.ownerId ? s.ownerId === id : s.owner === name))
 }
 
 /**
- * 删除某个用户名下的全部分享（成员被删除时调用）。
+ * 删除某个身份名下的全部分享（成员被删除/禁用时调用）。
  *
- * 分享记录以**用户名**为归属键；成员离职后链接若继续有效，等于把文件长期留在公网。
- * 同时这也避免"重建同名账号继承旧分享"的问题。
+ * 分享记录归属于**账号**；成员离职后链接若继续有效，等于把文件长期留在公网。
  * @returns {Promise<number>} 被删除的条数
  */
-export async function removeSharesByOwner(owner) {
+export async function removeSharesByOwner(owner, ownerId = "") {
   const name = String(owner || "")
-  if (!name) return 0
+  const id = String(ownerId || "")
+  if (!name && !id) return 0
   const current = load()
   const before = current.shares.length
-  current.shares = current.shares.filter((s) => s.owner !== name)
+  current.shares = current.shares.filter((s) =>
+    id && s.ownerId ? s.ownerId !== id : s.owner !== name
+  )
   const removed = before - current.shares.length
   if (removed) await persist()
   return removed
+}
+
+/** 成员改名后同步分享记录上的所有者名字（userId 不变，链接继续可管理） */
+export async function renameShareOwner(userId, newName) {
+  const id = String(userId || "")
+  const name = String(newName || "")
+  if (!id || !name) return 0
+  const current = load()
+  let changed = 0
+  for (const share of current.shares) {
+    if (share.ownerId === id && share.owner !== name) {
+      share.owner = name
+      changed += 1
+    }
+  }
+  if (changed) await persist()
+  return changed
 }
 
 export function findByToken(token) {
@@ -239,7 +304,10 @@ export async function createShare(input) {
     name: String(input.name || rel.split("/").pop() || rel).slice(0, 200),
     isFolder: !!input.isFolder,
     owner: String(input.owner || ""),
+    ownerId: String(input.ownerId || ""),
     ownerRole: String(input.ownerRole || "member"),
+    // 可见范围快照：创建时创建者能看到的范围。访问时会再用它判一次。
+    visibility: cleanVisibility(input.visibility),
     createdAt: now,
     expiresAt: now + expireSeconds * 1000,
     requirePassword: requirePassword || !!passwordHash,
@@ -257,13 +325,14 @@ export async function createShare(input) {
  * 删除分享（创建者本人或超管）。
  * @returns {boolean} 是否真的删掉了
  */
-export async function revokeShare(id, { owner = null, role = null } = {}) {
+export async function revokeShare(id, { owner = null, ownerId = "", role = null } = {}) {
   const current = load()
   const index = current.shares.findIndex((s) => s.id === id)
   if (index < 0) return false
   const share = current.shares[index]
-  if (role !== "superadmin" && owner !== null && share.owner !== owner) {
-    throw httpError(403, "只能取消自己创建的分享", { errorKey: "api.share.revoke_forbidden" })
+  if (role !== "superadmin" && owner !== null) {
+    const mine = ownerId && share.ownerId ? share.ownerId === ownerId : share.owner === owner
+    if (!mine) throw httpError(403, "只能取消自己创建的分享", { errorKey: "api.share.revoke_forbidden" })
   }
   current.shares.splice(index, 1)
   await persist()
