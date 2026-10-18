@@ -230,6 +230,9 @@ router.patch("/:id", async (req, res, next) => {
 
 router.post("/:id/done", async (req, res, next) => {
   try {
+    if (getConfig().todoEnabled === false) {
+      throw httpError(403, "Todo 功能已关闭", { errorKey: "api.todos.disabled" })
+    }
     const todo = getTodo(String(req.params.id))
     if (!todo) throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
     if (!canComplete(todo, req)) {
@@ -246,6 +249,9 @@ router.post("/:id/done", async (req, res, next) => {
 
 router.delete("/:id", async (req, res, next) => {
   try {
+    if (getConfig().todoEnabled === false) {
+      throw httpError(403, "Todo 功能已关闭", { errorKey: "api.todos.disabled" })
+    }
     const todo = getTodo(String(req.params.id))
     if (!todo) throw httpError(404, "Todo 不存在", { errorKey: "api.todos.not_found" })
     if (!canManage(todo, req)) {

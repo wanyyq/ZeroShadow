@@ -28,6 +28,7 @@ import i18nRoutes from "./src/routes/i18n.js"
 import { customLangCodes, ensureLangDir } from "./src/i18n.js"
 import { flushShareStats, pruneShares, reloadShares } from "./src/shares.js"
 import { createStaticCompressor } from "./src/compress.js"
+import { SHELL_CSP } from "./src/csp.js"
 import { adminShareRouter, manageShareRouter, publicShareRouter } from "./src/routes/shares.js"
 
 // 启动自检：隔离损坏的 JSON、清理 tmp 残留，然后重载内存态
@@ -131,21 +132,8 @@ if (webdav) {
 
 // 应用外壳的 CSP：脚本只允许同源文件（构建产物 index.html 无内联脚本），样式
 // 保留 inline 以兼容 UI 库注入的 <style>；允许本站把预览页放进 iframe。
-// 注意：这里只作用于前端文档，/api 响应不受影响（上传内容走 fs.js 里独立的
-// sandbox 策略）。
-const SHELL_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "media-src 'self' blob:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'self'",
-].join("; ")
+// 常量放在 csp.js，压缩中间件那条出口也要用同一份（见 compress.js）。
+
 
 if (fs.existsSync(WEB_DIST)) {
   // 兼容模式（web/public/robustness/）是独立于前端的静态页，这里必须显式处理：

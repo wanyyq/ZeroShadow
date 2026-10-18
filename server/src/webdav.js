@@ -3,8 +3,9 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { WEBDAV_PATH } from "./env.js"
 import { verifyLogin } from "./users.js"
+import { loginLocked, recordLoginFail, recordLoginSuccess } from "./auth.js"
 import { effectivePerms, getConfig, uploadLimitBytes } from "./config.js"
-import { normRel, resolveAny, joinRel, isHiddenFromGuest, isSameOrInside } from "./safety.js"
+import { normRel, resolveAny, joinRel, isSameOrInside } from "./safety.js"
 import { copyEntry, listDir, moveEntry, statSafe } from "./files.js"
 import { resolveGroupContext, isVisibleForContext } from "./groups.js"
 import { moveToTrash } from "./trash.js"
@@ -104,12 +105,26 @@ async function basicAuth(req, res, next) {
   const creds = parseBasic(req.headers.authorization)
   if (!creds || !creds.username || !creds.password) return unauthorized(res)
 
+  // 与 Web 登录共用同一套失败计数：Basic 凭据每个请求都会重复发送，没有锁定
+  // 就等于把成员口令暴露给无限次离线/在线猜测，还会被用来打满 bcrypt 的 CPU。
+  const locked = loginLocked(req.ip, creds.username)
+  if (locked > 0) {
+    res.setHeader("Retry-After", String(locked * 60))
+    return res.status(429).json({
+      error: `尝试次数过多，请 ${locked} 分钟后再试`,
+      errorKey: "api.auth.too_many_attempts",
+      errorParams: { minutes: locked },
+    })
+  }
+
   // 超管账号不接受（密码只应留在 .env 与本机，不该被客户端反复发送）
   const result = await verifyLogin(creds.username, creds.password)
   if (!result.ok) {
+    recordLoginFail(req.ip, creds.username)
     warn("webdav_auth_fail", { msg: creds.username, ip: req.ip })
     return unauthorized(res, "用户名或密码错误", "api.webdav.invalid_credentials")
   }
+  recordLoginSuccess(req.ip, creds.username)
   const user = result.user
   // 与 Web 端一致：小组上下文走 ?group= 或 X-ZS-Group（DAV 客户端一般不发头，
   // 因此默认落在「默认上下文」上，权限即全局 memberPerms）
@@ -156,7 +171,8 @@ function relFromUrl(req) {
 /** 相对路径是否对当前身份可见（隐藏目录按"不存在"处理） */
 function visible(req, rel) {
   if (!rel) return true
-  if (isHiddenFromGuest(rel)) return false
+  // DAV 只接受成员账号，而「对访客隐藏」只应约束访客；套在成员身上会让成员
+  // 在 Web 端看得到的目录在挂载盘里变成 404（与文档「成员一切正常」相反）。
   return isVisibleForContext(rel, {
     role: "member",
     group: req.dav.group,
@@ -472,9 +488,16 @@ async function handleCopyMove(req, res, isMove) {
 async function handleLock(req, res) {
   // 不实现真正的排他控制：只要让 Office / 资源管理器认为锁住了即可。
   // 这里如实说明——本项目的并发保护是靠版本比对（见 version.js），不是靠锁。
+  // 但"要不要锁"仍要过权限：否则任何成员（哪怕 browse=false）都能对任意路径
+  // 无限写锁条目，把内存当免费存储用。
+  const rel = relFromUrl(req)
+  if (rel === null) return res.status(400).json({ error: "路径无效", errorKey: "api.fs.path_invalid" })
+  if (!req.dav.perms.browse) return deny(res, "browse")
+  if (!req.dav.perms.fileWrite) return deny(res, "fileWrite")
+  if (rel && !visible(req, rel)) return res.status(404).json({ error: "文件或目录不存在", errorKey: "api.fs.not_found" })
   sweepLocks()
   const token = `opaquelocktoken:${crypto.randomUUID()}`
-  locks.set(token, { rel: relFromUrl(req), username: req.dav.username, expiresAt: Date.now() + LOCK_TTL_MS })
+  locks.set(token, { rel, username: req.dav.username, expiresAt: Date.now() + LOCK_TTL_MS })
   const body =
     '<?xml version="1.0" encoding="utf-8"?>\n' +
     '<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>' +
@@ -493,7 +516,14 @@ async function handleLock(req, res) {
 function handleUnlock(req, res) {
   const header = String(req.headers["lock-token"] || "")
   const token = header.replace(/^<|>$/g, "")
-  if (token) locks.delete(token)
+  if (token) {
+    const lock = locks.get(token)
+    // 只能解自己的锁：锁 token 会出现在响应头里，不校验归属等于谁都能解
+    if (lock && lock.username !== req.dav.username) {
+      return res.status(403).json({ error: "不能解除他人的锁", errorKey: "api.auth.forbidden" })
+    }
+    locks.delete(token)
+  }
   res.status(204).end()
 }
 

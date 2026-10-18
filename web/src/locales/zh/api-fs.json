@@ -40,5 +40,6 @@
   "api.fs.trash_not_found": "回收站里找不到这个项目",
   "api.fs.trash_content_missing": "回收站内容已丢失，无法还原",
   "api.fs.trash_invalid_target": "还原目标无效",
-  "api.fs.download_url_required": "请输入下载链接"
+  "api.fs.download_url_required": "请输入下载链接",
+  "api.fs.transfer_same_target": "目标与来源是同一个位置，已取消操作"
 }

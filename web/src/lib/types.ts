@@ -2,6 +2,7 @@ export type Role = "superadmin" | "member" | "guest"
 
 export interface Perms {
   fileWrite: boolean
+  browse: boolean
   upload: boolean
   uploadFolders: boolean
   downloadFile: boolean

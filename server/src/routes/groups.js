@@ -58,9 +58,15 @@ function serialize(req, group) {
 }
 
 router.get("/", (req, res) => {
+  const manageable = manageableGroups(req)
+  // 全站成员名单只对「超管」和「被下放了查看/管理成员能力的组长」开放：
+  // 普通成员拿到它只会扩大信息面，viewMembers=false 也就形同虚设。
+  const canSeeAll =
+    req.auth.role === "superadmin" ||
+    manageable.some((g) => g.leaderCaps.viewMembers || g.leaderCaps.manageMembers)
   res.json({
-    groups: manageableGroups(req).map((g) => serialize(req, g)),
-    allMembers: listMembers(),
+    groups: manageable.map((g) => serialize(req, g)),
+    allMembers: canSeeAll ? listMembers() : [],
   })
 })
 

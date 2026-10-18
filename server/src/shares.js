@@ -149,6 +149,24 @@ export function listSharesByOwner(owner) {
   return load().shares.filter((s) => s.owner === owner)
 }
 
+/**
+ * 删除某个用户名下的全部分享（成员被删除时调用）。
+ *
+ * 分享记录以**用户名**为归属键；成员离职后链接若继续有效，等于把文件长期留在公网。
+ * 同时这也避免"重建同名账号继承旧分享"的问题。
+ * @returns {Promise<number>} 被删除的条数
+ */
+export async function removeSharesByOwner(owner) {
+  const name = String(owner || "")
+  if (!name) return 0
+  const current = load()
+  const before = current.shares.length
+  current.shares = current.shares.filter((s) => s.owner !== name)
+  const removed = before - current.shares.length
+  if (removed) await persist()
+  return removed
+}
+
 export function findByToken(token) {
   const value = String(token || "")
   if (!value) return null

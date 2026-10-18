@@ -448,13 +448,266 @@ check("没有 a:xfrm 的标题占位符走兜底框（不丢文本）", () => {
   assert.equal(placeholder.paragraphs[0].runs[0].text, "版式标题占位符")
   assert.deepEqual(
     { x: placeholder.x, y: placeholder.y, w: placeholder.w, h: placeholder.h },
-    { x: 5, y: 5, w: 90, h: 16 }
+    { x: 8, y: 6, w: 84, h: 16 }
   )
 })
 
 check("media 里有 1 张图片", () => {
   assert.equal(pptx.media.size, 1)
   assert.equal(pptx.media.get("ppt/media/image1.png").mime, "image/png")
+})
+
+/* ---- 样式继承 / 表格列宽 / 纵向合并 / 1904 / 母版占位符 ---- */
+section("样式、表格与母版继承")
+
+function buildDocxStyled() {
+  return makeZip({
+    "[Content_Types].xml": CONTENT_TYPES,
+    "word/document.xml": `${XML_HEAD}
+<w:document ${W_NS}>
+  <w:body>
+    <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>样式标题</w:t></w:r></w:p>
+    <w:p><w:pPr><w:spacing w:before="120" w:after="240" w:line="360" w:lineRule="auto"/></w:pPr><w:r><w:t>正文</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="4000"/></w:tblGrid>
+      <w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/><w:shd w:val="clear" w:fill="FFCC00"/></w:tcPr><w:p><w:r><w:t>表头</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc></w:tr>
+    </w:tbl>
+    <w:p><w:hyperlink r:id="rIdLink"><w:r><w:t>示例链接</w:t></w:r></w:hyperlink></w:p>
+  </w:body>
+</w:document>`,
+    "word/_rels/document.xml.rels": `${XML_HEAD}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/" TargetMode="External"/>
+</Relationships>`,
+    "word/styles.xml": `${XML_HEAD}
+<w:styles ${W_NS}>
+  <w:docDefaults>
+    <w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault>
+    <w:pPrDefault><w:pPr><w:spacing w:after="160"/></w:pPr></w:pPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
+    <w:rPr><w:sz w:val="32"/><w:color w:val="1F4E79"/></w:rPr>
+  </w:style>
+</w:styles>`,
+  })
+}
+
+const styled = await office.parseOffice(await buildDocxStyled(), "docx")
+
+check("DOCX 样式继承：Heading1 → heading=1、16pt、深蓝", () => {
+  const first = styled.blocks[0]
+  assert.equal(first.kind, "paragraph")
+  assert.equal(first.heading, 1)
+  assert.equal(first.runs[0].sizePt, 16)
+  assert.equal(first.runs[0].color, "#1f4e79")
+  assert.equal(first.runs[0].bold, true)
+})
+
+check("DOCX 段落间距：before 6pt / after 12pt / 1.5 倍行距", () => {
+  const second = styled.blocks[1]
+  assert.deepEqual(second.spacing, { beforePt: 6, afterPt: 12, line: 1.5 })
+})
+
+check("DOCX 表格列宽来自 tblGrid（2:1）", () => {
+  const table = styled.blocks[2]
+  assert.equal(table.kind, "table")
+  assert.deepEqual(table.widths, [33.33, 66.67])
+})
+
+check("DOCX 单元格底纹与纵向合并（rowSpan + 续格 null）", () => {
+  const table = styled.blocks[2]
+  assert.equal(table.rows[0][0].shade, "#ffcc00")
+  assert.equal(table.rows[1][0].rowSpan, 2)
+  assert.equal(table.rows[2][0], null)
+})
+
+check("DOCX 超链接保留外部 URL", () => {
+  const para = styled.blocks[3]
+  assert.equal(para.runs[0].href, "https://example.com/")
+})
+
+function buildXlsxStyled() {
+  return makeZip({
+    "[Content_Types].xml": CONTENT_TYPES,
+    "xl/workbook.xml": `${XML_HEAD}
+<workbook ${S_NS} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <workbookPr date1904="1"/>
+  <sheets>
+    <sheet name="数据" sheetId="1" r:id="rId1"/>
+    <sheet name="隐藏" sheetId="2" state="hidden" r:id="rId2"/>
+  </sheets>
+</workbook>`,
+    "xl/_rels/workbook.xml.rels": `${XML_HEAD}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>`,
+    "xl/styles.xml": `${XML_HEAD}
+<styleSheet ${S_NS}>
+  <fonts count="2"><font/><font><b/><i/><color rgb="FFFF0000"/></font></fonts>
+  <fills count="3">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"/></patternFill></fill>
+  </fills>
+  <cellXfs count="3">
+    <xf numFmtId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2"><alignment horizontal="center" wrapText="1"/></xf>
+    <xf numFmtId="14"/>
+  </cellXfs>
+</styleSheet>`,
+    "xl/worksheets/sheet1.xml": `${XML_HEAD}
+<worksheet ${S_NS}>
+  <sheetData>
+    <row r="1" ht="30" customHeight="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>标题</t></is></c>
+      <c r="B1"><v>0.30000000000000004</v></c>
+    </row>
+    <row r="2"><c r="A2" s="2"><v>0</v></c></row>
+  </sheetData>
+</worksheet>`,
+    "xl/worksheets/sheet2.xml": `${XML_HEAD}
+<worksheet ${S_NS}><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>不该出现</t></is></c></row></sheetData></worksheet>`,
+  })
+}
+
+const xlsxStyled = await office.parseOffice(await buildXlsxStyled(), "xlsx")
+
+check("XLSX 隐藏工作表不出现", () => {
+  assert.deepEqual(xlsxStyled.sheets.map((s) => s.name), ["数据"])
+})
+
+check("XLSX 行高 ht=30 → 40px", () => assert.equal(xlsxStyled.sheets[0].rows[0].height, 40))
+
+check("XLSX 单元格样式：粗斜体 / 红字 / 绿底 / 居中 / 换行", () => {
+  const cell = xlsxStyled.sheets[0].rows[0].cells[0]
+  assert.equal(cell.bold, true)
+  assert.equal(cell.italic, true)
+  assert.equal(cell.color, "#ff0000")
+  assert.equal(cell.fill, "#00ff00")
+  assert.equal(cell.align, "center")
+  assert.equal(cell.wrap, true)
+})
+
+check("XLSX General 浮点噪声被收掉（0.1+0.2 → 0.3）", () => {
+  assert.equal(xlsxStyled.sheets[0].rows[0].cells[1].text, "0.3")
+})
+
+check("XLSX 1904 纪元：序列号 0 → 1904-01-01", () => {
+  assert.equal(xlsxStyled.sheets[0].rows[1].cells[0].text, "1904-01-01")
+})
+
+function buildPptxInherited() {
+  return makeZip({
+    "[Content_Types].xml": CONTENT_TYPES,
+    "ppt/presentation.xml": `${XML_HEAD}
+<p:presentation ${P_NS}>
+  <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+  <p:sldSz cx="12192000" cy="6858000"/>
+</p:presentation>`,
+    "ppt/_rels/presentation.xml.rels": `${XML_HEAD}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`,
+    "ppt/slides/slide1.xml": `${XML_HEAD}
+<p:sld ${P_NS}>
+  <p:cSld><p:spTree>
+    <p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:txBody><a:bodyPr/><a:p><a:r><a:t>继承标题</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+    <p:sp><p:nvSpPr><p:nvPr><p:ph type="body"/></p:nvPr></p:nvSpPr>
+      <p:spPr><a:xfrm><a:off x="0" y="2000000"/><a:ext cx="6000000" cy="3000000"/></a:xfrm></p:spPr>
+      <p:txBody>
+        <a:bodyPr wrap="none"><a:normAutofit fontScale="62500" lnSpcReduction="10000"/></a:bodyPr>
+        <a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:rPr sz="2000"/><a:t>第一项</a:t></a:r></a:p>
+        <a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:rPr sz="2000"/><a:t>第二项</a:t></a:r></a:p>
+      </p:txBody>
+    </p:sp>
+    <p:graphicFrame>
+      <p:xfrm><a:off x="1000000" y="3000000"/><a:ext cx="6000000" cy="1500000"/></p:xfrm>
+      <a:graphic><a:graphicData><a:tbl>
+        <a:tblGrid><a:gridCol w="3000000"/><a:gridCol w="3000000"/></a:tblGrid>
+        <a:tr h="750000">
+          <a:tc><a:tcPr><a:solidFill><a:srgbClr val="FFEEEE"/></a:solidFill></a:tcPr>
+            <a:txBody><a:p><a:r><a:t>甲</a:t></a:r></a:p></a:txBody></a:tc>
+          <a:tc><a:txBody><a:p><a:r><a:t>乙</a:t></a:r></a:p></a:txBody></a:tc>
+        </a:tr>
+      </a:tbl></a:graphicData></a:graphic>
+    </p:graphicFrame>
+  </p:spTree></p:cSld>
+</p:sld>`,
+    "ppt/slides/_rels/slide1.xml.rels": `${XML_HEAD}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>`,
+    "ppt/slideLayouts/slideLayout1.xml": `${XML_HEAD}
+<p:sldLayout ${P_NS}><p:cSld><p:spTree>
+  <p:sp><p:nvSpPr><p:nvPr><p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr>
+    <p:spPr><a:xfrm><a:off x="1000000" y="0"/><a:ext cx="8000000" cy="1000000"/></a:xfrm></p:spPr>
+    <p:lstStyle><a:lvl1pPr><a:defRPr sz="4400"><a:solidFill><a:schemeClr val="accent1"><a:lumMod val="60000"/></a:schemeClr></a:solidFill></a:defRPr></a:lvl1pPr></p:lstStyle>
+  </p:sp>
+</p:spTree></p:cSld></p:sldLayout>`,
+    "ppt/slideLayouts/_rels/slideLayout1.xml.rels": `${XML_HEAD}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>`,
+    "ppt/slideMasters/slideMaster1.xml": `${XML_HEAD}
+<p:sldMaster ${P_NS}><p:cSld><p:spTree/></p:cSld>
+  <p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz="4000" b="1"/></a:lvl1pPr></p:titleStyle></p:txStyles>
+</p:sldMaster>`,
+    "ppt/slideMasters/_rels/slideMaster1.xml.rels": `${XML_HEAD}
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
+</Relationships>`,
+    "ppt/theme/theme1.xml": `${XML_HEAD}
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <a:themeElements><a:clrScheme name="t">
+    <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
+    <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+    <a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+  </a:clrScheme></a:themeElements>
+</a:theme>`,
+  })
+}
+
+const inherited = await office.parseOffice(await buildPptxInherited(), "pptx")
+
+check("PPTX 占位符从版式继承位置（无 xfrm 也有正确框）", () => {
+  const title = inherited.slides[0].shapes[0]
+  assert.ok(Math.abs(title.x - 8.2021) < 0.01, `x=${title.x}`)
+  assert.equal(title.y, 0)
+  assert.ok(Math.abs(title.w - 65.6168) < 0.01, `w=${title.w}`)
+  assert.ok(Math.abs(title.h - 14.5815) < 0.01, `h=${title.h}`)
+})
+
+check("PPTX 字号/颜色继承：44pt、母版粗体、主题色 lumMod 变暗", () => {
+  const run = inherited.slides[0].shapes[0].paragraphs[0].runs[0]
+  assert.equal(run.sizePt, 44)
+  assert.equal(run.bold, true)
+  assert.match(run.color, /^#[0-9a-f]{6}$/)
+  assert.notEqual(run.color, "#4472c4")
+})
+
+check("PPTX 主题正文色（tx1）被读出来", () => assert.equal(inherited.textColor, "#000000"))
+
+check("PPTX 自适应字号 / 不换行 / 自动编号", () => {
+  const body = inherited.slides[0].shapes[1]
+  assert.equal(body.fontScale, 0.625)
+  assert.equal(body.lnSpcReduction, 0.1)
+  assert.equal(body.nowrap, true)
+  assert.equal(body.paragraphs[0].autoNum, true)
+  assert.equal(body.paragraphs[1].autoNum, true)
+})
+
+check("PPTX 表格：两列、单元格填充与文本", () => {
+  const table = inherited.slides[0].shapes[2].table
+  assert.deepEqual(table.cols, [50, 50])
+  assert.equal(table.rows[0].cells[0].fill, "#ffeeee")
+  assert.equal(table.rows[0].cells[0].paragraphs[0].runs[0].text, "甲")
 })
 
 /* ---- 失败路径 ---- */

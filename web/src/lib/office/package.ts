@@ -24,6 +24,8 @@ export interface RelTarget {
   /** 已按部件所在目录解析成包内绝对路径（external 时保留原始 URL） */
   target: string
   external: boolean
+  /** 关系类型，例如 .../slideLayout、.../theme；老文件缺省时为空 */
+  type?: string
 }
 
 export interface OfficePackage {
@@ -153,6 +155,7 @@ export async function readRels(
     out.set(id, {
       target: external ? target : resolvePart(baseDir, target),
       external,
+      type: attr(rel, "Type"),
     })
   }
   return out

@@ -27,6 +27,7 @@ export type {
   DocxListItem,
   DocxParagraph,
   DocxRun,
+  DocxSpacing,
   DocxTable,
   DocxTableCell,
   DocxTextRun,

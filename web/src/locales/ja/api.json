@@ -4,6 +4,7 @@
   "api.auth.login_required": "先にログインしてください",
   "api.auth.forbidden": "この操作を行う権限がありません",
   "api.auth.csrf_failed": "リクエストの検証に失敗しました",
+  "api.auth.too_many_attempts": "試行回数が多すぎます。{minutes} 分後にもう一度お試しください。",
   "api.i18n.unknown_lang": "その言語ファイルは存在しません",
   "api.admin.default_lang_invalid": "defaultLang は現在利用可能な言語コードである必要があります",
   "api.fs.version_conflict": "このファイルは開いた後に他のユーザーが変更しました。相手の変更を上書きしないため、今回の保存は実行していません。もう一度開く（またはページを更新する）と最新の内容を確認できますので、その後で統合方法を決めてください。",

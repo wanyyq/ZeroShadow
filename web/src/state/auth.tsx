@@ -14,6 +14,7 @@ const GUEST: Me = {
   group: null,
   perms: {
     fileWrite: false,
+    browse: true,
     upload: false,
     uploadFolders: false,
     downloadFile: true,

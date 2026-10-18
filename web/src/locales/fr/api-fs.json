@@ -40,5 +40,6 @@
   "api.fs.trash_not_found": "Élément introuvable dans la corbeille",
   "api.fs.trash_content_missing": "Le contenu de la corbeille a disparu, restauration impossible",
   "api.fs.trash_invalid_target": "Destination de restauration invalide",
-  "api.fs.download_url_required": "Saisissez un lien de téléchargement"
+  "api.fs.download_url_required": "Saisissez un lien de téléchargement",
+  "api.fs.transfer_same_target": "La destination est identique à la source, l'opération a été annulée"
 }

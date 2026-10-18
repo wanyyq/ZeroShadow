@@ -81,6 +81,7 @@ const SENSITIVE_DATA_ENTRIES = new Set([
   "users.json",
   "groups.json",
   "todos.json",
+  "shares.json",
   "backups",
   "logs",
   "metrics",
@@ -107,14 +108,20 @@ const SENSITIVE_DATA_ENTRIES = new Set([
  */
 export function isSensitiveAbs(abs) {
   const resolved = path.resolve(abs)
-  if (resolved === path.resolve(ENV_FILE)) return true
+  // Windows / macOS 的文件系统不区分大小写：`.ENV`、`Data\Config.json` 与真实文件
+  // 是同一个。比较前统一归一，否则一个大小写变形就能把这条防线整个绕开。
+  const norm = CASE_INSENSITIVE ? resolved.toLowerCase() : resolved
+  const envFile = path.resolve(ENV_FILE)
+  if (norm === (CASE_INSENSITIVE ? envFile.toLowerCase() : envFile)) return true
   const dataRoot = path.resolve(DATA_DIR)
+  const dataNorm = CASE_INSENSITIVE ? dataRoot.toLowerCase() : dataRoot
   // data/ 目录**本身**放行：FILES_DIR 有可能就设在 data/ 上（把文件直接放在
   // 配置旁边），那样网盘根目录就是 data/，把根目录整个挡掉会让网盘全空。
   // 需要挡的是它里面的具体条目（下一段的判断）。
-  if (resolved === dataRoot) return false
-  if (!resolved.startsWith(dataRoot + path.sep)) return false
-  const first = resolved.slice(dataRoot.length + 1).split(path.sep)[0]
+  if (norm === dataNorm) return false
+  if (!norm.startsWith(dataNorm + path.sep)) return false
+  const firstRaw = norm.slice(dataNorm.length + 1).split(path.sep)[0]
+  const first = CASE_INSENSITIVE ? firstRaw.toLowerCase() : firstRaw
   return SENSITIVE_DATA_ENTRIES.has(first)
 }
 

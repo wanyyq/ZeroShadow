@@ -40,5 +40,6 @@
   "api.fs.trash_not_found": "This item is not in the recycle bin",
   "api.fs.trash_content_missing": "The recycle bin content is gone and cannot be restored",
   "api.fs.trash_invalid_target": "Invalid restore target",
-  "api.fs.download_url_required": "Please enter a download URL"
+  "api.fs.download_url_required": "Please enter a download URL",
+  "api.fs.transfer_same_target": "The destination is the same as the source, so the operation was cancelled"
 }

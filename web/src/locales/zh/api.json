@@ -4,6 +4,7 @@
   "api.auth.login_required": "请先登录",
   "api.auth.forbidden": "没有权限执行此操作",
   "api.auth.csrf_failed": "请求校验失败",
+  "api.auth.too_many_attempts": "尝试次数过多，请 {minutes} 分钟后再试",
   "api.i18n.unknown_lang": "没有这个语言文件",
   "api.admin.default_lang_invalid": "defaultLang 必须是当前可用的语言代码",
   "api.fs.version_conflict": "这个文件在您打开之后已被其他人修改。为避免覆盖对方的改动，本次保存未执行。请重新打开（或刷新页面）查看最新内容后再决定怎么合并。",

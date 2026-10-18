@@ -135,6 +135,11 @@ function resolveSharePath(share, requested) {
   } catch {
     throw shareError(410, "分享的内容已被移动或删除", "api.share.target_missing", { code: "SHARE_TARGET_MISSING" })
   }
+  // 无密码分享按「访客视角」处理：与 /api/fs/* 的 guestBlocked 保持同一条规则。
+  // 只在 list 里过滤条目是不够的 —— 知道文件名就能用 ?path= 直接下载。
+  if (!share.requirePassword && isHiddenFromGuest(rel)) {
+    throw shareError(404, "文件或目录不存在", "api.fs.not_found")
+  }
   return { ...resolved, sub }
 }
 

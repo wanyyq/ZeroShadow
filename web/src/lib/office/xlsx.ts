@@ -10,7 +10,7 @@
  */
 
 import { collectMedia, readRels, type MediaMap, type OfficePackage } from "./package.ts"
-import { attr, child, kids, localName, numAttr, type XmlNode } from "./xml.ts"
+import { attr, boolProp, child, kids, localName, numAttr, type XmlNode } from "./xml.ts"
 
 export interface XlsxCell {
   /** 显示文本（已按数字格式转好） */
@@ -21,11 +21,21 @@ export interface XlsxCell {
   rowSpan?: number
   /** 数值/日期/百分比右对齐，文本左对齐（Excel 的默认观感） */
   numeric?: boolean
+  bold?: boolean
+  italic?: boolean
+  /** 字体颜色与单元格填充（`#rrggbb`） */
+  color?: string
+  fill?: string
+  align?: "left" | "center" | "right"
+  /** 自动换行 */
+  wrap?: boolean
 }
 
 export interface XlsxRow {
   /** 下标即列号；`null` 表示空位或被合并覆盖的格 */
   cells: (XlsxCell | null)[]
+  /** 行高（像素，来自 row/@ht） */
+  height?: number
 }
 
 export interface XlsxSheet {
@@ -103,16 +113,17 @@ function decimalsOf(code: string | undefined): number | undefined {
 const pad2 = (n: number) => String(n).padStart(2, "0")
 
 /** Excel 序列号（1899-12-30 纪元）→ `YYYY-MM-DD`（必要时带时间） */
-function formatSerial(serial: number, withTime: boolean): string {
+function formatSerial(serial: number, withTime: boolean, date1904 = false): string {
   const whole = Math.floor(serial)
   const frac = serial - whole
-  const dayMs = Math.round((whole - 25569) * 86400000)
+  // 1904 纪元（Mac 版 Excel 的旧默认）比 1900 纪元晚 1462 天
+  const dayMs = Math.round((whole + (date1904 ? 1462 : 0) - 25569) * 86400000)
   const timeMs = Math.round(frac * 86400000)
   const date = new Date(dayMs + timeMs)
   if (Number.isNaN(date.getTime())) return String(serial)
   const time = `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`
-  // 纯时间（序列号 < 1）不要凭空造出 1899-12-30
-  if (whole === 0) return time
+  // 纯时间（序列号 < 1）不要凭空造出 1899-12-30；1904 纪元里 0 是 1904-01-01
+  if (whole === 0 && !date1904) return time
   const day = `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`
   return withTime ? `${day} ${time}` : day
 }
@@ -120,12 +131,12 @@ function formatSerial(serial: number, withTime: boolean): string {
 /** 内置日期/时间格式里带时间的那些（14–17 是纯日期） */
 const BUILTIN_TIME = new Set([18, 19, 20, 21, 22, 45, 46, 47])
 
-function formatNumber(value: number, numFmtId: number, code: string | undefined): string {
+function formatNumber(value: number, numFmtId: number, code: string | undefined, date1904: boolean): string {
   if (isDateFormat(numFmtId, code)) {
     const withTime = code
       ? /[hs]/i.test(code.replace(/"[^"]*"/g, ""))
       : BUILTIN_TIME.has(numFmtId)
-    return formatSerial(value, withTime)
+    return formatSerial(value, withTime, date1904)
   }
   if ((code && code.includes("%")) || numFmtId === 9 || numFmtId === 10) {
     const decimals = decimalsOf(code) ?? (numFmtId === 10 ? 2 : 0)
@@ -136,12 +147,35 @@ function formatNumber(value: number, numFmtId: number, code: string | undefined)
   // 内置 1/3 是整数格式，2/4 是两位小数；其余（含 General）交给 JS 的最短表示
   if (numFmtId === 1 || numFmtId === 3) return String(Math.round(value))
   if (numFmtId === 2 || numFmtId === 4) return value.toFixed(2)
+  // General：Excel 最多显示 11 位有效数字，直接 String() 会把 0.1+0.2 之类
+  // 二进制误差原样吐出来（0.30000000000000004），看起来像算错了。
+  if (!Number.isInteger(value)) return String(Number(value.toPrecision(12)))
   return String(value)
+}
+
+interface FontInfo {
+  bold?: boolean
+  italic?: boolean
+  color?: string
 }
 
 interface FormatInfo {
   id: number
   code?: string
+  font?: FontInfo
+  /** 单元格填充色（`#rrggbb`） */
+  fill?: string
+  align?: "left" | "center" | "right"
+  wrap?: boolean
+}
+
+/** ARGB（`FFRRGGBB`）或 RGB（`RRGGBB`）→ `#rrggbb` */
+function argbToHex(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const hex = value.replace(/^#/, "")
+  if (hex.length === 8) return `#${hex.slice(2).toLowerCase()}`
+  if (hex.length === 6) return `#${hex.toLowerCase()}`
+  return undefined
 }
 
 function parseStyles(root: XmlNode | undefined): FormatInfo[] {
@@ -154,10 +188,49 @@ function parseStyles(root: XmlNode | undefined): FormatInfo[] {
     const code = attr(fmt, "formatCode")
     if (id !== undefined && code) custom.set(id, code)
   }
+
+  const fonts: FontInfo[] = kids(child(root, "fonts"), "font").map((font) => {
+    const info: FontInfo = {}
+    if (boolProp(child(font, "b"))) info.bold = true
+    if (boolProp(child(font, "i"))) info.italic = true
+    const color = argbToHex(attr(child(font, "color"), "rgb"))
+    if (color) info.color = color
+    return info
+  })
+
+  const fills: (string | undefined)[] = kids(child(root, "fills"), "fill").map((fill) => {
+    const pattern = child(fill, "patternFill")
+    const fg = attr(child(pattern, "fgColor"), "rgb") ?? attr(child(pattern, "fgColor"), "theme")
+    // Excel 的 0/1 号填充是 none / gray125，不能当用户设置的底色
+    if (!fg) return undefined
+    return argbToHex(fg)
+  })
+
   const xfs = kids(child(root, "cellXfs"), "xf")
   for (const xf of xfs) {
     const id = numAttr(xf, "numFmtId") ?? 0
-    out.push({ id, code: custom.get(id) })
+    const fontId = numAttr(xf, "fontId")
+    const fillId = numAttr(xf, "fillId")
+    const alignment = child(xf, "alignment")
+    const alignRaw = attr(alignment, "horizontal")
+    const align =
+      alignRaw === "center" || alignRaw === "centerContinuous"
+        ? "center"
+        : alignRaw === "right"
+          ? "right"
+          : alignRaw === "left"
+            ? "left"
+            : undefined
+    out.push({
+      id,
+      code: custom.get(id),
+      font: fontId !== undefined ? fonts[fontId] : undefined,
+      fill: fillId !== undefined ? fills[fillId] : undefined,
+      align,
+      wrap: alignment
+        ? ["1", "true"].includes((attr(alignment, "wrapText") ?? "").toLowerCase())
+        : false,
+    })
   }
   return out
 }
@@ -165,7 +238,8 @@ function parseStyles(root: XmlNode | undefined): FormatInfo[] {
 function cellFrom(
   node: XmlNode,
   shared: string[],
-  formats: FormatInfo[]
+  formats: FormatInfo[],
+  date1904: boolean
 ): XlsxCell | undefined {
   const type = attr(node, "t") ?? "n"
   const formulaNode = child(node, "f")
@@ -196,7 +270,7 @@ function cellFrom(
   } else if (raw !== "") {
     const value = Number(raw)
     if (Number.isFinite(value)) {
-      text = formatNumber(value, numFmtId, format?.code)
+      text = formatNumber(value, numFmtId, format?.code, date1904)
       // 日期/百分比同样按「数字」右对齐
       numeric = true
     } else {
@@ -208,6 +282,12 @@ function cellFrom(
   const cell: XlsxCell = { text }
   if (formula) cell.formula = formula
   if (numeric) cell.numeric = true
+  if (format?.font?.bold) cell.bold = true
+  if (format?.font?.italic) cell.italic = true
+  if (format?.font?.color) cell.color = format.font.color
+  if (format?.fill) cell.fill = format.fill
+  if (format?.align) cell.align = format.align
+  if (format?.wrap) cell.wrap = true
   return cell
 }
 
@@ -260,6 +340,9 @@ async function readSheetRefs(pkg: OfficePackage): Promise<SheetRef[]> {
   const rels = await readRels(pkg, "xl/workbook.xml")
   const out: SheetRef[] = []
   for (const sheet of kids(child(workbook, "sheets"), "sheet")) {
+    // 隐藏工作表不显示（Excel 的标签栏里也看不到）；如果全部隐藏，调用方会当成不支持
+    const state = (attr(sheet, "state") ?? "visible").toLowerCase()
+    if (state === "hidden" || state === "veryhidden") continue
     const name = attr(sheet, "name") ?? ""
     const rid = attr(sheet, "r:id") ?? attr(sheet, "id")
     const target = rid ? rels.get(rid) : undefined
@@ -273,12 +356,14 @@ async function parseSheet(
   pkg: OfficePackage,
   ref: SheetRef,
   shared: string[],
-  formats: FormatInfo[]
+  formats: FormatInfo[],
+  date1904: boolean
 ): Promise<XlsxSheet> {
   const root = await pkg.xml(ref.path)
   if (!root) return { name: ref.name, cols: [DEFAULT_COL_WIDTH], rows: [], truncated: false }
   const sheetData = child(root, "sheetData")
   const grid = new Map<number, Map<number, XlsxCell>>()
+  const heights = new Map<number, number>()
   let lastRow = -1
   let lastCol = -1
   let truncated = false
@@ -289,6 +374,9 @@ async function parseSheet(
       const explicitRow = numAttr(rowNode, "r")
       const rowIndex = explicitRow !== undefined && explicitRow > 0 ? explicitRow - 1 : rowCursor + 1
       rowCursor = rowIndex
+      // row/@ht 是磅值（1 磅 = 4/3 像素）
+      const ht = numAttr(rowNode, "ht")
+      if (ht && ht > 0 && rowIndex < MAX_ROWS) heights.set(rowIndex, Math.round((ht * 4) / 3))
       let colCursor = -1
       const rowMap = new Map<number, XlsxCell>()
       for (const cellNode of kids(rowNode, "c")) {
@@ -300,7 +388,7 @@ async function parseSheet(
           truncated = true
           continue
         }
-        const cell = cellFrom(cellNode, shared, formats)
+        const cell = cellFrom(cellNode, shared, formats, date1904)
         if (!cell) continue
         rowMap.set(col, cell)
         if (col > lastCol) lastCol = col
@@ -353,7 +441,8 @@ async function parseSheet(
     const rowMap = grid.get(r)
     const cells: (XlsxCell | null)[] = []
     for (let c = 0; c < colCount; c++) cells.push(rowMap?.get(c) ?? null)
-    rows.push({ cells })
+    const height = heights.get(r)
+    rows.push(height ? { cells, height } : { cells })
   }
 
   return { name: ref.name, cols, rows, truncated }
@@ -368,8 +457,11 @@ export async function parseXlsx(pkg: OfficePackage): Promise<XlsxWorkbook> {
   if (sst) for (const si of kids(sst, "si")) shared.push(sharedItemText(si))
 
   const refs = await readSheetRefs(pkg)
+  // 1904 纪元（Mac 版 Excel 的旧默认）会让所有日期差 4 年，必须按 workbookPr 判定
+  const workbook = await pkg.xml("xl/workbook.xml")
+  const date1904 = ["1", "true"].includes((attr(child(workbook, "workbookPr"), "date1904") ?? "").toLowerCase())
   const sheets: XlsxSheet[] = []
-  for (const ref of refs) sheets.push(await parseSheet(pkg, ref, shared, formats))
+  for (const ref of refs) sheets.push(await parseSheet(pkg, ref, shared, formats, date1904))
 
   const media = await collectMedia(pkg, [])
   return { kind: "xlsx", sheets, media }

@@ -197,7 +197,9 @@ export function effectivePerms(role, group = null) {
       manageGuestVisibility: !!p.manageGuestVisibility,
       details: true,
       htmlPreview: !!p.htmlPreview,
-      editFiles: !!p.editFiles,
+      // 「在线编辑」会覆盖已有文件内容，属于写操作：fileWrite 关闭时必须一起关，
+      // 否则「只读成员」仍能通过编辑器改写别人的文件（见安全审计）。
+      editFiles: fw && !!p.editFiles,
       compressZip: !!p.compressZip,
       extractZip: !!p.extractZip,
       downloadUrl: !!p.downloadUrl,
@@ -231,6 +233,7 @@ export function effectivePerms(role, group = null) {
     editFiles: !!g.editFiles,
     compressZip: !!g.compressZip,
     extractZip: !!g.extractZip,
+    downloadUrl: false,
     changePassword: false,
   }
 }

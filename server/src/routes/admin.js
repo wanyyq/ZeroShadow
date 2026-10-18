@@ -23,7 +23,8 @@ import { deleteAvatar, ownerForUser } from "../avatars.js"
 import { listBackups, restoreBackup, snapshotAll } from "../backup.js"
 import { emptyTrash, getTrash, listTrash, purgeTrash, restoreTrash, trashAvailable, trashStats } from "../trash.js"
 import { getMetrics, readMetricsHistory } from "../metrics.js"
-import { reloadShares } from "../shares.js"
+import { reloadShares, removeSharesByOwner } from "../shares.js"
+import { availableLangs } from "../i18n.js"
 
 const router = Router()
 
@@ -200,6 +201,8 @@ router.post("/members/batch", async (req, res, next) => {
       throw httpError(400, "参数格式错误", { errorKey: "api.admin.invalid_params" })
     }
     const idList = ids.map(String)
+    // 删除前先记下用户名：batchMembers 之后 findById 就查不到了，而分享是按用户名归属的
+    const owners = action === "delete" ? idList.map((id) => findById(id)?.username).filter(Boolean) : []
     const count = await batchMembers(action, idList)
     if (action === "delete") {
       for (const id of idList) {
@@ -207,6 +210,8 @@ router.post("/members/batch", async (req, res, next) => {
         await removeUserFromTodos(id)
         deleteAvatar(ownerForUser(id))
       }
+      // 离职成员的分享链接必须同时失效，否则链接会一直有效到过期
+      for (const owner of owners) await removeSharesByOwner(owner)
     }
     info("members_batch", { msg: `${action} × ${count}`, ...actor(req) })
     res.json({ count })

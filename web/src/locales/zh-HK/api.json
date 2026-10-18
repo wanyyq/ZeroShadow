@@ -4,6 +4,7 @@
   "api.auth.login_required": "請先登入",
   "api.auth.forbidden": "沒有權限執行此操作",
   "api.auth.csrf_failed": "請求驗證失敗",
+  "api.auth.too_many_attempts": "嘗試次數過多，請 {minutes} 分鐘後再試",
   "api.i18n.unknown_lang": "沒有這個語言檔案",
   "api.admin.default_lang_invalid": "defaultLang 必須是當前可用的語言代碼",
   "api.fs.version_conflict": "這個檔案在您開啟之後已被其他人修改。為避免覆蓋對方的改動，本次儲存未執行。請重新開啟（或重新整理頁面）查看最新內容後再決定如何合併。",

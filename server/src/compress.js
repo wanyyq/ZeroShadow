@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import zlib from "node:zlib"
+import { SHELL_CSP } from "./csp.js"
 
 // ============================================================================
 //  compress.js —— 静态文本资源的 gzip / brotli 压缩（v1.2.1）
@@ -181,6 +182,10 @@ export function createStaticCompressor(rootDir) {
     res.setHeader("ETag", hit.etag)
     res.setHeader("Cache-Control", cacheControlFor(abs))
     res.setHeader("X-Content-Type-Options", "nosniff")
+    // 这个中间件挂在 express.static 之前，命中后自己 res.end；static 的 setHeaders
+    // 不会再执行。不在这里补上，直连 /index.html（带 Accept-Encoding）就会拿到
+    // 一份没有 CSP 的应用外壳。
+    if (type.startsWith("text/html")) res.setHeader("Content-Security-Policy", SHELL_CSP)
 
     if (req.headers["if-none-match"] === hit.etag) {
       res.statusCode = 304

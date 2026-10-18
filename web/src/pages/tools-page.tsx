@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/layout/app-shell"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -38,13 +39,16 @@ function convertSize(value: number, from: Unit): Record<Unit, string> {
 
 export function ToolsPage() {
   const t = useT()
+  // 右键「新建 → 新建下载任务」会带着 ?tab=downloader&dest=<当前目录> 跳过来
+  const [params] = useSearchParams()
+  const [tab, setTab] = React.useState(params.get("tab") === "downloader" ? "downloader" : "size")
   return (
     <AppShell>
       <div className="flex flex-1 flex-col overflow-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{t("ui.tools.title")}</h1>
           <p className="mb-6 text-sm text-muted-foreground">{t("ui.tools.subtitle")}</p>
-          <Tabs defaultValue="size">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList variant="line" className="mb-6 flex-wrap">
               <TabsTrigger value="size"><Icon name="ruler" /> {t("ui.tools.size_converter")}</TabsTrigger>
               <TabsTrigger value="downloader"><Icon name="download" /> {t("ui.tools.url_downloader")}</TabsTrigger>
@@ -105,9 +109,10 @@ function UrlDownloader() {
   const t = useT()
   const { me } = useAuth()
   const ops = useOperations()
+  const [params] = useSearchParams()
   const [url, setUrl] = React.useState("")
   const [filename, setFilename] = React.useState("")
-  const [dest, setDest] = React.useState("")
+  const [dest, setDest] = React.useState(() => params.get("dest") ?? "")
   const [pickerOpen, setPickerOpen] = React.useState(false)
   const [errors, setErrors] = React.useState<{ url?: string; dest?: string }>({})
 
@@ -155,7 +160,7 @@ function UrlDownloader() {
         <CardContent className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="dl-url">{t("ui.tools.download_url_label")}</Label>
-            <Input id="dl-url" placeholder="https://example.com/file.zip"
+            <Input id="dl-url" placeholder="https://example.com/file.zip" autoFocus={params.get("tab") === "downloader"}
               value={url} onChange={(e) => { setUrl(e.target.value); setErrors((p) => ({ ...p, url: undefined })) }}
               className={errors.url ? "border-destructive" : ""} />
             {errors.url && <p className="text-xs text-destructive">{errors.url}</p>}

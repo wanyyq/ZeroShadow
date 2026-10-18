@@ -40,5 +40,6 @@
   "api.fs.trash_not_found": "ごみ箱にこの項目が見つかりません",
   "api.fs.trash_content_missing": "ごみ箱の内容が失われており、復元できません",
   "api.fs.trash_invalid_target": "復元先が無効です",
-  "api.fs.download_url_required": "ダウンロードリンクを入力してください"
+  "api.fs.download_url_required": "ダウンロードリンクを入力してください",
+  "api.fs.transfer_same_target": "移動先が移動元と同じ場所のため、操作を中止しました"
 }

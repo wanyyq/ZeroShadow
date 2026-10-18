@@ -40,5 +40,6 @@
   "api.fs.trash_not_found": "No se encuentra este elemento en la papelera",
   "api.fs.trash_content_missing": "El contenido de la papelera se ha perdido y no se puede restaurar",
   "api.fs.trash_invalid_target": "Destino de restauración no válido",
-  "api.fs.download_url_required": "Introduce el enlace de descarga"
+  "api.fs.download_url_required": "Introduce el enlace de descarga",
+  "api.fs.transfer_same_target": "El destino es la misma ubicación que el origen, así que se canceló la operación"
 }

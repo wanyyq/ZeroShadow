@@ -9,10 +9,12 @@ import type {
   DocxDocument,
   DocxListItem,
   DocxRun,
+  DocxSpacing,
   OfficeDoc,
   OfficeErrorCode,
   OfficeKind,
   PptxDeck,
+  PptxParagraph,
   PptxShape,
   PptxSlide,
   XlsxSheet,
@@ -189,6 +191,17 @@ function Runs({ runs, media }: { runs: DocxRun[]; media: Map<string, string> }) 
               style={{ width: run.width, height: run.height }}
             />
           ) : null
+        ) : run.href && /^(https?:|mailto:)/i.test(run.href) ? (
+          <a
+            key={i}
+            href={run.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={runStyle(run)}
+            className="text-primary underline underline-offset-2"
+          >
+            {run.text}
+          </a>
         ) : (
           <span key={i} style={runStyle(run)}>
             {run.text}
@@ -197,6 +210,17 @@ function Runs({ runs, media }: { runs: DocxRun[]; media: Map<string, string> }) 
       )}
     </>
   )
+}
+
+/** 段前/段后与行距 → 内联样式（Word 的 twips 在解析层已换成磅） */
+function spacingStyle(spacing: DocxSpacing | undefined): React.CSSProperties {
+  if (!spacing) return {}
+  const style: React.CSSProperties = {}
+  if (spacing.beforePt !== undefined) style.marginTop = `${spacing.beforePt}pt`
+  if (spacing.afterPt !== undefined) style.marginBottom = `${spacing.afterPt}pt`
+  if (spacing.linePt !== undefined) style.lineHeight = `${spacing.linePt}pt`
+  else if (spacing.line !== undefined) style.lineHeight = spacing.line
+  return style
 }
 
 function Blocks({ blocks, media }: { blocks: DocxBlock[]; media: Map<string, string> }) {
@@ -220,6 +244,7 @@ function ListBlock({ items, media }: { items: DocxListItem[]; media: Map<string,
             listStyleType: item.listStyle,
             marginLeft: item.level ? `${item.level * 1.25}rem` : undefined,
             textAlign: item.align,
+            ...spacingStyle(item.spacing),
           }}
         >
           <Runs runs={item.runs} media={media} />
@@ -238,18 +263,29 @@ function Block({ block, media }: { block: DocxBlock; media: Map<string, string> 
   if (block.kind === "table") {
     return (
       <table className="my-3 w-full border-collapse text-sm">
+        {block.widths ? (
+          <colgroup>
+            {block.widths.map((w, i) => (
+              <col key={i} style={{ width: `${w}%` }} />
+            ))}
+          </colgroup>
+        ) : null}
         <tbody>
           {block.rows.map((row, r) => (
             <tr key={r}>
-              {row.map((cell, c) => (
-                <td
-                  key={c}
-                  colSpan={cell.span > 1 ? cell.span : undefined}
-                  className="border border-border px-2 py-1 align-top"
-                >
-                  <Blocks blocks={cell.blocks} media={media} />
-                </td>
-              ))}
+              {row.map((cell, c) =>
+                cell ? (
+                  <td
+                    key={c}
+                    colSpan={cell.span > 1 ? cell.span : undefined}
+                    rowSpan={cell.rowSpan}
+                    style={{ backgroundColor: cell.shade }}
+                    className="border border-border px-2 py-1 align-top"
+                  >
+                    <Blocks blocks={cell.blocks} media={media} />
+                  </td>
+                ) : null
+              )}
             </tr>
           ))}
         </tbody>
@@ -259,7 +295,11 @@ function Block({ block, media }: { block: DocxBlock; media: Map<string, string> 
 
   const heading = block.heading && block.heading >= 1 && block.heading <= 6 ? block.heading : 0
   const content = <Runs runs={block.runs} media={media} />
-  const style: React.CSSProperties = { textAlign: block.align }
+  const style: React.CSSProperties = {
+    textAlign: block.align,
+    ...spacingStyle(block.spacing),
+  }
+  if (block.indentPt) style.textIndent = `${block.indentPt}pt`
   if (heading) {
     const Tag = `h${heading}` as "h1"
     return (
@@ -312,7 +352,7 @@ function SheetTable({ sheet }: { sheet: XlsxSheet }) {
         </colgroup>
         <tbody>
           {sheet.rows.map((row, r) => (
-            <tr key={r} className="even:bg-muted/30">
+            <tr key={r} className="even:bg-muted/30" style={row.height ? { height: row.height } : undefined}>
               {row.cells.map((cell, c) =>
                 cell ? (
                   <td
@@ -320,9 +360,18 @@ function SheetTable({ sheet }: { sheet: XlsxSheet }) {
                     colSpan={cell.colSpan}
                     rowSpan={cell.rowSpan}
                     title={cell.formula ? t("ui.office.xlsx.formula", { formula: `=${cell.formula}` }) : undefined}
+                    style={{
+                      backgroundColor: cell.fill,
+                      color: cell.color,
+                      fontWeight: cell.bold ? 600 : undefined,
+                      fontStyle: cell.italic ? "italic" : undefined,
+                      textAlign: cell.align,
+                    }}
                     className={cn(
-                      "h-7 overflow-hidden border border-border px-2 text-ellipsis whitespace-nowrap align-middle",
-                      cell.numeric && "text-right tabular-nums"
+                      "overflow-hidden border border-border px-2 align-middle",
+                      row.height ? "h-full" : "h-7",
+                      cell.wrap ? "whitespace-normal break-words" : "text-ellipsis whitespace-nowrap",
+                      cell.numeric && !cell.align && "text-right tabular-nums"
                     )}
                   >
                     {cell.text}
@@ -366,13 +415,259 @@ function XlsxView({ doc }: { doc: XlsxWorkbook }) {
    PPTX
    ========================================================================== */
 
-/** 磅值 → 容器宽度单位。幻灯片 13.333in 宽时 1cqw ≈ 0.133in，字号要跟着缩放 */
-function fontCqw(sizePt: number, slideWidth: number): string {
-  const cqw = ((sizePt * 12700) / slideWidth) * 100
-  return `max(6px, ${cqw.toFixed(3)}cqw)`
+/** 磅值 → cqw（1cqw = 幻灯片宽度的 1%）。字号、行距、缩进共用这一套基准 */
+function ptToCqw(sizePt: number, slideWidth: number): number {
+  return ((sizePt * 12700) / slideWidth) * 100
 }
 
-function SlideShape({ shape, media, slideWidth }: { shape: PptxShape; media: Map<string, string>; slideWidth: number }) {
+function fontCqw(sizePt: number, slideWidth: number): string {
+  return `max(6px, ${ptToCqw(sizePt, slideWidth).toFixed(3)}cqw)`
+}
+
+function PptxRunSpans({
+  paragraph,
+  scale,
+  textColor,
+  slideWidth,
+}: {
+  paragraph: PptxParagraph
+  scale: number
+  textColor: string
+  slideWidth: number
+}) {
+  return (
+    <>
+      {paragraph.runs.map((run, i) => {
+        const decoration = run.underline
+          ? run.strike
+            ? "underline line-through"
+            : "underline"
+          : run.strike
+            ? "line-through"
+            : undefined
+        return (
+          <span
+            key={i}
+            style={{
+              fontSize: fontCqw((run.sizePt ?? 18) * scale, slideWidth),
+              fontWeight: run.bold ? 600 : undefined,
+              fontStyle: run.italic ? "italic" : undefined,
+              textDecoration: decoration,
+              color: run.color ?? textColor,
+            }}
+          >
+            {run.text}
+          </span>
+        )
+      })}
+    </>
+  )
+}
+
+/** 一个段落：处理项目符号 / 编号 / 缩进 / 段前段后 / 行距 */
+function PptxParagraphView({
+  paragraph,
+  number,
+  scale,
+  reduction,
+  textColor,
+  slideWidth,
+  nowrap,
+}: {
+  paragraph: PptxParagraph
+  number?: number
+  scale: number
+  reduction: number
+  textColor: string
+  slideWidth: number
+  nowrap?: boolean
+}) {
+  const before = ptToCqw(paragraph.spaceBeforePt ?? 0, slideWidth)
+  const after = ptToCqw(paragraph.spaceAfterPt ?? 0, slideWidth)
+  const lineHeight = paragraph.lineHeightPt
+    ? `${ptToCqw(paragraph.lineHeightPt * scale * (1 - reduction), slideWidth).toFixed(3)}cqw`
+    : Math.max(0.8, (paragraph.lineSpacing ?? 1.2) * (1 - reduction))
+  const left = paragraph.marL ?? 0
+  const indent = paragraph.indent ?? 0
+  // 悬挂缩进（indent 为负）时，符号占住左侧那一段，正文从 marL 开始
+  const hang = Math.min(0, indent)
+  const marker = paragraph.autoNum ? `${number ?? 1}.` : paragraph.bullet
+  const whiteSpace = nowrap ? "pre" : "pre-wrap"
+
+  if (marker) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          marginLeft: `${left + hang}cqw`,
+          marginTop: `${before}cqw`,
+          marginBottom: `${after}cqw`,
+          lineHeight,
+          textAlign: paragraph.align,
+          whiteSpace,
+        }}
+      >
+        <span aria-hidden style={{ flex: `0 0 ${-hang}cqw`, whiteSpace: "pre" }}>
+          <PptxRunSpans paragraph={{ ...paragraph, runs: [{ text: marker }] }} scale={scale} textColor={textColor} slideWidth={slideWidth} />
+        </span>
+        <span style={{ flex: "1 1 auto" }}>
+          <PptxRunSpans paragraph={paragraph} scale={scale} textColor={textColor} slideWidth={slideWidth} />
+        </span>
+      </div>
+    )
+  }
+  return (
+    <p
+      style={{
+        margin: `${before}cqw 0 ${after}cqw`,
+        marginLeft: `${left}cqw`,
+        textIndent: `${indent}cqw`,
+        lineHeight,
+        textAlign: paragraph.align,
+        whiteSpace,
+      }}
+    >
+      <PptxRunSpans paragraph={paragraph} scale={scale} textColor={textColor} slideWidth={slideWidth} />
+    </p>
+  )
+}
+
+function PptxParagraphs({
+  paragraphs,
+  scale,
+  reduction,
+  textColor,
+  slideWidth,
+  nowrap,
+}: {
+  paragraphs: PptxParagraph[]
+  scale: number
+  reduction: number
+  textColor: string
+  slideWidth: number
+  nowrap?: boolean
+}) {
+  // 自动编号按级别累计；同一形状内跨段落连续（PowerPoint 的行为）
+  const counters = new Map<number, number>()
+  return (
+    <>
+      {paragraphs.map((paragraph, i) => {
+        let number: number | undefined
+        if (paragraph.autoNum) {
+          const level = paragraph.level ?? 0
+          const current = counters.get(level) ?? (paragraph.startAt ?? 1) - 1
+          number = current + 1
+          counters.set(level, number)
+        }
+        return (
+          <PptxParagraphView
+            key={i}
+            paragraph={paragraph}
+            number={number}
+            scale={scale}
+            reduction={reduction}
+            textColor={textColor}
+            slideWidth={slideWidth}
+            nowrap={nowrap}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function PptxTableShape({
+  shape,
+  textColor,
+  slideWidth,
+  slideHeight,
+}: {
+  shape: PptxShape
+  textColor: string
+  slideWidth: number
+  slideHeight: number
+}) {
+  const table = shape.table
+  if (!table) return null
+  const scale = shape.fontScale ?? 1
+  const reduction = shape.lnSpcReduction ?? 0
+  const ratio = slideHeight / slideWidth
+  const box: React.CSSProperties = {
+    position: "absolute",
+    left: `${shape.x}%`,
+    top: `${shape.y}%`,
+    width: `${shape.w}%`,
+    height: `${shape.h}%`,
+    transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
+  }
+  return (
+    <div style={box}>
+      <table
+        className="border-collapse"
+        style={{ width: "100%", height: "100%", tableLayout: "fixed", borderCollapse: "collapse" }}
+      >
+        <colgroup>
+          {table.cols.map((w, i) => (
+            <col key={i} style={{ width: `${w}%` }} />
+          ))}
+        </colgroup>
+        <tbody>
+          {table.rows.map((row, r) => (
+            <tr key={r} style={{ height: row.height ? `${row.height}%` : undefined }}>
+              {row.cells.map((cell, c) =>
+                cell ? (
+                  <td
+                    key={c}
+                    colSpan={cell.colSpan}
+                    rowSpan={cell.rowSpan}
+                    style={{
+                      backgroundColor: cell.fill,
+                      border: cell.border ? "1px solid rgba(0,0,0,.28)" : undefined,
+                      padding: cell.inset
+                        ? `${cell.inset.t * ratio}cqw ${cell.inset.r}cqw ${cell.inset.b * ratio}cqw ${cell.inset.l}cqw`
+                        : "0.35cqw 0.75cqw",
+                      verticalAlign:
+                        cell.anchor === "center" ? "middle" : cell.anchor === "bottom" ? "bottom" : "top",
+                    }}
+                  >
+                    {cell.paragraphs ? (
+                      <div style={{ textAlign: cell.align, fontSize: fontCqw(18 * scale, slideWidth) }}>
+                        <PptxParagraphs
+                          paragraphs={cell.paragraphs}
+                          scale={scale}
+                          reduction={reduction}
+                          textColor={textColor}
+                          slideWidth={slideWidth}
+                        />
+                      </div>
+                    ) : null}
+                  </td>
+                ) : null
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SlideShape({
+  shape,
+  media,
+  slideWidth,
+  slideHeight,
+  textColor,
+}: {
+  shape: PptxShape
+  media: Map<string, string>
+  slideWidth: number
+  slideHeight: number
+  textColor: string
+}) {
+  if (shape.table) {
+    return <PptxTableShape shape={shape} textColor={textColor} slideWidth={slideWidth} slideHeight={slideHeight} />
+  }
   const box: React.CSSProperties = {
     position: "absolute",
     left: `${shape.x}%`,
@@ -381,6 +676,7 @@ function SlideShape({ shape, media, slideWidth }: { shape: PptxShape; media: Map
     height: `${shape.h}%`,
     backgroundColor: shape.fill,
     border: shape.line ? `1px solid ${shape.line}` : undefined,
+    transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
   }
   if (shape.image) {
     const src = media.get(shape.image)
@@ -392,6 +688,9 @@ function SlideShape({ shape, media, slideWidth }: { shape: PptxShape; media: Map
     )
   }
   if (!shape.paragraphs) return <div style={box} />
+  const scale = shape.fontScale ?? 1
+  const reduction = shape.lnSpcReduction ?? 0
+  const ratio = slideHeight / slideWidth
   const inset = shape.inset
   return (
     <div
@@ -401,34 +700,22 @@ function SlideShape({ shape, media, slideWidth }: { shape: PptxShape; media: Map
         flexDirection: "column",
         justifyContent:
           shape.anchor === "center" ? "center" : shape.anchor === "bottom" ? "flex-end" : "flex-start",
-        overflow: "hidden",
+        overflow: shape.nowrap ? "visible" : "hidden",
         padding: inset
-          ? `${inset.t}cqw ${inset.r}cqw ${inset.b}cqw ${inset.l}cqw`
-          : "0.6cqw 0.8cqw",
+          ? `${inset.t * ratio}cqw ${inset.r}cqw ${inset.b * ratio}cqw ${inset.l}cqw`
+          : "0.5cqw 0.75cqw",
+        writingMode: shape.vert ? "vertical-rl" : undefined,
+        transform: shape.vert === "vert270" ? "rotate(180deg)" : undefined,
       }}
     >
-      {shape.paragraphs.map((paragraph, i) => (
-        <p
-          key={i}
-          className="whitespace-pre-wrap"
-          style={{ margin: 0, lineHeight: 1.2, textAlign: paragraph.align }}
-        >
-          {paragraph.runs.map((run, j) => (
-            <span
-              key={j}
-              style={{
-                fontSize: fontCqw(run.sizePt ?? 18, slideWidth),
-                fontWeight: run.bold ? 600 : undefined,
-                fontStyle: run.italic ? "italic" : undefined,
-                textDecoration: run.underline ? "underline" : undefined,
-                color: run.color,
-              }}
-            >
-              {run.text}
-            </span>
-          ))}
-        </p>
-      ))}
+      <PptxParagraphs
+        paragraphs={shape.paragraphs}
+        scale={scale}
+        reduction={reduction}
+        textColor={textColor}
+        slideWidth={slideWidth}
+        nowrap={shape.nowrap}
+      />
     </div>
   )
 }
@@ -445,10 +732,17 @@ function SlideCanvas({ slide, deck, media }: { slide: PptxSlide; deck: PptxDeck;
   return (
     <div
       className="relative h-full w-full [container-type:inline-size]"
-      style={{ backgroundColor: slide.bg }}
+      style={{ backgroundColor: slide.bg ?? "#ffffff" }}
     >
       {slide.shapes.map((shape, i) => (
-        <SlideShape key={i} shape={shape} media={media} slideWidth={deck.width} />
+        <SlideShape
+          key={i}
+          shape={shape}
+          media={media}
+          slideWidth={deck.width}
+          slideHeight={deck.height}
+          textColor={deck.textColor}
+        />
       ))}
     </div>
   )

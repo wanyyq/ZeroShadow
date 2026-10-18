@@ -326,6 +326,7 @@ async function collectZipItems(rels, vis) {
     if (!rel) continue
     if (!vis.visible(rel)) continue
     const resolved = resolveAny(rel)
+    if (isSensitiveAbs(resolved.abs)) continue
     const stat = await statSafe(resolved.abs)
     if (!stat || stat.isSymbolicLink()) continue
     items.push({ abs: resolved.abs, rel, name: path.basename(resolved.abs), isDir: stat.isDirectory(), size: stat.isFile() ? stat.size : 0 })
@@ -346,6 +347,9 @@ async function scanDirForZip(dirAbs, dirRel, vis, acc) {
   }
   for (const d of dirents) {
     const abs = path.join(dirAbs, d.name)
+    // 递归扫描也必须执行同样的「服务自身文件」判定：只校验被点名的目录是不够的，
+    // 软目录映射到项目根时，.env / data/ 就在它下面一层。
+    if (isSensitiveAbs(abs)) continue
     const entryRel = joinRel(dirRel, d.name)
     if (!vis.visible(entryRel)) continue
     const stat = await statSafe(abs)
@@ -424,6 +428,7 @@ async function addDirToArchive(archive, dirAbs, dirRel, zipBase, vis) {
     const entryRel = joinRel(dirRel, dirent.name)
     if (!vis.visible(entryRel)) continue
     const abs = path.join(dirAbs, dirent.name)
+    if (isSensitiveAbs(abs)) continue
     const stat = await statSafe(abs)
     if (!stat || stat.isSymbolicLink()) continue
     if (stat.isDirectory()) {
@@ -916,6 +921,11 @@ async function transfer(req, res, next, mode) {
         continue
       }
       const target = path.join(dest.abs, wanted)
+      // 目标与来源是同一个路径时，下面的 overwrite 会先 rm 掉目标 == 源，
+      // 文件永久消失（rm 不经过回收站）。同目录「复制 → 粘贴 → 覆盖」就能触发。
+      if (samePath(joinRel(dest.rel, wanted), src.rel)) {
+        throw httpError(400, "目标与来源相同", { errorKey: "api.fs.transfer_same_target" })
+      }
       const destStat = await statSafe(target)
       if (merge && stat.isDirectory() && destStat && destStat.isDirectory()) {
         await mergeFolder(src.abs, target, mode)
@@ -999,7 +1009,15 @@ router.get("/search", requirePerm("browse"), rateLimit, async (req, res, next) =
     assertContextVisible(req, resolved.rel)
     await assertDir(resolved.abs)
     let results = await searchFiles(resolved.abs, resolved.rel, q, { forGuest: req.auth.role === "guest" })
-    results = results.filter((r) => contextVisible(req, r.path))
+    results = results.filter((r) => {
+      if (!contextVisible(req, r.path)) return false
+      // 搜索结果同样不能把服务自身文件（.env、data/**）的名字与大小吐出去
+      try {
+        return !isSensitiveAbs(resolveAny(r.path).abs)
+      } catch {
+        return false
+      }
+    })
     if (resolved.isSoft) {
       results.forEach((r) => { r.softReadOnly = true })
     }

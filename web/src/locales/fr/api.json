@@ -4,6 +4,7 @@
   "api.auth.login_required": "Connexion requise",
   "api.auth.forbidden": "Action non autorisée",
   "api.auth.csrf_failed": "Échec de la validation de la requête",
+  "api.auth.too_many_attempts": "Trop de tentatives. Réessayez dans {minutes} minutes.",
   "api.i18n.unknown_lang": "Fichier de langue inexistant",
   "api.admin.default_lang_invalid": "defaultLang doit être un code de langue disponible",
   "api.fs.version_conflict": "Ce fichier a été modifié par quelqu'un d'autre depuis son ouverture. Pour ne pas écraser ses changements, cet enregistrement a été annulé. Rouvrez le fichier (ou actualisez la page) pour voir le contenu le plus récent, puis décidez comment fusionner.",

@@ -8,7 +8,7 @@ import { DeleteDialog, DetailsDialog, NewFolderDialog, RenameDialog } from "@/co
 import { DestPickerDialog } from "@/components/browser/dest-picker"
 import { ConflictDialog } from "@/components/browser/conflict-dialog"
 import { ShortcutEditorDialog } from "@/components/browser/shortcut-editor"
-import { DownloadTaskDialog, NewCustomFileDialog } from "@/components/browser/new-file-dialog"
+import { NewCustomFileDialog } from "@/components/browser/new-file-dialog"
 import { createTextFileWithDefault } from "@/lib/new-file"
 import { ShareDialog } from "@/components/browser/share-dialog"
 import { Button } from "@/components/ui/button"
@@ -123,7 +123,6 @@ export function BrowserPage() {
   // 右键「新建…」与「分享」（v1.2.1）
   const [newFileOpen, setNewFileOpen] = React.useState(false)
   const [newFileDir, setNewFileDir] = React.useState("")
-  const [downloadOpen, setDownloadOpen] = React.useState(false)
   const [shareTarget, setShareTarget] = React.useState<Entry | null>(null)
 
   // 请求序号：快速连续切目录时，先发出的慢响应会覆盖后发出的结果，
@@ -683,8 +682,11 @@ export function BrowserPage() {
           <ContextMenuItem
             onClick={() => {
               if (!me.perms.downloadUrl) return noPermToast()
-              setNewFileDir(dir)
-              setDownloadOpen(true)
+              // 现在不再弹一个独立对话框，直接带着当前目录跳到「工具 → 多线程下载器」，
+              // 用户填完链接就能开始，同时能在同一页看见进度。
+              const query = new URLSearchParams({ tab: "downloader" })
+              if (dir) query.set("dest", dir)
+              navigate(`/tools?${query.toString()}`)
             }}
           >
             <Icon name="download" /> {t("ui.create.download_task")}
@@ -695,98 +697,117 @@ export function BrowserPage() {
   }
 
   // ---------- 上下文菜单内容（提取为函数，供三个点和右键共用） ----------
+  // 排序原则：高频动作在上，破坏性动作（删除）永远在最后；
+  // 「新建…」只出现在文件夹上 —— 在文件上它其实是在当前目录新建，容易误点。
   const buildMenuItems = (entry: Entry) => {
     const targets = targetsOf(entry)
     const single = targets.length === 1
     const items: React.ReactNode[] = []
+    let pendingSep = false
+    const markSep = () => {
+      if (items.length) pendingSep = true
+    }
+    const push = (node: React.ReactNode) => {
+      if (pendingSep && items.length) items.push(<ContextMenuSeparator key={`sep-${items.length}`} />)
+      pendingSep = false
+      items.push(node)
+    }
 
-    if (entry.type === "dir" && single) {
-      items.push(<ContextMenuItem key="open" onClick={() => openEntry(entry)}><Icon name="folder-open" /> {t("ui.common.open")}</ContextMenuItem>)
-    }
-    // 新建…：文件夹里就在该文件夹内新建，其余情况新建到当前目录
+    const entryExt = (entry.name.split(".").pop() || "").toLowerCase()
+    const canShare = entry.type === "dir" ? me.perms.downloadFolder : me.perms.downloadFile
+
+    // ---- 1. 打开 / 新建（文件夹内新建）----
     if (single) {
-      items.push(newSubmenu(entry.type === "dir" ? joinPath(path, entry.name) : path, "newsub"))
-    }
-    items.push(
-      <ContextMenuItem key="download" disabled={single && entry.type === "file" ? !me.perms.downloadFile : !me.perms.downloadFolder} onClick={() => { doDownload(targets) }}>
-        <Icon name="download" /> {t("ui.common.download")}{!single || entry.type === "dir" ? " (Zip)" : ""}
-      </ContextMenuItem>
-    )
-    // 分享（v1.2.1）：仅登录用户、且只能分享自己有权下载的单项
-    if (single && me.role !== "guest") {
-      const canShare = entry.type === "dir" ? me.perms.downloadFolder : me.perms.downloadFile
-      items.push(
-        <ContextMenuItem key="share" disabled={!canShare} onClick={() => { if (!canShare) return noPermToast(); setShareTarget(entry) }}>
-          <Icon name="share-2" /> {t("ui.share.menu")}
+      push(
+        <ContextMenuItem key="open" onClick={() => openEntry(entry)}>
+          <Icon name={entry.type === "dir" ? "folder-open" : "external-link"} /> {t("ui.common.open")}
         </ContextMenuItem>
       )
     }
+    if (single && entry.type === "dir") {
+      push(newSubmenu(joinPath(path, entry.name), "newsub"))
+    }
+
+    // ---- 2. 预览类（仅文件）----
     if (single && entry.type === "file" && canPreview(entry.name)) {
-      items.push(
+      push(
         <ContextMenuItem key="preview" disabled={!me.perms.preview} onClick={() => { if (!me.perms.preview) noPermToast(); else handleOpenFile(entry) }}>
           <Icon name="eye" /> {t("ui.common.preview")}
         </ContextMenuItem>
       )
     }
-    const entryExt = (entry.name.split(".").pop() || "").toLowerCase()
     if (single && entry.type === "file" && (entryExt === "html" || entryExt === "htm")) {
-      items.push(
+      push(
         <ContextMenuItem key="htmlpreview" disabled={!me.perms.htmlPreview} onClick={() => { if (!me.perms.htmlPreview) noPermToast(); else doHtmlPreview(entry) }}>
           <Icon name="globe" /> {t("ui.browser.html_preview")}
         </ContextMenuItem>
       )
     }
+
+    // ---- 3. 下载 / 分享 ----
+    push(
+      <ContextMenuItem key="download" disabled={single && entry.type === "file" ? !me.perms.downloadFile : !me.perms.downloadFolder} onClick={() => { doDownload(targets) }}>
+        <Icon name="download" /> {t("ui.common.download")}{!single || entry.type === "dir" ? " (Zip)" : ""}
+      </ContextMenuItem>
+    )
+    if (single && me.role !== "guest") {
+      push(
+        <ContextMenuItem key="share" disabled={!canShare} onClick={() => { if (!canShare) return noPermToast(); setShareTarget(entry) }}>
+          <Icon name="share-2" /> {t("ui.share.menu")}
+        </ContextMenuItem>
+      )
+    }
+
+    // ---- 4. 编辑 / 重命名 ----
+    markSep()
     if (single && entry.type === "file" && EDITABLE.includes(entryExt)) {
-      items.push(
+      push(
         <ContextMenuItem key="edit" disabled={!me.perms.editFiles || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.editFiles) noPermToast(); else doEdit(entry) }}>
           <Icon name="pencil-line" /> {t("ui.browser.edit_online")}
         </ContextMenuItem>
       )
     }
-    if (single && entry.type === "file" && entry.name.toLowerCase().endsWith(".zip")) {
-      items.push(
-        <ContextMenuItem key="extract" disabled={!me.perms.extractZip || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
-          <Icon name="folder-open" /> {t("ui.browser.extract_here")}
-        </ContextMenuItem>
-      )
-    }
-    if (single && entry.type === "dir") {
-      items.push(
-        <ContextMenuItem key="compressDir" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress([entry]) }}>
-          <Icon name="folder-archive" /> {t("ui.browser.compress_zip")}
-        </ContextMenuItem>
-      )
-    }
-    if (!single) {
-      items.push(
-        <ContextMenuItem key="compress" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress(targets) }}>
-          <Icon name="folder-archive" /> {t("ui.browser.compress_selected_zip")}
-        </ContextMenuItem>
-      )
-    }
     if (single && entry.type === "shortcut") {
-      items.push(
+      push(
         <ContextMenuItem key="editShortcut" disabled={entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else { setShortcutEntry(entry); setShortcutOpen(true) } }}>
           <Icon name="pencil-line" /> {t("ui.browser.edit_shortcut")}
         </ContextMenuItem>
       )
     }
-    if (single && entry.type !== "shortcut") {
-      items.push(
-        <ContextMenuItem key="createShortcut" onClick={() => { setShortcutEntry(entry); setShortcutOpen(true) }}>
-          <Icon name="link" /> {t("ui.browser.create_shortcut")}
+    if (single) {
+      push(
+        <ContextMenuItem key="rename" disabled={!me.perms.rename || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.rename) noPermToast(); else openDialog("rename", entry) }}>
+          <Icon name="pencil-line" /> {t("ui.common.rename")}
+          <ContextMenuShortcut>F2</ContextMenuShortcut>
         </ContextMenuItem>
       )
     }
-    // 文件也要能「打开」—— 旧菜单只有文件夹才有这一项
-    if (entry.type === "file" && single) {
-      items.push(
-        <ContextMenuItem key="openFile" onClick={() => handleOpenFile(entry)}>
-          <Icon name="external-link" /> {t("ui.common.open")}
-        </ContextMenuItem>
-      )
+
+    // ---- 5. 剪贴板类 ----
+    markSep()
+    push(
+      <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
+        <Icon name="copy" /> {t("ui.common.copy")}
+        <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+      </ContextMenuItem>
+    )
+    push(
+      <ContextMenuItem key="cut" disabled={!me.perms.move || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.move) noPermToast(); else doClipboard("cut", targets) }}>
+        <Icon name="scissors" /> {t("ui.browser.cut")}
+        <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+      </ContextMenuItem>
+    )
+    if (me.perms.copy) {
+      push(<ContextMenuItem key="copyto" onClick={() => { setSelected(new Set(targets.map((tgt) => tgt.name))); setPicker("copy") }}><Icon name="copy-plus" /> {t("ui.browser.copy_to")}</ContextMenuItem>)
+    } else {
+      push(<ContextMenuItem key="copyto-d" disabled onClick={noPermToast}><Icon name="copy-plus" /> {t("ui.browser.copy_to")}</ContextMenuItem>)
     }
-    items.push(
+    if (me.perms.move && !anySoftReadOnly(targets)) {
+      push(<ContextMenuItem key="moveto" onClick={() => { setSelected(new Set(targets.map((tgt) => tgt.name))); setPicker("move") }}><Icon name="folder-input" /> {t("ui.browser.move_to")}</ContextMenuItem>)
+    } else {
+      push(<ContextMenuItem key="moveto-d" disabled onClick={anySoftReadOnly(targets) ? noPermSoftToast : noPermToast}><Icon name="folder-input" /> {t("ui.browser.move_to")}</ContextMenuItem>)
+    }
+    push(
       <ContextMenuSub key="copyAs">
         <ContextMenuSubTrigger>
           <Icon name="clipboard-copy" /> {t("ui.browser.copy_submenu")}
@@ -806,54 +827,56 @@ export function BrowserPage() {
         </ContextMenuSubContent>
       </ContextMenuSub>
     )
-    items.push(<ContextMenuSeparator key="s1" />)
-    items.push(
-      <ContextMenuItem key="copy" disabled={!me.perms.copy} onClick={() => { if (!me.perms.copy) noPermToast(); else doClipboard("copy", targets) }}>
-        <Icon name="copy" /> {t("ui.common.copy")}
-        <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
-      </ContextMenuItem>
-    )
-    items.push(
-      <ContextMenuItem key="cut" disabled={!me.perms.move || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.move) noPermToast(); else doClipboard("cut", targets) }}>
-        <Icon name="scissors" /> {t("ui.browser.cut")}
-        <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
-      </ContextMenuItem>
-    )
-    if (me.perms.copy) {
-      items.push(<ContextMenuItem key="copyto" onClick={() => { setSelected(new Set(targets.map((tgt) => tgt.name))); setPicker("copy") }}><Icon name="copy-plus" /> {t("ui.browser.copy_to")}</ContextMenuItem>)
-    } else {
-      items.push(<ContextMenuItem key="copyto-d" disabled onClick={noPermToast}><Icon name="copy-plus" /> {t("ui.browser.copy_to")}</ContextMenuItem>)
-    }
-    if (me.perms.move && !anySoftReadOnly(targets)) {
-      items.push(<ContextMenuItem key="moveto" onClick={() => { setSelected(new Set(targets.map((tgt) => tgt.name))); setPicker("move") }}><Icon name="folder-input" /> {t("ui.browser.move_to")}</ContextMenuItem>)
-    } else {
-      items.push(<ContextMenuItem key="moveto-d" disabled onClick={anySoftReadOnly(targets) ? noPermSoftToast : noPermToast}><Icon name="folder-input" /> {t("ui.browser.move_to")}</ContextMenuItem>)
-    }
-    if (single) {
-      items.push(
-        <ContextMenuItem key="rename" disabled={!me.perms.rename || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.rename) noPermToast(); else openDialog("rename", entry) }}>
-          <Icon name="pencil-line" /> {t("ui.common.rename")}
-          <ContextMenuShortcut>F2</ContextMenuShortcut>
+
+    // ---- 6. 压缩 / 解压 / 快捷方式 ----
+    markSep()
+    if (single && entry.type === "file" && entry.name.toLowerCase().endsWith(".zip")) {
+      push(
+        <ContextMenuItem key="extract" disabled={!me.perms.extractZip || entry.softReadOnly} onClick={() => { if (entry.softReadOnly) noPermSoftToast(); else if (!me.perms.extractZip) noPermToast(); else doExtract(entry) }}>
+          <Icon name="folder-open" /> {t("ui.browser.extract_here")}
         </ContextMenuItem>
       )
     }
-    if (entry.type === "dir" && single) {
-      items.push(<ContextMenuSeparator key="s2" />)
-      items.push(
+    if (single && entry.type === "dir") {
+      push(
+        <ContextMenuItem key="compressDir" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress([entry]) }}>
+          <Icon name="folder-archive" /> {t("ui.browser.compress_zip")}
+        </ContextMenuItem>
+      )
+    }
+    if (!single) {
+      push(
+        <ContextMenuItem key="compress" disabled={!me.perms.compressZip} onClick={() => { if (!me.perms.compressZip) noPermToast(); else doCompress(targets) }}>
+          <Icon name="folder-archive" /> {t("ui.browser.compress_selected_zip")}
+        </ContextMenuItem>
+      )
+    }
+    if (single && entry.type !== "shortcut") {
+      push(
+        <ContextMenuItem key="createShortcut" onClick={() => { setShortcutEntry(entry); setShortcutOpen(true) }}>
+          <Icon name="link" /> {t("ui.browser.create_shortcut")}
+        </ContextMenuItem>
+      )
+    }
+
+    // ---- 7. 可见性 / 信息 / 删除 ----
+    markSep()
+    if (single && entry.type === "dir") {
+      push(
         <ContextMenuItem key="hide" disabled={!me.perms.manageGuestVisibility} onClick={() => { if (!me.perms.manageGuestVisibility) noPermToast(); else doVisibility(entry, !entry.hiddenFromGuest) }}>
           <Icon name={entry.hiddenFromGuest ? "eye" : "eye-off"} /> {entry.hiddenFromGuest ? t("ui.browser.make_visible_to_guest") : t("ui.browser.hide_from_guest")}
         </ContextMenuItem>
       )
     }
     if (single) {
-      items.push(
+      push(
         <ContextMenuItem key="details" disabled={!me.perms.details} onClick={() => { if (!me.perms.details) noPermToast(); else openDialog("details", entry) }}>
           <Icon name="info" /> {t("ui.browser.details")}
         </ContextMenuItem>
       )
     }
-    items.push(<ContextMenuSeparator key="s3" />)
-    items.push(
+    markSep()
+    push(
       <ContextMenuItem key="delete" variant="destructive" disabled={!me.perms.delete || anySoftReadOnly(targets)} onClick={() => { if (anySoftReadOnly(targets)) noPermSoftToast(); else if (!me.perms.delete) noPermToast(); else { setSelected(new Set(targets.map((tgt) => tgt.name))); openDialog("delete", entry) } }}>
         <Icon name="trash-2" /> {t("ui.common.delete")}
         <ContextMenuShortcut>Delete</ContextMenuShortcut>
@@ -1268,12 +1291,6 @@ export function BrowserPage() {
         onOpenChange={setNewFileOpen}
         dirPath={newFileDir}
         onDone={refresh}
-      />
-      <DownloadTaskDialog
-        open={downloadOpen}
-        onOpenChange={setDownloadOpen}
-        dest={newFileDir}
-        onDone={() => { /* 进度在「工具」面板里，列表无需刷新 */ }}
       />
       <ShareDialog
         open={!!shareTarget}

@@ -11,6 +11,77 @@
 
 ---
 
+## [未发布]
+
+本次以「安全审计回归 + Office 预览正确性 + 右键菜单」为主，版本号仍未改动。
+
+### 安全
+
+- **只读映射目录打通 ZIP 递归**：`/api/fs/zip` 的递归打包（`scanDirForZip` /
+  `addDirToArchive`）补上 `isSensitiveAbs` 判定。此前映射项目根时，匿名访客一个请求
+  就能把 `.env`、`data/.jwt-secret`、`users.json` 打进 zip；`/api/fs/search` 的结果
+  也做了同样的过滤。
+- **敏感路径判定改为大小写归一**：Windows / macOS 上 `.ENV`、`DATA/CONFIG.JSON`
+  与真实文件是同一个，旧实现用裸字符串比较会被直接绕过；`shares.json` 也补进
+  敏感条目表。
+- **分享下载补上「对访客隐藏」判定**：无密码分享的 `?path=` 下载与列表使用同一条
+  规则，隐藏目录里的文件返回 404，不再能"知道文件名就下载"。
+- **`/api/fs/copy` 覆盖到自身**时返回 400：旧实现会先 `rm` 目标（== 源）再复制，
+  源文件永久丢失且不进回收站。
+- **WebDAV**：Basic 认证接入与 Web 登录同一套失败计数与锁定；`LOCK` 需要
+  `browse + fileWrite` 且路径可见，`UNLOCK` 只能解自己的锁；成员不再被套用
+  「对访客隐藏」规则（与 Web 端一致）。
+- **成员删除时撤销其分享**：避免离职成员的链接在有效期内继续外泄文件，也避免
+  重建同名账号继承旧分享。
+- **`/api/groups` 的 `allMembers`** 只返回给超管与被下放了查看/管理成员能力的组长。
+- **团队待办关闭后**，完成/删除接口也返回 403（此前只挡了创建与编辑）。
+- **静态压缩中间件直出 `.html` 时补上 `SHELL_CSP`**：直连 `/index.html` 不再拿到
+  一份没有 CSP 的应用外壳。
+- **修复 `PATCH /api/admin/config` 的 `defaultLang` 分支**：补上漏掉的
+  `availableLangs` 导入（此前会抛 `ReferenceError` → 500）。
+- 「在线编辑文件」现在同时受「文件操作」总开关约束：`fileWrite` 关闭后不能再通过
+  编辑器覆盖文件内容。
+
+### 修复
+
+- **PPTX 预览**：占位符从 slideLayout / slideMaster 继承位置与字号（标题不再被塞进
+  一个 5% 的小框、44pt 变 18pt）；读 `theme1.xml` 并支持 `lumMod` / `tint` /
+  `shade` 等修饰；补表格（`p:graphicFrame` → `a:tbl`，含列宽、行高、合并、
+  底纹）；补项目符号 / 自动编号、缩进、段前段后、行距、`normAutofit` 字号缩放、
+  `wrap="none"`、竖排与旋转；内边距上下改为按高度折算。
+- **DOCX 预览**：读 `word/styles.xml`（docDefaults → 段落样式 → 字符样式 → 直接格式），
+  标题层级、默认字号、行距与对齐不再只认直接写在段落上的属性；表格补 `tblGrid`
+  列宽、`vMerge` 纵向合并、单元格底纹；段落补段前/段后/行距/首行缩进；超链接保留
+  `http(s)`/`mailto` 外链（渲染侧仍只放行安全协议）。
+- **XLSX 预览**：单元格字体（粗/斜/颜色）、填充色、水平对齐、自动换行；行高
+  `row/@ht`；隐藏工作表不再显示；`workbookPr/@date1904` 的 1904 纪元；General
+  数字格式收掉二进制浮点噪声（`0.30000000000000004` → `0.3`）。
+- **右键菜单**：按"高频在上、删除最后"重排为 打开 / 新建 / 预览 / 下载 / 分享 /
+  编辑·重命名 / 剪切板 / 压缩解压 / 可见性·详情 / 删除，并去掉文件上多余的
+  「新建…」与重复的「打开」项。
+- **「新建 → 新建下载任务」** 不再弹独立对话框，直接跳到「工具 → 多线程下载器」，
+  自动切到下载器标签页并带入当前目录。
+
+### 变更
+
+- `effectivePerms("member")` 中 `editFiles` 乘上 `fileWrite`；访客的 `downloadUrl`
+  显式给 `false`。`Perms` 类型补上 `browse`。
+- 分享相关的 `share_create` / `share_unlock` / `share_browse` / `share_download` /
+  `share_revoke` / `share_admin_revoke` / `share_password_fail` 进入审计事件流，
+  「仅审计」筛选与导出能看到分享活动。
+
+### 文档
+
+- [快速开始](docs/快速开始.md) 新增第 5 节「正式部署到服务器（pm2 + Caddy HTTPS）」：
+  运行用户、`.env`（`HOST=127.0.0.1` / `TRUST_PROXY=loopback`）、pm2
+  `ecosystem.config.cjs`（单进程、日志、开机自启）、Caddyfile、上线检查、更新回滚
+  与排查表。
+- [公网访问与隧道](docs/公网访问与隧道.md) 新增「用 Caddy 做 HTTPS 反向代理」小节；
+  [权限与角色](docs/权限与角色.md) 修正 `fileWrite` 与在线编辑的关系；
+  README 的三步启动处加上正式部署入口。
+
+---
+
 ## [1.2.1] - 2026-10-17
 
 本次以「分享链接」与「把体积压下来」为主，另外补齐了 Office 预览、6 门语言，
