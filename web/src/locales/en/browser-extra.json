@@ -1,7 +1,7 @@
 {
   "ui.preview.source_code": "Source",
   "ui.preview.unsupported_format": "This format cannot be previewed yet",
-  "ui.preview.raw_html_notice": "This file contains raw HTML tags, so it is shown as plain text for safety. Switch to “Source” to view the original text.",
+  "ui.preview.raw_html_notice": "Only a few attribute-free tags such as <br>, <kbd> and <span> are rendered; other raw HTML (including tags with attributes) is shown as plain text. Switch to “Source” to view the original.",
   "ui.preview.download_original": "Download original file",
   "ui.preview.link_copied": "Link copied",
 

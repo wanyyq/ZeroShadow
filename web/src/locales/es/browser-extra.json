@@ -1,7 +1,7 @@
 {
   "ui.preview.source_code": "Código",
   "ui.preview.unsupported_format": "Este formato aún no se puede previsualizar",
-  "ui.preview.raw_html_notice": "El archivo contiene etiquetas HTML sin procesar; por seguridad se muestra como texto plano. Cambia a «Código» para ver el original.",
+  "ui.preview.raw_html_notice": "Solo se renderizan unas pocas etiquetas sin atributos como <br>, <kbd> y <span>; el resto del HTML sin procesar (incluidas las etiquetas con atributos) se muestra como texto plano. Cambia a «Código» para ver el original.",
   "ui.preview.download_original": "Descargar original",
   "ui.preview.link_copied": "Enlace copiado",
 

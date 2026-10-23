@@ -3,7 +3,18 @@
 - 审计对象：`D:\编程\Wangyq EPan 网盘\EPan`（v1.1.2，Node + Express + React）
 - 审计范围：`server/src/**`、`server/index.js`、`web/src/**`、`web/public/robustness/**`、依赖库关键实现
 - 审计方式：完整读取全部后端源码（约 6.5k 行）与前端源码；对 5 项关键结论**在隔离副本中实际复现**（未触碰真实 `data/`）
-- 结论：**发现 4 个高危（含 2 个已验证的越权/信息泄露）、6 个中危、若干低危**。整体安全设计水准较高（路径校验、SSRF 防护、CSRF、原子写都做得比同类项目好），但访问控制有一处**成体系的遗漏**。
+- 结论：**发现 4 个高危（1 严重 + 3 高，含 2 个已验证的越权/信息泄露）、5 个中危、若干低危**。整体安全设计水准较高（路径校验、SSRF 防护、CSRF、原子写都做得比同类项目好），但访问控制有一处**成体系的遗漏**。
+
+> **阅读提示（2026-10 更新）**
+>
+> - 本报告的**审计基准是 v1.1.2**，此后项目又发布了 v1.2.1 与 v1.2.3，当前版本是 **v1.2.4**。
+>   因此下表里"保留"的结论**不等于今天仍然成立** —— 有 4 项已在 v1.2.3 被修掉，见每条状态列后的
+>   `（v1.2.3 已闭合）` 标注。
+> - v1.2.3 的"第二轮安全审计"目前**只有 [CHANGELOG](CHANGELOG.md) 里的摘要**（安全 /
+>   行为变化两组），没有一份独立的逐条报告。要追溯某项结论，请以 CHANGELOG 为准。
+> - 文中出现的 `fs.js:1143`、`safety.js:140` 这类行号是 **v1.1.2** 的行号，与当前源码已不对应；
+>   按函数名 / 机制名搜索更可靠。
+> - 本文件自身的编号已修正（此前有两个「## 二」导致后续章节整体错位一位）。
 
 ---
 
@@ -23,20 +34,20 @@
 | 8 | 中 | 限流桶 `MAX_TRACKED_IPS` 上限无效；开启 `TRUST_PROXY` 后限流可被 `X-Forwarded-For` 完全绕过 | `ratelimit.js:40-44`、`env.js:92-103` | ✅ 上限已修；`TRUST_PROXY` 语义保留（见第二节说明） |
 | 9 | 中 | 回收站失败（含路径 >1024 字符）会**静默降级为彻底删除** | `trash.js:89` ↔ `fs.js:713-722` | ✅ 已修（改为跳过并报错） |
 | 10 | 低 | WebDAV `MOVE/COPY` 的自嵌套检查大小写敏感，与 `fs.js` 不一致 | `webdav.js:421` | ✅ 已修 |
-| 11 | 低 | 无 `realpath` 校验：`FILES_DIR` 中间层符号链接可越出根目录 | `safety.js:35-60` | 保留（理由见第二节） |
+| 11 | 低 | 无 `realpath` 校验：`FILES_DIR` 中间层符号链接可越出根目录 | `safety.js:35-60` | 保留（理由见第二节）→ **v1.2.3 已闭合**（`resolveAny` 改用 `realpathSync.native`） |
 | 12 | 低 | 回收站还原参数非法时返回 200 假成功 | `trash.js:192-196` ↔ `admin.js:468` | ✅ 已修（实测返回 400） |
 | 13 | 低 | 损坏文件「绝不直接删除」的承诺被 `rmSync` 兜底打破 | `integrity.js:31-38` | ✅ 已修 |
 | 14 | 低 | 备份回滚不校验 JSON 顶层类型、不重置 0600 权限 | `backup.js:188-202` | ✅ 已修 |
 | 15 | 低 | 删除成员/小组会把其**私有** Todo 改成「全体可见」 | `todos.js:134-166` | ✅ 已修（改为保留可见性、清空关联） |
-| 16 | 低 | 任何普通成员都能通过 `/api/groups` 拿到全站账号名册 | `routes/groups.js:68` | 保留（团队页指派需要，属设计取舍） |
-| 17 | 低 | 小组上下文**替换**而非取交 `defaultVisibility`；组长可清空本组白/黑名单 | `groups.js:302-307` | 保留（改动会变更可见性语义，需产品确认） |
+| 16 | 低 | 任何普通成员都能通过 `/api/groups` 拿到全站账号名册 | `routes/groups.js:68` | 保留（团队页指派需要，属设计取舍）→ **v1.2.3 已收紧**（`allMembers` 只给超管与被授权组长） |
+| 17 | 低 | 小组上下文**替换**而非取交 `defaultVisibility`；组长可清空本组白/黑名单 | `groups.js:302-307` | 保留（改动会变更可见性语义，需产品确认）→ **v1.2.3 已改**（缺省上下文权限取交集、可见范围取并集；`manageVisibility` 只能收窄） |
 | 18 | 低 | 热路径同步 `appendFileSync`；控制台日志行可被换行注入 | `logger.js:52-75` | ✅ 换行已修；同步写在第二节说明为何保留 |
 | 19 | 低 | 轮询可无限延长任务及其资源寿命 | `jobs.js:6-24,48-53` | 保留（实际影响有限，见第二节） |
 | 20 | 低 | `dirStats` 缓存无 single-flight（仅超管可触达） | `status.js:26-29`、`metrics.js:68-79` | 保留 |
 | 21 | 低 | 日志导出一次性读入内存（仅超管可触达） | `logger.js:99-131` | 保留 |
 | 22 | 低 | `rename` 失败的兜底存在短暂"目标不存在"窗口 | `store.js:44-49` | 保留（有快照兜底） |
 
-前端缺陷（第五节）：粘贴/上传重入、`handleUpload` 依赖、头像串号、回收站按钮 busy 失效、`truncated` 提示数字 — **均已修**；`editor-page` 快捷键 effect、`format.ts` 的 `.gitignore` 两项经复核**不属于缺陷**（见第五节说明）。
+前端缺陷（第六节）：粘贴/上传重入、`handleUpload` 依赖、头像串号、回收站按钮 busy 失效、`truncated` 提示数字 — **均已修**；`editor-page` 快捷键 effect、`format.ts` 的 `.gitignore` 两项经复核**不属于缺陷**（见第六节说明）。
 
 ---
 
@@ -120,7 +131,7 @@
 另外顺带修掉一处同类根因：`env.js` 解析 `.env` 时不剥 BOM —— 用记事本/PowerShell 5.1 保存的 `.env`，**首行会被当成键名 `\uFEFFPORT` 而失效**，用户写了 `PORT=xxxx` 却跑在默认端口上。
 
 
-## 二、高危问题详情
+## 三、高危问题详情
 
 ### 【严重】#1 「对访客隐藏」目录被越权读取/写入
 
@@ -253,7 +264,7 @@ for (const ch of text) { if (!present.has(ch)) bad.add(ch); if (bad.size >= 32) 
 
 ---
 
-## 三、中危问题详情
+## 四、中危问题详情
 
 ### #5 解压信任 zip 头声明的大小，且先整块读入内存 → zip 炸弹
 
@@ -369,7 +380,7 @@ await fs.promises.rm(resolved.abs, { recursive: true, force: true })   // ← �
 
 ---
 
-## 四、低危问题
+## 五、低危问题
 
 | # | 位置 | 问题与修复 |
 |---|------|-----------|
@@ -389,7 +400,7 @@ await fs.promises.rm(resolved.abs, { recursive: true, force: true })   // ← �
 
 ---
 
-## 五、前端缺陷（`web/src`）
+## 六、前端缺陷（`web/src`）
 
 | 严重度 | 位置 | 问题 |
 |--------|------|------|
@@ -398,7 +409,6 @@ await fs.promises.rm(resolved.abs, { recursive: true, force: true })   // ← �
 | 低 | `lib/avatar-cache.ts:216-230` | `owner` 变化时不会同步清空 `url`，要等 `getAvatarUrl()` 异步返回才 `setUrl`。表现是**短暂**显示上一个成员的头像（IndexedDB 读取通常几毫秒；因 `tx()` 各分支都 resolve、不会 reject，所以不会永久残留）。把 URL 与 owner 一起放进 state 即可修掉。 |
 | 低 | `pages/settings/trash-section.tsx:209-210` | `setBusyId(it.id); doRestore(...); setBusyId(null)` 同一 tick 内完成，`disabled` 永远不生效；另两个按钮压根没设 `busyId`，该 state 实为死代码 → 连点「还原」会弹出两个确认框。 |
 | 低 | `state/uploads.tsx:34,104-108` | 服务端返回 `truncated` 时只弹警告，被丢弃的文件不会重传；`okCount` 取自 `results.length`，可能出现"提示已上传 N 个"但实际少了文件。服务端已返回权威值 `maxFilesPerRequest`，客户端应当用它分片。 |
-| 低 | `pages/editor-page.tsx:308-323` | 全局 keydown 监听没有依赖数组，每次渲染都移除再添加（每个按键都做一次）。行为正确，仅为无谓开销。 |
 | 低 | `pages/editor-page.tsx:308-323` | 全局 keydown 监听没有依赖数组，每次渲染都移除再添加（每个按键都做一次）。**经复核不改**：当前行为正确（闭包总是最新的），补依赖反而有引入过期闭包的风险，收益仅是省一次 add/removeEventListener。 |
 | — | `lib/format.ts:117-140` | **经复核不属于缺陷**：`ext()` 里 `i > 0` 的判断让 `.gitignore`/`.env` 会原样返回（带点），与 `PREVIEWABLE` 的 `.gitignore`/`.env` 成员是匹配的，预览正常。 |
 | — | `pages/preview-page.tsx:217` | **降级为提示**：PDF 预览的 iframe 未加 `sandbox`，但服务端对 html/svg 内联响应强制 `CSP: sandbox allow-scripts`（`fs.js:262`），且 html 走的是带 sandbox 的 `/html-preview`。属于"纵深防御可以再加一层"，当前无可利用路径。 |
@@ -407,7 +417,7 @@ await fs.promises.rm(resolved.abs, { recursive: true, force: true })   // ← �
 
 ---
 
-## 六、已验证「做得对」的部分（无需再查）
+## 七、已验证「做得对」的部分（无需再查）
 
 - **路径穿越**：实测 `../`、`..\`、`/etc/passwd`、`C:/Windows/win.ini`、`%00` 等 7 组 payload 全部被 400/404 拦下；`path.join(FILES_DIR, "C:", ...)` 不会跳出根目录；软目录子路径有 `base + sep` 前缀校验。
 - **XSS**：`web/src` 全量 grep 无 `dangerouslySetInnerHTML` / `innerHTML` / `eval` / `new Function` / `srcdoc`；两个 HTML 预览 iframe 都是 `sandbox="allow-scripts"`（**没有** `allow-same-origin`）；用户上传的 HTML/SVG 内联时由服务端强制 `CSP: sandbox allow-scripts`（`fs.js:262-264`）；兼容模式页（`web/public/robustness`）所有 `innerHTML` 都过了 `esc()`。
@@ -421,7 +431,7 @@ await fs.promises.rm(resolved.abs, { recursive: true, force: true })   // ← �
 
 ---
 
-## 七、复现与审计方法说明
+## 八、复现与审计方法说明
 
 - 所有实测都在**工作区内的隔离副本** `.audit-tmp/` 中进行：复制 `server/index.js` + `server/src`，用自定义 ESM loader 把裸模块解析到 `server/node_modules`，独立 `PORT`/`.env`/`data/`，服务端只监听 `127.0.0.1:5187`。
 - **真实的 `data/` 目录未被改动**（其最新写入时间早于本次审计），测试结束后 `.audit-tmp/` 已删除。
@@ -431,7 +441,7 @@ await fs.promises.rm(resolved.abs, { recursive: true, force: true })   // ← �
   Remove-Item "D:\编程\Wangyq EPan 网盘\EPan\server\.audit-enc-probe.mjs"
   ```
 
-## 八、建议的后续动作
+## 九、建议的后续动作
 
 1. **重新构建前端**：本次改了 `web/src`（5 个文件），线上仍是旧的 `web/dist`。发布前请 `pnpm build`，否则前端修复（重入保护、头像、回收站按钮、delete.failed 提示）不会生效。
 2. **删除审计遗留的探针脚本**（沙箱不允许我写 `server/` 目录，删不掉）：

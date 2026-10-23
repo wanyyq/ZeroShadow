@@ -422,24 +422,33 @@ HTML 预览页与对话框里的 iframe 都写成：
 `sandbox="..."` 实际取值**，确保"只是注释里提了一句 allow-same-origin"不能蒙混过关。
 </Callout>
 
-### Markdown 预览：先转义，再渲染
+### Markdown 预览：先转义，再渲染（含 13 个标签的白名单）
 
 `.md` 预览会把文件内容渲染成 HTML，这条路同样不能变成 XSS 通道。做法是**先整体转义、再解析**
-（`web/src/lib/markdown.ts`）：
+（`web/src/lib/markdown.ts` + `web/src/lib/markdown-html.ts`）：
 
 - 渲染器入口第一步就把 `&` `<` `>` `"` 转成实体，此后所有正则只处理已转义的文本，
   拼接出来的标签全部由我们生成 —— 输出串里不可能出现文件提供的标签，
   所以那处 `dangerouslySetInnerHTML` 没有注入面；
-- 文件里手写的 `<script>` / `<img onerror=…>` 之类会**按纯文本原样显示**（页面顶部给出提示），
-  而不是被执行。这与"上传的 HTML 走沙箱 iframe"是同一个思路的两条路径；
+- 文件里手写的 `<script>` / `<iframe>` / `<a>` / `<img onerror=…>` 之类会**按纯文本原样显示**
+  （页面顶部给出提示），而不是被执行。这与"上传的 HTML 走沙箱 iframe"是同一个思路的两条路径；
+- **唯一的例外是一张固定的无属性标签白名单**（1.2.4 起）：`<br>` `<hr>` `<sub>` `<sup>` `<kbd>`
+  `<u>` `<s>` `<mark>` `<small>` `<span>` `<div>` `<p>` `<center>`。它们是纯排版标签、不带属性，
+  由渲染器自己拼成字面标签，因此"输出可信"的前提没有被打破：
+  - **属性一律丢弃**：`<div align="center">` 渲染成 `<div>`，`on*` / `style` / `href` / `src`
+    这些注入入口根本不会被解析；
+  - 属性必须写成 `name=value` 才会被当成标签，`<span and more text>` 这类残句仍按纯文本显示，
+    **不会吞掉正文**；
+  - 代码块与行内代码里的标签保持原文（`` `<br>` `` 是示例，不该被执行）；
+  - 白名单是代码常量（`SAFE_HTML_TAGS`），没有后台开关，也不受 `data/lang` 影响；
 - 链接与图片地址里的 `javascript:` / `vbscript:` / `data:` 一律降级成纯文本；
 - 输出里只有 `href` / `src` / `title` / `alt` / `style="text-align:…"` 这些由我们拼的属性，
   没有 `on*` 事件属性。
 
-<Callout type="warn" title="副作用是有意保留的">
+<Callout type="warn" title="带属性的 HTML 仍然不解析，这是有意的">
 "带徽章的 README 会把 HTML 显示成字面量"是**有意的取舍**：预览页与网盘同源，
 允许执行上传文件里的 HTML 等于把上传文件变成 XSS 通道。需要看原文时切到预览页右上角的
-「源码」视图即可。
+「源码」视图即可（该视图同样是 `select-text`，可以直接复制）。
 </Callout>
 
 ### 应用外壳的 CSP
@@ -450,7 +459,7 @@ HTML 预览页与对话框里的 iframe 都写成：
 default-src 'self';
 script-src 'self';
 style-src 'self' 'unsafe-inline';
-img-src 'self' data: blob:;
+img-src 'self' data: blob: http: https:;
 media-src 'self' blob:;
 font-src 'self' data:;
 connect-src 'self';
@@ -462,6 +471,14 @@ frame-ancestors 'self'
 
 - `script-src 'self'`（没有 `unsafe-inline`）之所以可行，是因为构建产物 `index.html` 里**没有任何内联脚本**；
 - `style-src` 保留 `'unsafe-inline'` 是为了兼容 UI 库注入的 `<style>`；
+- **`img-src` 里的 `http:` / `https:` 是 1.2.4 有意放开的**：Markdown 里引用的外链图片
+  （`![](https://某CDN/x.jpg)`）以前会被拦成破图。放开后的边界：
+  - `<img>` 只能解码图片，**不能执行脚本**，不受 `script-src` 约束；
+  - `script-src` / `connect-src` / `frame-src`（未声明，回落 `default-src 'self'`）**仍是同源白名单**，
+    第三方脚本与第三方请求依旧进不来；
+  - 代价：加载外链图片会把访问者 IP / UA 暴露给图片服务器（可作追踪像素）。站内已有
+    `Referrer-Policy: no-referrer`，不会额外泄露来源页面；
+  - 所以**只放开图片**，不要顺手放开 `connect-src` 或 `default-src`；
 - 预览页需要把同源内容放进 iframe，所以 `frame-ancestors` / `default-src` 允许 `'self'`，同时
   `X-Frame-Options: SAMEORIGIN` 阻止被第三方站点套框。
 
@@ -537,14 +554,23 @@ frame-ancestors 'self'
 | `POST /api/fs/compress` | 在线压缩 |
 | `POST /api/fs/extract` | 在线解压 |
 | `GET /api/fs/search` | 递归搜索 |
-| `GET /api/fs/stat` | 目录详情统计 |
+| `GET /api/fs/stat` · `GET /api/fs/details` | 目录详情统计 · 按内容解析元数据（要读文件、算哈希） |
 | `POST /api/fs/download-url` | 链接下载 |
+| `GET /api/fs/file` · `POST /api/fs/save-file` | 在线编辑的读取与保存（1.2.3 起补上） |
+| `POST /api/auth/login` | 登录（1.2.3 起补上，配合失败锁定） |
+| `GET /api/shares/precheck` · `POST /api/shares` | 分享预检与创建（要递归统计目录） |
+| `GET /api/share/:token` · `.../list` · `.../download` · `POST .../verify` | 分享公开接口（1.2.3 起补上） |
 
 **刻意不限**普通列目录与单文件下载：画廊预览、连续下载这类正常使用会产生大量请求，
 限流只会伤害体验。
 
 规则：按客户端 IP 固定窗口计数（60 秒窗口），默认 **120 次/分钟**，超限返回 **429** 并带 `Retry-After` 头。
 可在「设置 → 安全」里调整数值或整体关闭。
+
+<Callout type="info" title="还有一层按 TCP 对端的兜底桶">
+阈值 = `rateLimitPerMin` × 6（默认 720/分钟）。开启 `TRUST_PROXY` 后 `X-Forwarded-For` 可被伪造，
+换头就能换到新桶；对端地址伪造不了，所以单个来源最多只能做到 6 倍限额。
+</Callout>
 
 <Callout type="warn" title="TRUST_PROXY 配错等于没限流">
 限流状态保存在**内存**里，服务重启即清零；也不跨多进程共享（本服务设计为单进程运行）。

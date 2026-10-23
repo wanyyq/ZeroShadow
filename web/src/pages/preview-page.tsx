@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon"
 import { downloadUrl, triggerDownload } from "@/lib/api"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { officePreviewKind, parentOf, previewType } from "@/lib/format"
+import { hasUnsupportedHtml } from "@/lib/markdown-html"
 import { isMarkdown, renderMarkdown } from "@/lib/markdown"
 import { translate, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -77,9 +78,11 @@ export default function PreviewPage() {
     () => (markdown && text ? renderMarkdown(text, { baseDir }) : ""),
     [markdown, text, baseDir]
   )
-  // 渲染器把原始 HTML 当纯文本（安全前提），命中时给个提示，免得用户以为是渲染坏了
+  // 渲染器只把「白名单以外的原始 HTML」当纯文本（安全前提），命中时给个提示，
+  // 免得用户以为是渲染坏了。白名单内（<br> / <kbd> / <div> …）已正常渲染，
+  // 不该再弹这条提示 —— 判定逻辑与渲染器共用同一份（lib/markdown-html.ts）。
   const rawHtml = React.useMemo(
-    () => markdown && !!text && /<(?:[a-z!/][^>]*)>/i.test(text),
+    () => markdown && !!text && hasUnsupportedHtml(text),
     [markdown, text]
   )
 
@@ -285,14 +288,19 @@ export default function PreviewPage() {
               <p className="p-6 text-sm text-muted-foreground">{t("ui.common.loading")}</p>
             ) : (
               // html 由 lib/markdown.ts 生成：源文本先整体转义再解析，输出里不含
-              // 任何来自文件的标签，因此这里的 dangerouslySetInnerHTML 没有 XSS 通道
-              <article className="md-body" dangerouslySetInnerHTML={{ __html: html }} />
+              // 任何来自文件的标签（白名单标签是渲染器自己拼的字面标签，且无属性），
+              // 因此这里的 dangerouslySetInnerHTML 没有 XSS 通道。
+              //
+              // `select-text` 是必须的：本页最外层是 ContextMenuTrigger，而它的
+              // 样式里带 `select-none`（.ui/context-menu.tsx 的默认 className），
+              // 于是整页文字都选不中 —— 表现就是"Markdown 正文无法复制"。
+              <article className="md-body select-text" dangerouslySetInnerHTML={{ __html: html }} />
             )}
           </div>
         )}
         {supported && kind === "text" && (!markdown || sourceView) && (
           <div className="h-full overflow-auto bg-muted/30">
-            <pre className={cn("p-6 font-mono text-sm whitespace-pre-wrap", text ? "" : "opacity-50")}>
+            <pre className={cn("select-text p-6 font-mono text-sm whitespace-pre-wrap", text ? "" : "opacity-50")}>
               {text ?? t("ui.common.loading")}
             </pre>
           </div>

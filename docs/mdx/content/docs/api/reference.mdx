@@ -147,7 +147,7 @@ X-Requested-With: XMLHttpRequest
 | `fileWrite` | 文件操作（总开关） | 关闭后成员的所有写类权限一并失效 |
 | `browse` | 浏览目录 | 列目录、搜索 |
 | `upload` | 上传文件 | 上传接口真正校验的开关 |
-| `uploadFolders` | 上传文件夹 | **只在前端生效**，界面置灰按钮 |
+| `uploadFolders` | 上传文件夹 | 上传接口也会校验：文件名里带 `/` 的条目按"上传文件夹"处理 |
 | `mkdir` | 新建文件夹 | |
 | `copy` | 复制 | |
 | `move` | 移动 | |
@@ -196,7 +196,7 @@ X-Requested-With: XMLHttpRequest
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.2.3" }
+{ "name": "ZeroShadow", "version": "1.2.4" }
 ```
 
 <Callout type="info" title="version 是写死的，改版本号要动三处">
@@ -519,9 +519,10 @@ X-Requested-With: XMLHttpRequest
 - **超过 100 个文件必须分批**：busboy 命中 `files` 上限后会**跳过**超出的部分，
   且只发一次 `filesLimit` 事件（不告知被跳过的数量），所以响应里的 `truncated` 只是一个布尔标记。
 
-<Callout type="warn" title="uploadFolders 只在前端生效">
-服务端只校验 `upload`，「上传文件夹」对应的 `uploadFolders` 开关**目前只在前端生效**（界面会把按钮置灰），
-裸调接口时不受它限制。若需要严格限制"能不能传文件夹"，请直接关闭 `upload`。
+<Callout type="info" title="uploadFolders 服务端也校验">
+除 `upload` 外，服务端还会校验 `uploadFolders`：**文件名里带 `/`** 的条目会被当成"上传文件夹"处理，
+`uploadFolders` 为假时这类条目直接被拒绝。所以"绕过界面直接调接口传整个目录"已经挡得住了；
+关掉 `upload` 是更粗粒度的做法。
 </Callout>
 
 - 响应：
@@ -984,9 +985,12 @@ Web 界面按 `maxFilesPerRequest` 把选中的文件切片，每批 100 个依�
   - 数值（必须是整数，且在各字段的上下限内，越界返回 400）：`superUploadLimitMB`、`memberUploadLimitMB`、
     `zipMaxFiles`、`zipMaxSingleMB`、`zipMaxTotalMB`、`extractMaxZipMB`、`extractMaxTotalMB`、
     `downloadUrlMaxMB`、`rateLimitPerMin`、`avatarMaxKB`、`backupKeep`、`logRetentionDays`、
-    `metricsRetentionDays`、`metricsMemMinutes`、`slowRequestMs`
+    `trashRetentionDays`、`metricsRetentionDays`、`metricsMemMinutes`、`slowRequestMs`
   - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、
-    `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`
+    `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`、
+    `guestWrite`（访客写权限总开关）、`shareEnabled`、`sharePublicAccess`
+  - 字符串：`defaultLang`（站点默认界面语言，必须是当前可用的语言代码，否则 400
+    `defaultLang 必须是当前可用的语言代码`）
   - 对象：`memberPerms`、`guestPerms`（只覆盖传入的键，值统一按布尔处理）
   - 对象：`defaultVisibility`——传 `{ "whitelist": [...], "blacklist": [...] }` **整体替换**
     （只认 `whitelist` / `blacklist` 两个数组；内部会清洗、去重，每份最多 200 条）

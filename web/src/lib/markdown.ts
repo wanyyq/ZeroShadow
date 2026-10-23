@@ -4,16 +4,22 @@
  * 为什么自己写而不引第三方库：本项目的需求只是「把 .md 排版出来 + 绝对安全」，
  * 而 marked / markdown-it 打进产物会让前端多出 30~110KB（未压缩）。
  * 这里用十几 KB 源码覆盖常用语法，且**先整体转义、再解析**：源文件里的原始
- * HTML 一律当纯文本显示，因此输出的字符串不可能包含用户提供的标签，
+ * HTML 默认当纯文本显示，因此输出的字符串不可能包含用户提供的标签，
  * 可以安全地交给 dangerouslySetInnerHTML —— 不存在 XSS 通道。
+ * 唯一的例外是一张**固定的无属性标签白名单**（`<br>` / `<kbd>` / `<span>` 等，
+ * 见 `lib/markdown-html.ts`）：它们由我们自己拼成字面标签、属性全部丢弃，
+ * 所以"输出可信"这个前提没有被打破。
  *
  * 支持：ATX / setext 标题、围栏代码块、引用（可嵌套）、有序 / 无序 / 嵌套列表、
  *       任务列表、表格（含对齐）、水平线、行内代码、粗体、斜体、删除线、
- *       链接、图片、`<自动链接>`、硬换行（行尾两个空格或反斜杠）。
- * 不支持（有意为之，见 docs/安全设计.md）：原始 HTML、参考式链接、脚注、数学公式、目录。
+ *       链接、图片（含 http/https 外链）、`<自动链接>`、硬换行（行尾两个空格、
+ *       反斜杠或 `<br>`）、白名单内的原始 HTML 标签。
+ * 不支持（有意为之，见 docs/安全设计.md）：白名单以外的原始 HTML（含任何属性）、
+ *       参考式链接、脚注、数学公式、目录。
  */
 
 import { canPreview } from "./format"
+import { renderSafeTags } from "./markdown-html"
 import { downloadFileUrl, inlineFileUrl, looksLikeFile, resolveRef } from "./markdown-urls"
 
 /**
@@ -61,6 +67,11 @@ function inline(raw: string): string {
   s = s.replace(/(`+)([\s\S]*?)\1(?!`)/g, (_m, _t, code: string) =>
     keep(`<code>${code.replace(/^ | $/g, "")}</code>`)
   )
+
+  // 2.5) 白名单里的原始 HTML 标签（<br> / <kbd> / <span> …）还原成真标签。
+  //      必须排在行内代码之后：`` `<br>` `` 是"教人怎么写标签"的示例，不该被渲染；
+  //      标签上的属性一律丢弃，白名单见 lib/markdown-html.ts。
+  s = renderSafeTags(s)
 
   // 3) 图片 / 链接：整段标签都放进占位符。
   //    只把地址 keep() 是不够的 —— 标签还留在正文里，后面的强调 / 硬换行规则

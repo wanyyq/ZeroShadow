@@ -343,6 +343,29 @@ UTF-16 文件含 NUL 是正常的，不会被拦。
 <Accordion title="保存后内容没变">
 确认点的是「保存」或按了 `Ctrl/⌘ + S`；文件名后面的「未保存」徽章消失才算保存成功。
 </Accordion>
+
+<Accordion title=".md 里的 &lt;br&gt; 显示成了 &amp;lt;br&amp;gt;">
+1.2.4 起支持 13 个**无属性**标签（`br` / `hr` / `sub` / `sup` / `kbd` / `u` / `s` / `mark` / `small` /
+`span` / `div` / `p` / `center`）。若仍看到字面量，先确认标签在名单里，再确认前端是 1.2.4 的构建产物
+（升级后要重新 `pnpm build` 或换发布包）。
+</Accordion>
+
+<Accordion title="Markdown 里的 &lt;div align=&quot;center&quot;&gt; 不居中">
+标签属性**一律被丢弃**（`on*` / `style` / `href` 都是注入入口，白名单只解析无属性标签），
+所以渲染出来的是不带 `align` 的 `div`，看不到居中效果。
+</Accordion>
+
+<Accordion title=".md 里的外链图片不显示">
+1.2.4 起应用外壳 CSP 允许 `img-src http: https:`，公网 CDN 图片能正常加载。仍不显示时按序排查：
+① 图片地址本身 404 / 需要登录 / 开了防盗链；
+② 页面是 HTTPS 而图片是 `http://`（浏览器按混合内容拦掉）；
+③ 前端是旧构建产物。
+</Accordion>
+
+<Accordion title=".md 正文选不中 / 复制不了">
+1.2.4 已修（预览页外层容器的 `select-none` 曾波及正文）。仍是旧构建产物时请重新构建；
+临时可以用右上角「源码」视图复制。
+</Accordion>
 </Accordions>
 
 ## 头像与小组

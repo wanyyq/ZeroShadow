@@ -232,9 +232,10 @@ SESSION_HOURS=72
 （`Auto-building.bat` 在打包前就会删掉它，所以发布包里本来就没有这个文件。）
 </Callout>
 
-`config.json` 一共 **58** 个字段：**16** 个数值、**10** 个布尔开关、**19** 个成员权限、
+`config.json` 一共 **59** 个字段：**16** 个数值、**11** 个布尔开关、**19** 个成员权限、
 **8** 个访客权限、**1** 个访客隐藏列表、**3** 个隧道字段，外加 **1** 组默认可见范围
 （`defaultVisibility`，内含 `whitelist` / `blacklist` 两个列表）。
+另有一个**服务端内部字段** `superSessionEpoch`（数字，默认 `0`，见 3.2 末尾）。
 
 ### 3.1 数值类字段
 
@@ -285,6 +286,13 @@ SESSION_HOURS=72
 | `backupEnabled` | `true` | 是否启用数据快照；关闭后连写入前的自动快照也不再产生 |
 | `trashEnabled` | `true` | 删除时是否移入回收站。关闭后删除**立即生效**、不保留副本；回收站目录不可用时（`data/` 只读等）也会降级为直接删除，并在删除结果里明确告知 |
 | `requestMetricsEnabled` | `true` | 是否采集请求指标（QPS、状态码分布、慢请求） |
+| `guestWrite` | `false` | **访客写权限总开关**。访客没有 `fileWrite`，`guestPerms` 里的 `editFiles` / `compressZip` / `extractZip` 必须它打开才生效（"两步都做"） |
+
+<Callout type="info" title="还有两个内部字段">
+- `superSessionEpoch`（数字，默认 `0`）：**服务端内部使用**。超管每次「登出」自增 1 并写进超管 JWT
+  的 `se` 声明，用来让已发出的令牌立即失效。**不接受** `PATCH /api/admin/config` 修改，不要手工编辑。
+- `shareEnabled` / `sharePublicAccess` 同样是布尔开关，就在上表里。
+</Callout>
 
 ### 3.3 默认可见范围 `defaultVisibility`
 
@@ -318,7 +326,8 @@ SESSION_HOURS=72
 |:--|:--|:--|:--|
 | `defaultLang` | `"zh"` | 当前可用的语言代码 | **站点默认界面语言**；没在自己浏览器里选过语言的访客看到的就是它 |
 
-- 取值只允许**内置语言**（`zh` / `en`）与 `data/lang/` 里存在的语言文件（见下文「界面语言」一节）；
+- 取值只允许**内置语言**（`zh` / `zh-TW` / `zh-HK` / `zh-MO` / `en` / `ja` / `es` / `fr`）与
+  `data/lang/` 里存在的语言文件（见下文「界面语言」一节）；
   填一个不存在的代码会被 `PATCH /api/admin/config` 拒绝（400 `defaultLang 必须是当前可用的语言代码`）；
 - 用户在自己浏览器里选过的语言（`localStorage` 的 `zs-lang`）优先级更高；
 - 站点默认语言对应的文件后来被删除时，`GET /api/i18n` 的 `default` 会回落成 `zh`；
@@ -338,6 +347,7 @@ SESSION_HOURS=72
 说明：
 
 - 除 `fileWrite` 之外的写类开关（`upload` / `uploadFolders` / `mkdir` / `copy` / `move` / `rename` / `delete`）都必须同时满足 `fileWrite = true` 才真正生效；
+- **压缩 / 解压 / 链接下载 / 在线编辑也受 `fileWrite` 约束**（1.2.3 起）：`compressZip` / `extractZip` / `downloadUrl` / `editFiles` 都是 `fileWrite && …`。想要"完全只读"的成员，关 `fileWrite` 即可；
 - 小组（`data/groups.json` 里每个小组的 `perms`）用的是**同一组键**，并且只能在这套全局值的基础上**继续关闭**（两者取"与"），详见 [权限与角色](/docs/zeroshadow/guide/permissions) 的「小组上下文」一节；
 - `downloadFile` / `downloadFolder` / `preview` 三个开关兼容旧配置里的 `download` 键（若存在会被当作三者的默认值）；
 - 成员没有 `details` 字段，**查看详细信息是固定开放的**。
@@ -358,6 +368,11 @@ SESSION_HOURS=72
 | `editFiles` | `false` |
 
 访客**没有**、也无法获得：上传、上传文件夹、新建文件夹、复制、移动、重命名、删除、查看详细信息、链接下载器、管理访客可见性、修改密码。
+
+<Callout type="warn" title="三个写类子权限还有总闸门 guestWrite">
+上表里的 `editFiles` / `compressZip` / `extractZip` 只有在 `guestWrite = true` 时才真正生效
+（默认 `false`）。所以"允许匿名访客写盘"要**两步都做**：先开 `guestWrite`，再勾对应子项。
+</Callout>
 
 ### 3.7 访客隐藏列表 `guestHiddenPaths`
 

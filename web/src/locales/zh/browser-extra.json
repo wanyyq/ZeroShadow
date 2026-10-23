@@ -1,7 +1,7 @@
 {
   "ui.preview.source_code": "源码",
   "ui.preview.unsupported_format": "暂不支持预览此格式",
-  "ui.preview.raw_html_notice": "文件里含原始 HTML 标签，出于安全考虑按纯文本显示；可切到「源码」查看原文。",
+  "ui.preview.raw_html_notice": "文件里的原始 HTML 只有 <br>、<kbd>、<span> 等少数无属性标签会被渲染，其余（含带属性的标签）按纯文本显示；可切到「源码」查看原文。",
   "ui.preview.download_original": "下载原文件",
   "ui.preview.link_copied": "已复制链接",
 

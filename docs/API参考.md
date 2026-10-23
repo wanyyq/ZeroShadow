@@ -145,7 +145,7 @@ X-ZS-Group: <小组 id>
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.2.3" }
+{ "name": "ZeroShadow", "version": "1.2.4" }
 ```
 
 > `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：
@@ -446,8 +446,9 @@ X-ZS-Group: <小组 id>
   临时文件写入失败（例如磁盘写满）只让**这一个文件**失败（`ok: false` + 原因），
   **不会**让服务进程崩溃。
 
-> **注意**：服务端只校验 `upload`，「上传文件夹」对应的 `uploadFolders` 开关**目前只在前端生效**
-> （界面会把按钮置灰），裸调接口时不受它限制。若需要严格限制"能不能传文件夹"，请直接关闭 `upload`。
+> **注意**：除 `upload` 之外，服务端还会校验 `uploadFolders`（1.2.3 起）——**文件名里带 `/`**
+> 的条目会被当成"上传文件夹"处理，`uploadFolders` 为假时这类条目直接拒绝。所以"绕过界面
+> 直接调接口传整个目录"已经挡得住了；当然，关掉 `upload` 是更粗粒度的做法。
 
 - 响应：
 
@@ -1094,11 +1095,14 @@ X-ZS-Group: <小组 id>
   - 数值（必须是该字段允许区间内的**整数**，否则 400）：`superUploadLimitMB`、`memberUploadLimitMB`、
     `zipMaxFiles`（1–100000）、`zipMaxSingleMB`、`zipMaxTotalMB`、`extractMaxZipMB`、`extractMaxTotalMB`、
     `downloadUrlMaxMB`、`rateLimitPerMin`（1–100000）、`avatarMaxKB`（1–10240）、`backupKeep`（1–500）、
-    `logRetentionDays`（1–3650）、`metricsRetentionDays`（1–365）、`metricsMemMinutes`（1–1440）、
-    `slowRequestMs`（1–600000）；未标注的默认区间是 1–1048576
+    `logRetentionDays`（1–3650）、`trashRetentionDays`（1–3650）、`metricsRetentionDays`（1–365）、
+    `metricsMemMinutes`（1–1440）、`slowRequestMs`（1–600000）；未标注的默认区间是 1–1048576
   - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、
     `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`、
+    **`guestWrite`**（访客写权限总开关，默认 `false`）、
     **`shareEnabled`**、**`sharePublicAccess`**（分享的两个开关，见 [§8](#8-分享链接)）
+  - 字符串：**`defaultLang`**（站点默认界面语言，必须是**当前可用**的语言代码，否则 400
+    `defaultLang 必须是当前可用的语言代码`；可用清单见 `GET /api/i18n`）
   - 对象：`memberPerms`、`guestPerms`（只覆盖传入的键，值统一按布尔处理）
   - 对象：`defaultVisibility`——传 `{ "whitelist": [...], "blacklist": [...] }` 整体替换
     （数组会按可见性规则清洗：去首尾 `/`、`\`→`/`、丢弃空串 / `.` / `..` / 含 `..` 的段，最多 200 条）

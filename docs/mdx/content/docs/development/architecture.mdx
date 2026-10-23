@@ -173,7 +173,7 @@ icon: Boxes
 | `components/` | `layout/`（外壳）、`browser/`（业务弹窗与面板）、`ui/`（shadcn 基础组件，含 `ui/context-menu.tsx`） |
 | `locales/` | 译文：`locales/zh/<区域>.json` 与 `locales/en/<区域>.json`，由 `locales/index.ts` 在构建期用 `import.meta.glob` 合并 |
 | `state/` | 六个 Provider：auth / groups / client-settings / clipboard / uploads / operations |
-| `lib/` | api / types / format / i18n / markdown / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
+| `lib/` | api / types / format / i18n / markdown / markdown-html / markdown-urls / conflict / lucide / utils / avatar-cache / avatar-image / avatar-default |
 
 `components/ui/toggle-group.tsx` 是基于 `@base-ui/react` 的**分段控件**（2–4 个互斥选项），
 团队待办的筛选与编辑器、同名处理对话框都改用了它。
@@ -671,7 +671,7 @@ web/public/robustness/
 兜底成「浏览器不支持此格式」；文本类走 `GET /api/fs/file`（服务端识别编码）后
 以文本节点只读显示。**不要**在这里引入任何 JS 解析库。
 
-### Markdown 预览渲染（`lib/markdown.ts`）
+### Markdown 预览渲染（`lib/markdown.ts` + `lib/markdown-html.ts`）
 
 > 注意：这一节说的是**主前端**的 `.md` 预览。兼容模式对 `.md` 仍然是等宽字体只读展示，
 > 它不参与本节这套渲染（见上一节「预览策略」）。
@@ -685,12 +685,20 @@ web/public/robustness/
 可以安全地交给 `dangerouslySetInnerHTML` —— 不存在 XSS 通道。
 </Callout>
 
+唯一的例外是一张**固定的无属性标签白名单**（`lib/markdown-html.ts` 的 `SAFE_HTML_TAGS`，13 个）：
+它把已转义文本里的 `&lt;br&gt;` 还原成字面标签，**属性全部丢弃**，所以上面那条前提仍然成立。
+
+- 白名单还原排在**行内代码抠走之后**、图片 / 链接解析之前（代码里的 `<br>` 是示例，不该渲染）；
+- 属性必须写成 `name=value`（`ATTRS_RE` 保证），`<span and more text>` 这种残句不会被当成标签；
 - 行内代码、链接地址、图片地址先用 `NUL + 序号 + NUL` 的占位符"抠出来"，最后再还原
   （占位符可能嵌套，所以还原要跑最多 4 轮）；
 - 危险协议（`javascript:` / `vbscript:` / `data:`）命中即降级为纯文本；
 - 样式集中在 `index.css` 的 `.md-body` 段：渲染器只产出语义标签、**不给任何 class**，
   这样既省字节，也避开"运行时生成的 HTML 里写的工具类 Tailwind 扫不到、根本不会进产物"
-  这个坑。
+  这个坑；
+- 预览页正文与源码视图都带 `select-text`：外层 `ContextMenuTrigger` 自带 `select-none`，
+  不覆盖会导致整页文字选不中（"Markdown 不能复制"的根因）；
+- 外链图片依赖应用外壳 CSP 的 `img-src http: https:`（见 [安全设计](/docs/zeroshadow/security/design)）。
 
 ### 多语言（i18n）
 
@@ -829,7 +837,8 @@ node i18n-check.mjs --strict   # 把"剩余硬编码中文"也算作失败
 | 改日志 / 指标 / 备份的保留策略 | `logger.js` 的 `sweepLogs`、`metrics.js` 的 `cleanupOldMetrics`、`backup.js` 的 `rotate` + `settings/data-section.tsx` |
 | 改默认体积上限 | `server/src/config.js` 的 `DEFAULTS`（注意已存在的 `data/config.json` 会覆盖默认值） |
 | 加一种可预览格式 | `web/src/lib/format.ts` 的 `EXT_KIND` / `PREVIEWABLE` + `server/src/routes/fs.js` 的 `INLINE_TYPES` |
-| 改 Markdown 渲染 | `web/src/lib/markdown.ts`（解析规则、危险协议白名单）+ `index.css` 的 `.md-body`（排版样式）+ `web/src/pages/preview-page.tsx`（「源码 / 预览」开关）。**注意保持"先转义再解析"的顺序**，并确认兼容模式不受影响 |
+| 改 Markdown 渲染 | `web/src/lib/markdown.ts`（解析规则、危险协议白名单）+ `web/src/lib/markdown-html.ts`（安全 HTML 白名单）+ `index.css` 的 `.md-body`（排版样式）+ `web/src/pages/preview-page.tsx`（「源码 / 预览」开关与 `select-text`）。**注意保持"先转义再解析"的顺序**，改白名单要跑 `scripts/markdown-html-test.mjs` |
+| 放宽 / 收紧 CSP | `server/src/csp.js` 的 `SHELL_CSP`（三条出口共用）。改完在 `security-test.ps1` 第 1 组补断言，并同步 [安全设计](/docs/zeroshadow/security/design) |
 | 给「详细信息」加一类元数据 | `server/src/fileinfo.js`（新增一段解析，并确保只读有界的字节数、失败只让那段为空）+ `web/src/lib/types.ts` 的 `EntryDetails` + `browser/dialogs.tsx` 的分区渲染 |
 | 加 / 改一句界面文案 | 先找 `web/src/locales/zh/*.json` 里有没有可复用的键；没有就在对应区域文件里加 `ui.<区域>.<名字>`，同时补 `en/` 的译文，源码里用 `t("…")`。改完跑 `node i18n-check.mjs` |
 | 给服务端错误加新提示 | `throw httpError(status, "中文原文", { errorKey: "api.<区域>.<名字>", errorParams: {...} })`，键写进 `web/src/locales/{zh,en}/api*.json`；**不要**动日志里的中文 |

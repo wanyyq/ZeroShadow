@@ -1,7 +1,7 @@
 {
   "ui.preview.source_code": "ソース",
   "ui.preview.unsupported_format": "この形式はプレビューに対応していません",
-  "ui.preview.raw_html_notice": "ファイルに生の HTML タグが含まれているため、安全上の理由からプレーンテキストで表示しています。「ソース」に切り替えると原文を確認できます。",
+  "ui.preview.raw_html_notice": "ファイル内の生の HTML は <br>・<kbd>・<span> など属性のない一部のタグのみ描画され、それ以外（属性付きのタグを含む）はプレーンテキストで表示されます。「ソース」に切り替えると原文を確認できます。",
   "ui.preview.download_original": "元のファイルをダウンロード",
   "ui.preview.link_copied": "リンクをコピーしました",
   "ui.shortcut.type_dir": "ディレクトリ",

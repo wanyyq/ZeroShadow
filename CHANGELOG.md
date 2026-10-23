@@ -11,6 +11,66 @@
 
 ---
 
+## [1.2.4] - 2026-10-18
+
+本次以 **Markdown 预览体验修复** 与 **文档全面对齐代码** 为主，无破坏性变更。
+
+### 新增
+
+- **Markdown 预览支持少量原始 HTML 标签**：新增模块 `web/src/lib/markdown-html.ts`，把
+  `<br>` / `<hr>` / `<sub>` / `<sup>` / `<kbd>` / `<u>` / `<s>` / `<mark>` / `<small>` /
+  `<span>` / `<div>` / `<p>` / `<center>` 这 13 个**无属性**标签渲染出来。
+  - **属性一律丢弃**：`<div align="center">` 渲染成 `<div>`；`on*` / `style` / `href` /
+    `src` 这些"注入入口"根本不会被解析。
+  - 白名单以外的标签（`<script>` / `<iframe>` / `<a>` / `<img>` / `<style>` …）依旧按纯文本显示，
+    **"先整体转义、再解析"的安全前提没有被打破**。
+  - 属性必须写成 `name=value`；`<span and more text>` 这种像标签的残句不会被吞掉正文。
+  - 代码块与行内代码里的 `<br>` 保持原样（`` `<br>` `` 是"教人怎么写标签"的示例）。
+- **Markdown 里的外链图片可以正常显示**：`.md` 中 `![](https://某CDN/x.jpg)` 以前被应用外壳的
+  CSP（`img-src 'self' data: blob:`）直接拦掉，页面只剩破图。现在 `img-src` 放开
+  `http:` / `https:`（`server/src/csp.js`）。
+  - **只放开图片**：`script-src` / `connect-src` / `frame-src`（回落 `default-src`）仍是同源白名单，
+    第三方脚本与第三方请求依旧进不来；`<img>` 本身不能执行脚本。
+  - 代价是图片服务器能看到访问者的 IP 与 UA（可被用作追踪像素）。站内已设
+    `Referrer-Policy: no-referrer`，不会额外泄露来源页面地址。
+- `scripts/markdown-html-test.mjs`：白名单渲染的单元测试（28 项，纯 Node，不需要起服务）。
+
+### 修复
+
+- **Markdown 正文无法复制**：预览页最外层是 `ContextMenuTrigger`，而它的样式里带着
+  `select-none`（`web/src/components/ui/context-menu.tsx` 的默认 className），于是整页文字
+  （含 Markdown 正文与源码视图）都选不中。现在给正文与源码视图补 `select-text`。
+- **`<br>` 等标签显示成 `&lt;br&gt;`**：见上方"新增"。预览页顶部的提示条改为只在
+  **白名单以外**的 HTML 存在时才出现（围栏代码块与行内代码里的标签不再误报）。
+
+### 变更
+
+- 预览页提示条文案（`ui.preview.raw_html_notice`）在 8 种内置语言里同步改写：说明"只有少数
+  无属性标签会渲染，其余按纯文本显示"。
+
+### 文档
+
+- **修正与 1.2.3 代码不一致的描述**（这些都是文档落后于实现的真实缺陷）：
+  - 「访客写权限总开关 `guestWrite`」此前只出现在更新日志里，现在补进
+    [配置参考](docs/配置参考.md)（布尔开关 + `guestPerms` 生效前提）与
+    [管理员指南](docs/管理员指南.md)、[权限与角色](docs/权限与角色.md)。
+  - `uploadFolders` 自 1.2.3 起**服务端也校验**，改正 [API 参考](docs/API参考.md)、
+    [权限与角色](docs/权限与角色.md) 里"只在前端生效"的旧说法。
+  - 小组「缺省上下文」语义：未发 `X-ZS-Group` 时**权限取所属各组交集、可见范围取并集**，
+    改正 [权限与角色](docs/权限与角色.md) 里"去掉请求头就拿到全局权限"的旧警告。
+  - `compressZip` / `extractZip` / `downloadUrl` 自 1.2.3 起与 `fileWrite` 取与，
+    改正「它们不受 `fileWrite` 管辖」的旧结论。
+  - [管理员指南](docs/管理员指南.md) 补回缺失的「回收站」整章（此前只在开头的标签页总表里出现）。
+  - [更新日志（文档站版）](docs/changelog.md) 的自述从"与根 `CHANGELOG.md` 保持一致"改为
+    "精简版……以根文件为准"（两者本来就是压缩关系）。
+  - [SECURITY-AUDIT.md](SECURITY-AUDIT.md) 标注审计基准为 **v1.1.2**、逐条注明哪些结论已被
+    1.2.3 闭合，并修掉自身两处「## 二」、编号错位、中危计数与重复行。
+- `docs/mdx/`（文档站副本）同步上述全部修正与本次 Markdown 改动。
+- 版本号统一为 `1.2.4`（根 / `server` / `web` 三个 `package.json`、`/api/meta`、
+  `web/src/version.ts` 与相关文档示例）。
+
+---
+
 ## [1.2.3] - 2026-10-18
 
 本次以**第二轮安全审计修复**为主，同时包含上一轮「安全审计回归 + Office 预览正确性 + 右键菜单」的未发布改动。
@@ -486,6 +546,7 @@
 
 ---
 
+[1.2.4]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.4
 [1.2.3]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.3
 [1.2.1]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.1
 [1.2.0]: https://github.com/wanyyq/ZeroShadow/releases/tag/v1.2.0

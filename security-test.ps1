@@ -178,6 +178,15 @@ $shellCsp = ""
 if ($r.headers) { $shellCsp = [string]$r.headers["Content-Security-Policy"] }
 Check "app shell ships a Content-Security-Policy" (-not [string]::IsNullOrWhiteSpace($shellCsp)) ("CSP header is empty")
 
+# img-src is deliberately relaxed to http:/https: so Markdown previews can show remote
+# images. That relaxation must stay scoped to images: scripts and fetch targets remain
+# same-origin only. If someone widens script-src / connect-src, this pair fails.
+$cspImagesRelaxed = ($shellCsp -match "img-src[^;]*https:")
+$cspScriptStrict = ($shellCsp -match "script-src 'self'") -and ($shellCsp -notmatch "script-src[^;]*unsafe-inline")
+$cspConnectStrict = ($shellCsp -match "connect-src 'self'")
+Check "app shell CSP allows remote images (Markdown preview)" $cspImagesRelaxed ("CSP is '" + $shellCsp + "'")
+Check "CSP image relaxation does not spread to script or fetch" ($cspScriptStrict -and $cspConnectStrict) ("CSP is '" + $shellCsp + "'")
+
 $permissionsPolicy = ""
 if ($r.headers) { $permissionsPolicy = [string]$r.headers["Permissions-Policy"] }
 Check "Permissions-Policy is set" (-not [string]::IsNullOrWhiteSpace($permissionsPolicy)) "missing"

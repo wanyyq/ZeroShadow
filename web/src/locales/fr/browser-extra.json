@@ -1,7 +1,7 @@
 {
   "ui.preview.source_code": "Code source",
   "ui.preview.unsupported_format": "Aperçu non disponible pour ce format",
-  "ui.preview.raw_html_notice": "Le fichier contient des balises HTML brutes ; par sécurité, il est affiché en texte brut. Passez à « Code source » pour voir le contenu d'origine.",
+  "ui.preview.raw_html_notice": "Seules quelques balises sans attribut comme <br>, <kbd> et <span> sont rendues ; le reste du HTML brut (y compris les balises avec attributs) est affiché en texte brut. Passez à « Code source » pour voir le contenu d'origine.",
   "ui.preview.download_original": "Télécharger l'original",
   "ui.preview.link_copied": "Lien copié",
 
