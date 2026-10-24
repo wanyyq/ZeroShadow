@@ -74,6 +74,8 @@ const BOOLEAN_KEYS = [
   "guestWrite",
   // v2.0：WebDAV 转为正式功能，开关进后台（默认仍是关）
   "webdavEnabled",
+  // v2.0：插件总开关（默认关）。插件是第三方内容，必须显式打开
+  "pluginsEnabled",
 ]
 
 function cleanVisibilityPathList(value) {

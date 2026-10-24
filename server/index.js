@@ -31,6 +31,8 @@ import { flushShareStats, pruneShares, reloadShares } from "./src/shares.js"
 import { createStaticCompressor } from "./src/compress.js"
 import { SHELL_CSP } from "./src/csp.js"
 import { adminShareRouter, manageShareRouter, publicShareRouter } from "./src/routes/shares.js"
+import { adminPluginRouter, publicPluginRouter } from "./src/routes/plugins.js"
+import { reloadPlugins } from "./src/plugins/store.js"
 
 // 启动自检：隔离损坏的 JSON、清理 tmp 残留，然后重载内存态
 const integrity = runIntegrityCheck()
@@ -39,6 +41,7 @@ reloadUsers()
 reloadGroups()
 reloadTodos()
 reloadShares()
+reloadPlugins()
 const avatarInit = initAvatars()
 // 界面语言目录（data/lang）：首次运行时建目录并写入格式说明
 ensureLangDir()
@@ -125,12 +128,15 @@ app.use("/api/fs", fsRoutes)
 app.use("/api/share", publicShareRouter)
 app.use("/api/shares", manageShareRouter)
 app.use("/api/admin/shares", adminShareRouter)
+app.use("/api/admin/plugins", adminPluginRouter)
 app.use("/api/admin", adminRoutes)
 app.use("/api/avatars", avatarRoutes)
 app.use("/api/todos", todoRoutes)
 app.use("/api/groups", groupRoutes)
 // 界面语言清单与语言文件：必须免登录（登录页自己也要显示语言选择器）
 app.use("/api/i18n", i18nRoutes)
+// 插件相关的公开接口：目前只有「当前生效主题」（主题是视觉信息，访客也要能拿到）
+app.use("/api/plugins", publicPluginRouter)
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "接口不存在", errorKey: "api.common.not_found" })

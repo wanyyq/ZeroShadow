@@ -40,6 +40,7 @@ import { DataSection } from "@/pages/settings/data-section"
 import { TrashSection } from "@/pages/settings/trash-section"
 import { LogsMetricsSection } from "@/pages/settings/logs-metrics-section"
 import { SharesSection } from "@/pages/settings/shares-section"
+import { PluginsSection } from "@/pages/settings/plugins-section"
 
 export function SettingsPage() {
   const { me, ready } = useAuth()
@@ -79,6 +80,7 @@ export function SettingsPage() {
                     <TabsTrigger value="trash"><Icon name="trash-2" /> {t("ui.settings.tabs.trash")}</TabsTrigger>
                     <TabsTrigger value="security"><Icon name="lock" /> {t("ui.settings.tabs.security")}</TabsTrigger>
                     <TabsTrigger value="tunnel"><Icon name="globe" /> {t("ui.settings.tabs.tunnel")}</TabsTrigger>
+                    <TabsTrigger value="plugins"><Icon name="package" /> {t("ui.settings.tabs.plugins")}</TabsTrigger>
                   </>
                 )}
               </TabsList>
@@ -95,6 +97,7 @@ export function SettingsPage() {
                   <TabsContent value="trash"><TrashSection /></TabsContent>
                   <TabsContent value="security"><SecuritySection /></TabsContent>
                   <TabsContent value="tunnel"><TunnelSection /></TabsContent>
+                  <TabsContent value="plugins"><PluginsSection /></TabsContent>
                 </>
               )}
             </Tabs>

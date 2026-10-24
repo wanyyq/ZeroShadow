@@ -5,8 +5,11 @@ import "./index.css"
 import App from "./App.tsx"
 import { initLucide } from "@/lib/lucide"
 import { VERSION } from "@/version"
+import { loadPluginTheme } from "@/lib/plugin-theme"
 
 initLucide()
+// 主题插件：尽早拉一次，避免先闪默认配色（失败时保持默认主题）
+void loadPluginTheme()
 
 /**
  * 注册 Service Worker（v2.0，弱网 / 内网穿透优化）。

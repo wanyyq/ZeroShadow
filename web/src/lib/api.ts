@@ -252,6 +252,97 @@ export function thumbUrl(path: string, w = 256) {
   return `/api/fs/thumb?path=${encodeURIComponent(path)}&w=${w}${groupQuery()}`
 }
 
+/* ================================================================ 插件 == */
+
+/** 插件清单里前端需要的字段（服务端会裁掉 theme 令牌等细节） */
+export interface PluginInfo {
+  id: string
+  name: string
+  version: string
+  apiVersion: number
+  kind: "theme" | "fileType" | "server"
+  description: string
+  author: string
+  homepage: string
+  permissions: string[]
+  /** 只有当插件声明了 settings 时才有值（JSON Schema 子集） */
+  settings?: {
+    type: "object"
+    additionalProperties: false
+    properties: Record<string, Record<string, unknown>>
+  } | null
+}
+
+export interface PluginRow {
+  id: string
+  installed: boolean
+  enabled: boolean
+  installedAt: number
+  sha256: string
+  broken: boolean
+  manifest: PluginInfo | null
+  settings: Record<string, unknown>
+  activeTheme: boolean
+}
+
+export interface PluginsResponse {
+  enabled: boolean
+  summary: { total: number; enabled: number; activeTheme: string; max: number }
+  plugins: PluginRow[]
+}
+
+export function fetchPlugins() {
+  return api.get<PluginsResponse>("/admin/plugins")
+}
+
+export function patchPlugin(id: string, body: { enabled?: boolean; settings?: Record<string, unknown> }) {
+  return api.patch<{ ok: boolean; plugin: PluginRow }>(`/admin/plugins/${encodeURIComponent(id)}`, body)
+}
+
+export function deletePlugin(id: string) {
+  return api.del<{ ok: boolean }>(`/admin/plugins/${encodeURIComponent(id)}`)
+}
+
+export function setPluginTheme(id: string, active: boolean) {
+  return api.post<{ ok: boolean; activeTheme: string }>(`/admin/plugins/${encodeURIComponent(id)}/theme`, { active })
+}
+
+/**
+ * 安装插件包。**不能走 `api.post`**：那里会把 body 当成 JSON 字符串化，
+ * 而插件包里是二进制 zip。这里直接发 ArrayBuffer，错误处理与服务端 errorKey 对齐。
+ */
+export async function installPluginPackage(file: File): Promise<{ ok: boolean; plugin: PluginInfo }> {
+  const buffer = await file.arrayBuffer()
+  const res = await fetch(`/api/admin/plugins?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "X-Requested-With": "XMLHttpRequest",
+      "Content-Type": "application/zip",
+      ...contextHeaders(),
+    },
+    body: buffer,
+  })
+  let data: unknown = null
+  try {
+    data = await res.json()
+  } catch {
+    /* 非 JSON 响应 */
+  }
+  if (!res.ok) {
+    const detail = (data && typeof data === "object" ? data : {}) as {
+      error?: string
+      errorKey?: string
+      errorParams?: Record<string, string | number>
+    }
+    const message = detail.errorKey
+      ? translate(detail.errorKey, detail.errorParams)
+      : detail.error || translate("ui.common.request_failed", { status: res.status })
+    throw new ApiError(res.status, message)
+  }
+  return data as { ok: boolean; plugin: PluginInfo }
+}
+
 export function zipUrl(paths: string[]) {
   return `/api/fs/zip?paths=${encodeURIComponent(JSON.stringify(paths))}${groupQuery()}`
 }

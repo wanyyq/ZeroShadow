@@ -58,6 +58,13 @@ const DEFAULTS = {
   webdavEnabled: WEBDAV_ENABLED,
   /** 挂载路径，默认 /dav（同样以 .env 的 WEBDAV_PATH 为默认值） */
   webdavPath: WEBDAV_PATH,
+  // ===== 插件（v2.0，默认关闭）=====
+  /**
+   * 插件总开关。**默认 false**：与项目其它"默认收紧"的开关一致 ——
+   * 插件是第三方内容（哪怕这一轮只支持主题），管理员必须显式打开才谈得上安装。
+   * 关掉后既有插件不再生效，但不会被删除（数据还在 data/plugins/）。
+   */
+  pluginsEnabled: false,
   // ===== 界面语言 =====
   /** 站点默认界面语言；用户在自己浏览器里选过的语言会覆盖它 */
   defaultLang: "zh",

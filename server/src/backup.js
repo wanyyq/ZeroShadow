@@ -21,7 +21,8 @@ export const BACKUP_DIR = path.join(DATA_DIR, "backups")
 // 受管文件（相对 data/ 的文件名）。只有这些名字允许被回滚。
 // shares.json 是 v1.2.1 新增的分享记录：也要参与快照/回滚，
 // 否则一次误操作把分享表写坏就再也回不来了。
-export const MANAGED_FILES = ["config.json", "users.json", "groups.json", "todos.json", "shares.json"]
+// plugins.json（v2.0）记录插件启停与私有设置：丢了要重新勾一遍，也纳入快照。
+export const MANAGED_FILES = ["config.json", "users.json", "groups.json", "todos.json", "shares.json", "plugins.json"]
 
 function managedNames() {
   return new Set(MANAGED_FILES)

@@ -1062,4 +1062,185 @@ try {
   }
 }
 
+# --------------------------------------------- 17. 插件体系 ---------------
+Section "17. 插件体系（manifest / apiVersion / 权限白名单 / JSON Schema）"
+
+$pluginWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-plugin-$suffix"
+$pluginZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-plugin-$suffix.zip"
+$badZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-bad-$suffix.zip"
+$pluginId = "org.zeroshadow.smoke-theme"
+$origPluginsEnabled = $false
+try {
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/config"; WebSession = $session }
+  try { $origPluginsEnabled = [bool](($r.Content | ConvertFrom-Json).pluginsEnabled) } catch { }
+
+  # 17.1 默认关闭：关闭时接口应拒绝安装（而不是"装了但不生效"）
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ pluginsEnabled = $false })
+  }
+  New-Item -ItemType Directory -Path $pluginWork -Force | Out-Null
+  $manifest = @{
+    id = $pluginId
+    name = "冒烟主题"
+    version = "1.0.0"
+    apiVersion = 1
+    kind = "theme"
+    description = "smoke test theme"
+    theme = @{
+      light = @{ "--background" = "oklch(0.98 0.01 90)"; "--foreground" = "oklch(0.3 0.02 220)" }
+      dark = @{ "--background" = "oklch(0.22 0.02 220)" }
+    }
+    settings = @{
+      type = "object"
+      additionalProperties = $false
+      properties = @{
+        accent = @{ type = "string"; title = "Accent"; default = "auto"; enum = @("auto", "blue", "green") }
+        compact = @{ type = "boolean"; title = "Compact"; default = $false }
+        size = @{ type = "integer"; title = "Size"; minimum = 1; maximum = 100; default = 16 }
+      }
+    }
+  }
+  $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $pluginWork "manifest.json") -Encoding UTF8
+  if (Test-Path $pluginZip) { Remove-Item $pluginZip -Force }
+  Compress-Archive -Path (Join-Path $pluginWork "*") -DestinationPath $pluginZip -Force
+  $zipBytes = [System.IO.File]::ReadAllBytes($pluginZip)
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=smoke-theme.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session; Body = $zipBytes
+  }
+  Check "plugin-install-blocked-when-disabled" ($r.Status -eq 403) "插件关闭时应 403，实际 $($r.Status)"
+
+  # 17.2 打开总开关后可以安装
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ pluginsEnabled = $true })
+  }
+  Check "plugin-config-on" ($r.Ok -and $r.Content -match '"pluginsEnabled":true') "$($r.Status)"
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=smoke-theme.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session; Body = $zipBytes
+  }
+  Check "plugin-install" ($r.Status -eq 201 -and $r.Content -match [regex]::Escape($pluginId)) "$($r.Status) $($r.Content)"
+
+  # 17.3 装完默认禁用；主题插件不需要任何权限
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/plugins"; WebSession = $session }
+  $pluginsBody = $r.Content
+  Check "plugin-installed-disabled" ($pluginsBody -match [regex]::Escape($pluginId) -and $pluginsBody -match '"enabled":false') `
+    "装完应默认禁用: $pluginsBody"
+  Check "plugin-no-permissions" ($pluginsBody -match '"permissions":\[\]') "主题插件不应带权限"
+
+  # 17.4 未启用时不能应用主题；启用后才可以
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId) + "/theme"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ active = $true })
+  }
+  Check "plugin-theme-needs-enable" ($r.Status -eq 400) "未启用就应用主题应 400，实际 $($r.Status)"
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ enabled = $true })
+  }
+  Check "plugin-enable" ($r.Ok -and $r.Content -match '"enabled":true') "$($r.Status)"
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId) + "/theme"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ active = $true })
+  }
+  Check "plugin-theme-apply" ($r.Ok -and $r.Content -match [regex]::Escape($pluginId)) "$($r.Status) $($r.Content)"
+
+  # 17.5 公开主题接口：返回服务端拼好的 CSS（访客也要能看到同一套主题）
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/theme" }
+  Check "plugin-theme-public-css" ($r.Status -eq 200 -and $r.Content -match "data-theme-plugin" -and $r.Content -match "--background") `
+    "主题 CSS 未下发: $($r.Content)"
+
+  # 17.6 设置按 JSON Schema 校验：合法值保存、越界值拒绝
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ settings = @{ accent = "blue"; compact = $true; size = 16 } })
+  }
+  Check "plugin-settings-save" ($r.Ok -and $r.Content -match '"accent":"blue"') "$($r.Status) $($r.Content)"
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ settings = @{ size = 999 } })
+  }
+  Check "plugin-settings-range-rejected" ($r.Status -eq 400) "越界设置应 400，实际 $($r.Status)"
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ settings = @{ accent = "purple" } })
+  }
+  Check "plugin-settings-enum-rejected" ($r.Status -eq 400) "非枚举值应 400，实际 $($r.Status)"
+
+  # 17.7 非法清单被拒：apiVersion 不支持 / 未知权限 / 缺 manifest
+  $badWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-bad-$suffix"
+  New-Item -ItemType Directory -Path $badWork -Force | Out-Null
+  @{
+    id = "org.zeroshadow.bad-api"; name = "bad"; version = "1.0.0"; apiVersion = 99; kind = "theme"
+    theme = @{ light = @{ "--background" = "red" } }
+  } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $badWork "manifest.json") -Encoding UTF8
+  if (Test-Path $badZip) { Remove-Item $badZip -Force }
+  Compress-Archive -Path (Join-Path $badWork "*") -DestinationPath $badZip -Force
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=bad.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session
+    Body = ([System.IO.File]::ReadAllBytes($badZip))
+  }
+  Check "plugin-bad-api-version-rejected" ($r.Status -eq 400) "apiVersion=99 应 400，实际 $($r.Status)"
+
+  $badPermWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-badperm-$suffix"
+  New-Item -ItemType Directory -Path $badPermWork -Force | Out-Null
+  @{
+    id = "org.zeroshadow.bad-perm"; name = "bad perm"; version = "1.0.0"; apiVersion = 1; kind = "theme"
+    permissions = @("fs.write")
+    theme = @{ light = @{ "--background" = "red" } }
+  } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $badPermWork "manifest.json") -Encoding UTF8
+  $badPermZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-badperm-$suffix.zip"
+  if (Test-Path $badPermZip) { Remove-Item $badPermZip -Force }
+  Compress-Archive -Path (Join-Path $badPermWork "*") -DestinationPath $badPermZip -Force
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=badperm.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session
+    Body = ([System.IO.File]::ReadAllBytes($badPermZip))
+  }
+  Check "plugin-theme-permission-rejected" ($r.Status -eq 400) "主题插件带权限应 400，实际 $($r.Status)"
+
+  # 17.8 卸载后主题自动恢复默认
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId); Method = "DELETE"
+    Headers = $jsonHeaders; WebSession = $session
+  }
+  Check "plugin-uninstall" ($r.Ok) "$($r.Status) $($r.Content)"
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/theme" }
+  Check "plugin-theme-reset-after-uninstall" ($r.Content -match '"id":""') "卸载后应恢复默认主题: $($r.Content)"
+} catch {
+  Check "plugin-section-completed" $false $_.Exception.Message
+} finally {
+  # 还原现场：卸掉可能残留的插件、恢复总开关、清理临时文件
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($pluginId); Method = "DELETE"
+      Headers = $jsonHeaders; WebSession = $session
+    }
+  } catch { }
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+      ContentType = $jsonType; WebSession = $session
+      Body = (JsonBytes @{ pluginsEnabled = $origPluginsEnabled })
+    }
+  } catch { }
+  foreach ($p in @($pluginWork, $pluginZip, $badZip, $badPermWork, $badPermZip)) {
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+}
+
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })

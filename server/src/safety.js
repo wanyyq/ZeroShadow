@@ -158,6 +158,8 @@ const SENSITIVE_DATA_ENTRIES = new Set([
   "lang",
   // 图片缩略图缓存（v2.0）：只是派生数据，但同样不该经网盘接口被列举 / 下载
   "thumbs",
+  // 插件包（v2.0）：第三方 JS/CSS 与清单，绝不能被网盘接口读到
+  "plugins",
 ])
 
 /**

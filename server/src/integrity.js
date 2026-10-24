@@ -21,6 +21,8 @@ const MANAGED = [
   // v1.2.1：分享记录是对象（{ version, shares: [] }）。
   // 老版本实例没有这个文件，checkFile 会返回 absent，不影响启动。
   { file: "shares.json", type: "object" },
+  // v2.0：插件启停与私有设置（{ version, plugins: {}, activeTheme }）
+  { file: "plugins.json", type: "object" },
 ]
 
 function quarantine(name) {
