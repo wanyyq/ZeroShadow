@@ -48,7 +48,11 @@ const avatarInit = initAvatars()
 // md→PDF 的中文字体：开机就探测一次。放在这里（而不是首次转换时）是为了：
 //   1. 启动横幅能直接告诉管理员"PDF 里用哪个字体"，这是最常被问的一件事；
 //   2. 顺便把 20MB 字体读进缓存，第一次转换不用等。
-const pdfFont = await warmUpPdfFont()
+//
+// **不能用顶层 await**：发布包是把这份 ESM 用 `esbuild --format=cjs` 打成单文件
+// （pkg 只吃 CJS），而 CJS 没有顶层 await —— 一旦写了，`pnpm bundle` 直接失败、
+// 五个平台的发布归档全部编译不出来。所以这里只登记一个 promise，等它好了再补一行横幅。
+const pdfFontReady = warmUpPdfFont().catch(() => null)
 // 界面语言目录（data/lang）：首次运行时建目录并写入格式说明
 ensureLangDir()
 runDailySnapshot()
@@ -285,17 +289,20 @@ const server = app.listen(env.port, env.host, () => {
     if (customLangs.length) {
       console.log(`  界面语言:   zh, en, ${customLangs.join(", ")}（data/lang）`)
     }
-    // md→PDF 的中文字体：管理员最需要一眼看到的一行（开机时已探测好）。
-    // 找不到时中文转换会**直接报错**（不会写出满屏问号），所以提示要足够显眼。
-    if (pdfFont.ok) {
-      console.log(`  PDF 字体:   ${pdfFont.source}`)
-    } else {
+    // md→PDF 的中文字体：管理员最需要一眼看到的一行。
+    // 探测是异步登记的（顶层 await 会让 CJS 打包失败），所以这里是"好了就补一行"，
+    // 找不到时中文转换会**直接报错**（不会写出满屏问号），提示要足够显眼。
+    void pdfFontReady.then((pdfFont) => {
+      if (pdfFont?.ok) {
+        console.log(`  PDF 字体:   ${pdfFont.source}（${pdfFont.kind === "cff" ? "CFF" : "TrueType"}）`)
+        return
+      }
       console.log(
         "  PDF 字体:   未找到中文字体 —— 含中文的 md→PDF 会报错。" +
-          "把 .ttf/.ttc 放进 data/fonts/ 或用 CONVERT_PDF_FONT 指定路径"
+          "把 .ttf/.ttc/.otf 放进 data/fonts/ 或在「设置 → 文件转换」里指定路径"
       )
-      warn("pdf_font_missing", { msg: `md→PDF 未找到中文字体：${pdfFont.reason || "未知原因"}` })
-    }
+      warn("pdf_font_missing", { msg: `md→PDF 未找到中文字体：${pdfFont?.reason || "未知原因"}` })
+    })
     // 放宽了 SSRF 防护时显式提醒，避免"以为还拦着内网"
     const relaxed = []
     const TRUE_RE = /^(1|true|yes|on)$/i

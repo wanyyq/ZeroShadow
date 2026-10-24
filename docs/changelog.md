@@ -77,6 +77,13 @@
 
 ### 修复
 
+- **发布归档编译失败**：`server/index.js` 为开机预探测 PDF 字体用了**顶层 `await`**，
+  而发布包要先 `esbuild --format=cjs`（CJS 不支持顶层 await），`pnpm bundle` 直接失败，
+  CI 五个平台全部编译不出来。改为登记 promise + 横幅里 `.then()` 补一行。
+  新增 `scripts/bundle-check.mjs` 在本地复现这类"ESM 能跑、CJS 打包失败"的问题。
+
+### 修复
+
 - **WebDAV 挂不上 / 挂上后保存失败**（详见下面是同批修复）：
   - `getetag` 写反（目录有、文件没有），且 PROPFIND / GET / PUT 三处 ETag 算法互不相同 ——
     "从列表拿 ETag 再保存"永远判 412。现统一为 `davEtag()` 一个来源：`"s-<mtimeMs>-<size>"`；

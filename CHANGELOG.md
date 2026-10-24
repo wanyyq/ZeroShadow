@@ -100,6 +100,17 @@ md→PDF 是完全自实现的（手写 PDF 1.7 写出器 + TrueType 子集化�
 
 ### 修复
 
+- **发布归档编译失败（五个平台全红）**：`server/index.js` 里为"开机预探测 PDF 字体"用了**顶层 `await`**。
+  服务端按 ESM 跑没问题，但发布包要先 `esbuild --format=cjs` 打成单文件 —— **CJS 不支持顶层 await**，
+  于是 `pnpm bundle` 直接报 `Top-level await is currently not supported with the "cjs" output format`，
+  CI 的 `Build release archives` 全部失败。改为登记一个 promise、在启动横幅里 `.then()` 补一行
+  （`PDF 字体: …（TrueType / CFF）`），既保住"开机就能看到用哪个字体"，也让打包恢复。
+  同时新增 **`scripts/bundle-check.mjs`**：照抄 `server/package.json` 的 bundle 命令跑到系统临时目录，
+  在本地就能复现这类"ESM 能跑、CJS 打包失败"的问题（顶层 await、`import.meta` 等），
+  已写进开发者指南的构建小节与测试表。
+
+### 修复
+
 **WebDAV 挂载不上 / 挂上后保存失败（本轮实测发现，均有回归断言）**
 
 - **`getetag` 写反了，且三处 ETag 算法互不一致**（`webdav.js`）：
