@@ -7,6 +7,7 @@ import { getStatus } from "../status.js"
 import { applyTunnelConfig, tunnelStatus, validateCustomHost } from "../tunnel.js"
 import { aggregateLogs, clearLogs, info, logsExportName, logsToCsv, logsToJsonl, queryLogs } from "../logger.js"
 import { contentDisposition, httpError } from "../http.js"
+import { inspectFontFile, resolveFontPath, fontStatus as convertFontStatus, resetFontCache } from "../convert/pdf/font.js"
 import { samePath, normRel, resolveAny } from "../safety.js"
 import {
   LEADER_CAPS,
@@ -149,6 +150,24 @@ router.patch("/config", async (req, res, next) => {
       }
       updates.webdavPath = normalized
     }
+    if (body.convertPdfFont !== undefined) {
+      // md→PDF 的字体：允许留空（= 自动探测），非空时必须**当场验证**它真的能排中文。
+      // 否则会出现"保存成功、转换时才报错"这种最难查的情况 —— 而字体文件不可用
+      // （下载成 .zip、CFF2 变量字体、name-keyed OTF、没有汉字）恰恰是最常见的。
+      const raw = String(body.convertPdfFont || "").trim()
+      if (!raw) {
+        updates.convertPdfFont = ""
+      } else {
+        const probe = await inspectFontFile(raw)
+        if (!probe.ok) {
+          throw httpError(400, `这个字体不可用：${probe.reason}`, {
+            errorKey: "api.admin.convert_font_invalid",
+            errorParams: { reason: String(probe.reason || "") },
+          })
+        }
+        updates.convertPdfFont = resolveFontPath(raw)
+      }
+    }
     for (const group of ["memberPerms", "guestPerms"]) {
       if (body[group] !== undefined) {
         if (typeof body[group] !== "object" || body[group] === null) {
@@ -169,11 +188,45 @@ router.patch("/config", async (req, res, next) => {
       }
       if (updates.defaultVisibility) draft.defaultVisibility = updates.defaultVisibility
       if (updates.webdavPath !== undefined) draft.webdavPath = updates.webdavPath
+      if (updates.convertPdfFont !== undefined) draft.convertPdfFont = updates.convertPdfFont
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms)
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms)
     })
+    // 字体换了就清掉探测缓存并**立刻重新探测**：后台刷新后马上能看到新字体的
+    // 状态，而不是一句"未探测"。不用重启。
+    if (updates.convertPdfFont !== undefined) {
+      resetFontCache()
+      const { warmUpFont } = await import("../convert/pdf/font.js")
+      await warmUpFont()
+    }
     info("config_update", { msg: JSON.stringify(updates), ...actor(req) })
     res.json(config)
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * 「设置 → 文件转换」用：当前字体状态 + 每个候选被跳过的原因 + 重新探测。
+ *
+ * 为什么单独给一个接口：字体问题几乎全是"环境问题"（路径、格式、权限），
+ * 光看一句"没有可用字体"没法排查；这里把**每个候选文件与它的判据**都摊开。
+ */
+router.get("/convert", async (_req, res, next) => {
+  try {
+    res.json({ config: { font: String(getConfig().convertPdfFont || "") }, status: convertFontStatus() })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** 「重新探测」：丢掉缓存后按当前配置重新扫一遍（服主刚把字体丢进 data/fonts 时用） */
+router.post("/convert/rescan", async (_req, res, next) => {
+  try {
+    resetFontCache()
+    const { warmUpFont } = await import("../convert/pdf/font.js")
+    await warmUpFont()
+    res.json({ config: { font: String(getConfig().convertPdfFont || "") }, status: convertFontStatus() })
   } catch (err) {
     next(err)
   }

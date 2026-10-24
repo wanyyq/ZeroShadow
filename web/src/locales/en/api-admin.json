@@ -11,6 +11,7 @@
   "api.admin.username_duplicate": "Duplicate username in this submission",
   "api.admin.member_limit_reached": "The member limit of {max} has been reached",
   "api.admin.logs_format_invalid": "format must be either jsonl or csv",
+  "api.admin.convert_font_invalid": "This font cannot be used: {reason}",
   "api.admin.trash_restore_conflict": "An item with the same name already exists at “{name}”. Rename or delete it first, or choose to overwrite.",
   "api.auth.login_missing_credentials": "Please enter your username and password",
   "api.auth.login_format_invalid": "The username or password has an invalid format",

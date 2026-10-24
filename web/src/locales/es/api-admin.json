@@ -11,6 +11,7 @@
   "api.admin.username_duplicate": "Nombre de usuario duplicado en este envío",
   "api.admin.member_limit_reached": "Se alcanzó el límite de miembros {max}",
   "api.admin.logs_format_invalid": "format solo puede ser jsonl o csv",
+  "api.admin.convert_font_invalid": "Esta fuente no se puede usar: {reason}",
   "api.admin.trash_restore_conflict": "En la ubicación de «{name}» ya existe un elemento con el mismo nombre. Cámbiale el nombre o elimínalo primero, o elige sobrescribir.",
   "api.auth.login_missing_credentials": "Introduce usuario y contraseña",
   "api.auth.login_format_invalid": "Formato de usuario o contraseña incorrecto",

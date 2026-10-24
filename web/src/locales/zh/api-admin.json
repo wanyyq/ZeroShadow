@@ -11,6 +11,7 @@
   "api.admin.username_duplicate": "本次提交中用户名重复",
   "api.admin.member_limit_reached": "成员数量已达上限 {max}",
   "api.admin.logs_format_invalid": "format 只能是 jsonl 或 csv",
+  "api.admin.convert_font_invalid": "这个字体不可用：{reason}",
   "api.admin.trash_restore_conflict": "「{name}」的位置上已经有一个同名项目。请先改名或删除它，或者选择覆盖。",
   "api.auth.login_missing_credentials": "请输入用户名和密码",
   "api.auth.login_format_invalid": "用户名或密码格式不正确",

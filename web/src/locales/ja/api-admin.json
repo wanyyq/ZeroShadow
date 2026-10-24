@@ -11,6 +11,7 @@
   "api.admin.username_duplicate": "今回の送信でユーザー名が重複しています",
   "api.admin.member_limit_reached": "メンバー数が上限 {max} に達しました",
   "api.admin.logs_format_invalid": "format は jsonl または csv のみです",
+  "api.admin.convert_font_invalid": "このフォントは使用できません：{reason}",
   "api.admin.trash_restore_conflict": "「{name}」の位置に同名の項目が既にあります。先に名前を変更するか削除するか、上書きを選択してください。",
   "api.auth.login_missing_credentials": "ユーザー名とパスワードを入力してください",
   "api.auth.login_format_invalid": "ユーザー名またはパスワードの形式が正しくありません",

@@ -188,11 +188,12 @@ check("front matter 被跳过（第一块是 h1 而不是分隔线）", () => {
   assert.equal(markdown.inlineToText(blocks[0].inlines, { keepUrl: false }), "项目周会纪要")
 })
 
-check("段落里的软换行：中文之间不插空格", () => {
+check("段落里的软换行：与预览一致，折叠成一个空格", () => {
   const para = blocks.find((b) => b.type === "para")
   const text = markdown.inlineToText(para.inlines, { keepUrl: false })
-  assert.ok(text.includes("还有 PNG/JPG 互转。第二行"), `实际：${text}`)
-  assert.ok(!text.includes("互转。 第二行"), "中文之间被插入了空格")
+  // 浏览器把段落里的换行折叠成空格 —— PDF 必须一样，否则"同一句话"在两边会长得不同。
+  // 这条断言以前写的是"中文之间不插空格"，是有意改掉的（见 scripts/markdown-parity-test.mjs）
+  assert.ok(text.includes("互转。 第二行"), `实际：${text}`)
 })
 
 check("行内样式：粗体 / 代码 / 斜体 / 链接都带标记位", () => {
@@ -254,9 +255,11 @@ check("图片降级成带 alt 的行内单元", () => {
   assert.ok(last.inlines.some((r) => r.image && r.text === "示意图"))
 })
 
-check("原始 HTML 标签被剥掉，只留文字", () => {
+check("原始 HTML：白名单标签丢标签留文字，白名单外的原样当文本", () => {
   const parsed = markdown.parseMarkdown("<div>危险</div> 正文 <b>加粗</b>")
-  assert.equal(markdown.inlineToText(parsed[0].inlines, { keepUrl: false }), "危险 正文 加粗")
+  // div 在白名单里（预览会渲染成块），b 不在白名单里（预览会把它当**纯文本**显示）。
+  // 所以 PDF 侧也必须保留 `<b>` 的字面文字，不能悄悄删掉 —— 否则两边内容不一致。
+  assert.equal(markdown.inlineToText(parsed[0].inlines, { keepUrl: false }), "危险 正文 <b>加粗</b>")
 })
 
 /* ---------------------------------------------------------------- 2. md → txt */
@@ -504,7 +507,7 @@ await checkAsync("真·退化路径（没有中文字体）：退回内置 Helve
     font: fallback,
     fallbackTitle: "fallback",
   })
-  const buffer = docMod.buildPdf({ pages: layout.pages, font: fallback, title: "fallback" })
+  const buffer = docMod.buildPdf({ pages: layout.pages, font: fallback, title: "fallback" }).data
   const info = inspectPdf(buffer)
   // 退化时必须是内置 Type1 字体，而不是"空字体程序的 CIDFontType2"（那会让阅读器直接报错）
   assert.ok(/\/Subtype \/Type1/.test(info.raw), "退化路径没有用 Type1 内置字体")
@@ -691,6 +694,223 @@ await checkAsync("队列排满时立刻报 503（不让用户干等）", async (
   for (const release of releases) release()
   await Promise.all(drain)
   assert.deepEqual(queue.convertQueueState(), { active: 0, waiting: 0 })
+})
+
+/* ------------------------------------------------- 7. 字体：CFF 与服主指定 */
+
+section("字体：CFF（OpenType）子集化与服主指定")
+
+// 找一个 CFF 中文字体：优先用环境变量指定，其次扫常见目录（拿不到就跳过这几条，
+// 因为这些断言需要**真实的** CFF 字体才有意义，造不出来）
+function findCffFont() {
+  const candidates = [
+    process.env.ZS_TEST_CFF_FONT,
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "C:/Users/RedmiBook/AppData/Local/Microsoft/Windows/Fonts/NotoSerifSC-Medium.otf",
+    "C:/Users/RedmiBook/AppData/Local/Microsoft/Windows/Fonts/SourceHanSansSC-Normal-2.otf",
+  ].filter(Boolean)
+  for (const file of candidates) {
+    try {
+      if (fs.statSync(file).isFile()) return file
+    } catch {
+      /* 没有就继续 */
+    }
+  }
+  return null
+}
+
+const cffFont = findCffFont()
+const truetypeMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "truetype.js")).href)
+
+if (!cffFont) {
+  console.log("  · 跳过 CFF 断言（本机没有 CFF 中文字体，可用 ZS_TEST_CFF_FONT 指定一个）")
+} else {
+  await checkAsync("CFF 字体能被解析，且 kind = cff", async () => {
+    const font = truetypeMod.parseFont(fs.readFileSync(cffFont))
+    assert.equal(font.kind, "cff")
+    assert.ok(font.cidByGid && font.cidByGid.length === font.numGlyphs, "没有解析出 CID 映射")
+  })
+
+  await checkAsync("CFF 子集化：体积大幅下降、自检通过、CID 保持原值", async () => {
+    const { parseFont, charMap, buildFontProgram } = truetypeMod
+    const font = parseFont(fs.readFileSync(cffFont))
+    const map = charMap(font)
+    const gids = new Set()
+    for (const ch of "中文测试文件转换ABC") {
+      const gid = map.get(ch.codePointAt(0))
+      if (gid) gids.add(gid)
+    }
+    const built = buildFontProgram(font, gids)
+    assert.equal(built.format, "cff")
+    assert.equal(built.fallbackReason, undefined, `子集化失败并回退了：${built.fallbackReason}`)
+    // 思源/Noto 这种中文字体整份 CFF 有 10MB 上下，子集必须小得多（这里给 1/5 的宽松门槛）
+    assert.ok(
+      built.program.length < font.cff.fullProgram.length / 5,
+      `子集没变小：${built.program.length} vs ${font.cff.fullProgram.length}`
+    )
+    // CID 必须与原字体一致（PDF 内容流里写的就是 CID，错了就是一堆错字）
+    const cffMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "cff.js")).href)
+    const reparsed = cffMod.parseCff(built.program, 0, built.program.length, built.oldGids.length)
+    for (let i = 0; i < built.oldGids.length; i += 1) {
+      assert.equal(reparsed.cidByGid[i], font.cidByGid[built.oldGids[i]], `第 ${i} 个字形的 CID 不一致`)
+    }
+  })
+
+  await checkAsync("服主指定的 CFF 字体优先于系统里的 TrueType 字体", async () => {
+    const prevEnv = process.env.CONVERT_PDF_FONT
+    process.env.CONVERT_PDF_FONT = cffFont
+    fontMod.resetFontCache()
+    try {
+      const loaded = await fontMod.loadFont()
+      assert.equal(loaded.ok, true)
+      assert.equal(loaded.kind, "cff", `指定了 CFF 却用了 ${loaded.kind}（显式指定必须优先）`)
+      assert.equal(path.resolve(loaded.source), path.resolve(cffFont))
+    } finally {
+      if (prevEnv === undefined) delete process.env.CONVERT_PDF_FONT
+      else process.env.CONVERT_PDF_FONT = prevEnv
+      fontMod.resetFontCache()
+    }
+  })
+
+  await checkAsync("CFF 字体也能生成结构合法的 PDF（CIDFontType0 + FontFile3）", async () => {
+    const prevEnv = process.env.CONVERT_PDF_FONT
+    process.env.CONVERT_PDF_FONT = cffFont
+    fontMod.resetFontCache()
+    try {
+      const result = await mdPdf.run({ text: "# 中文标题\n\n正文含中文与 ASCII。\n", name: "cff.md", onProgress: () => {} })
+      const raw = result.data.toString("latin1")
+      assert.ok(/\/Subtype \/CIDFontType0\b/.test(raw), "没有用 CIDFontType0")
+      assert.ok(/\/FontFile3/.test(raw), "没有引用 FontFile3")
+      assert.ok(/\/Subtype \/CIDFontType0C/.test(raw), "字体流缺少 /CIDFontType0C")
+      assert.ok(!/\/CIDToGIDMap/.test(raw), "CIDFontType0 不该出现 /CIDToGIDMap")
+      inspectPdf(result.data)
+    } finally {
+      if (prevEnv === undefined) delete process.env.CONVERT_PDF_FONT
+      else process.env.CONVERT_PDF_FONT = prevEnv
+      fontMod.resetFontCache()
+    }
+  })
+}
+
+await checkAsync("字体校验：路径不存在 / 不是字体 / 没有汉字 都要被拒", async () => {
+  const missing = await fontMod.inspectFontFile(path.join(OUT_DIR, "definitely-not-here.ttf"))
+  assert.equal(missing.ok, false)
+  assert.match(missing.reason, /不存在|权限/)
+
+  const notFont = path.join(OUT_DIR, "not-a-font.ttf")
+  fs.writeFileSync(notFont, Buffer.from("this is definitely not a font file"))
+  const bad = await fontMod.inspectFontFile(notFont)
+  assert.equal(bad.ok, false)
+
+  const wrongExt = await fontMod.inspectFontFile(path.join(OUT_DIR, "x.zip"))
+  assert.equal(wrongExt.ok, false)
+  assert.match(wrongExt.reason, /只支持/)
+})
+
+/* ---------------------------------------------- 8. 与预览一致的行内/块级特性 */
+
+section("与预览一致：硬换行 / 删除线 / 白名单标签 / 复选框")
+
+check("硬换行（行尾两个空格）变成 { br: true } 的换行单元", () => {
+  const parsed = markdown.parseMarkdown("第一行  \n第二行\n")
+  const run = parsed[0].inlines.find((r) => r.br)
+  assert.ok(run, "没有产生换行单元")
+})
+
+check("反斜杠结尾也是硬换行", () => {
+  const parsed = markdown.parseMarkdown("第一行\\\n第二行\n")
+  assert.ok(parsed[0].inlines.some((r) => r.br), "没有产生换行单元")
+})
+
+check("<br> 标签变成换行单元，<kbd> 只丢标签留文字", () => {
+  const parsed = markdown.parseMarkdown("上<br>下 与 <kbd>Ctrl</kbd>")
+  const inlines = parsed[0].inlines
+  assert.ok(inlines.some((r) => r.br), "<br> 没有变成换行")
+  const text = markdown.inlineToText(inlines, { keepUrl: false })
+  assert.ok(text.includes("Ctrl"), "白名单标签里的文字丢了")
+  assert.ok(!text.includes("<kbd>"), "白名单标签本身不该出现在正文里")
+})
+
+check("~~删除线~~ 带上 strike 标记", () => {
+  const parsed = markdown.parseMarkdown("~~删掉~~ 正常")
+  const strike = parsed[0].inlines.find((r) => r.strike)
+  assert.ok(strike && strike.text.includes("删掉"))
+})
+
+check("任务列表的勾选框不是文字（改用矢量方框，避免字体缺 ☑ 变成 ?）", () => {
+  const parsed = markdown.parseMarkdown("- [x] 完成\n- [ ] 未完成\n")
+  const list = parsed.find((b) => b.type === "list")
+  assert.equal(list.items[0].task, true)
+  assert.equal(list.items[1].task, false)
+  const text = markdown.inlineToText(list.items[0].inlines, { keepUrl: false })
+  assert.ok(!text.includes("☑") && !text.includes("☐"), "正文里不该再出现 ☑/☐ 这两个码点")
+})
+
+/* --------------------------------------------------- 9. 图片真的进了 PDF */
+
+section("图片：预览里看得到的图，PDF 里也要有")
+
+/** 造一张最小但合法的 PNG（1×1，RGB，filter=0） */
+function tinyPng() {
+  const zlibRaw = zlib.deflateSync(Buffer.from([0x00, 0x11, 0x22, 0x33])) // filter 0 + RGB
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8)
+    head.writeUInt32BE(data.length, 0)
+    head.write(type, 4, 4, "latin1")
+    const crcTable = []
+    for (let n = 0; n < 256; n += 1) {
+      let c = n
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+      crcTable[n] = c >>> 0
+    }
+    let crc = 0xffffffff
+    // CRC 覆盖"类型 + 数据"两部分（类型已经在 head 里，这里单独拼一份给 CRC 用）
+    for (const byte of Buffer.concat([Buffer.from(type, "latin1"), data])) {
+      crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8)
+    }
+    const tail = Buffer.alloc(4)
+    tail.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 0)
+    return Buffer.concat([head, data, tail])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(1, 0)
+  ihdr.writeUInt32BE(1, 4)
+  ihdr[8] = 8 // bit depth
+  ihdr[9] = 2 // color type: RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlibRaw),
+    chunk("IEND", Buffer.alloc(0)),
+  ])
+}
+
+await checkAsync("md 里引用的图片被内嵌成 Image XObject（不是一行占位文字）", async () => {
+  const image = path.join(OUT_DIR, "inline-test.png")
+  fs.writeFileSync(image, tinyPng())
+  const result = await mdPdf.run({
+    text: "# 有图\n\n![一张图](inline-test.png)\n\n正文\n",
+    name: "img.md",
+    dir: OUT_DIR,
+    onProgress: () => {},
+  })
+  const raw = result.data.toString("latin1")
+  assert.ok(/\/Subtype \/Image/.test(raw), "PDF 里没有图像对象")
+  assert.ok(/\/XObject\s*</.test(raw), "页面资源里没有 /XObject")
+  assert.ok(!raw.includes("[图片: 一张图]"), "仍然只画了占位文字")
+  inspectPdf(result.data)
+})
+
+await checkAsync("图片不存在时退化成占位文字（不抛错、不缺块）", async () => {
+  const result = await mdPdf.run({
+    text: "![缺失](nope.png)\n",
+    name: "img2.md",
+    dir: OUT_DIR,
+    onProgress: () => {},
+  })
+  inspectPdf(result.data)
+  const raw = result.data.toString("latin1")
+  assert.ok(!/\/Subtype \/Image/.test(raw), "图不存在却写了图像对象")
 })
 
 /* ---------------------------------------------------------------- 汇总 */

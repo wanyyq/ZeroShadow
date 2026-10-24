@@ -26,7 +26,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { DATA_DIR, ROOT_DIR } from "../../env.js"
-import { advances, charMap, parseFont, subsetFont } from "./truetype.js"
+import { getConfig } from "../../config.js"
+import { advances, charMap, parseFont, subsetFont, buildFontProgram } from "./truetype.js"
 
 /** 去掉控制台噪声用：最多尝试多少个候选字体（正常情况下第一个就成） */
 const MAX_TRIES = 12
@@ -148,24 +149,33 @@ let dirCacheKey = ""
 let dirCacheAt = 0
 const DIR_CACHE_MS = 5 * 60 * 1000
 
-/** 按优先级列出所有候选字体文件 */
+/**
+ * 按优先级列出所有候选字体。
+ *
+ * 每项带 `explicit` 标记：**服主显式指定**（后台配置 / 环境变量）的字体不受
+ * "优先 TrueType"的约束 —— 说了用哪个就用哪个，哪怕它更大。
+ */
 function candidatePaths() {
   const list = []
   const seen = new Set()
-  const push = (file) => {
+  const push = (file, explicit = false) => {
     if (!file) return
     const resolved = path.isAbsolute(file) ? file : path.join(ROOT_DIR, file)
     const key = resolved.toLowerCase()
     if (seen.has(key)) return
     seen.add(key)
-    list.push(resolved)
+    list.push({ path: resolved, explicit })
   }
 
-  // 1. 显式指定：环境变量
-  const fromEnv = String(process.env.CONVERT_PDF_FONT || "").trim()
-  if (fromEnv) push(fromEnv)
+  // 1. **后台指定**（「设置 → 文件转换 → PDF 字体」）：服主说了算，排第一
+  const fromConfig = resolveFontPath(configuredFont())
+  if (fromConfig) push(fromConfig, true)
 
-  // 2. data/fonts/：管理员自备字体（离线 / 无字体系统的部署靠它）
+  // 2. 环境变量 CONVERT_PDF_FONT（老部署与容器场景仍然有效）
+  const fromEnv = String(process.env.CONVERT_PDF_FONT || "").trim()
+  if (fromEnv) push(fromEnv, true)
+
+  // 3. data/fonts/：管理员自备字体（离线 / 无字体系统的部署靠它）
   try {
     const dir = path.join(DATA_DIR, "fonts")
     if (fs.existsSync(dir)) {
@@ -179,7 +189,7 @@ function candidatePaths() {
     /* 目录不可读就跳过 */
   }
 
-  // 3. 扫描平台字体目录（结果缓存 5 分钟）
+  // 4. 扫描平台字体目录（结果缓存 5 分钟）
   const dirs = fontDirs()
   const cacheKey = dirs.join("|")
   const now = Date.now()
@@ -196,10 +206,9 @@ function candidatePaths() {
   }
   for (const { file } of dirCache) push(file)
 
-  // 4. 最后的兜底绝对路径
+  // 5. 最后的兜底绝对路径
   for (const file of FALLBACK_FILES[process.platform] ?? FALLBACK_FILES.linux) push(file)
 
-  // 排序只看"命中优先级"，没命中的按原顺序留在后面
   return list
 }
 
@@ -217,14 +226,17 @@ let cachedAt = 0
  * `usedGids`，如果复用，第二次转换会把上一次用到的字形也一起内嵌进 PDF，
  * 文件只会越来越大。所以每次转换都拿到一份干净的视图。
  *
- * 找不到字体时**只缓存一分钟**：管理员按提示把 `.ttf` 丢进 `data/fonts/` 之后，
- * 一分钟内（或重启）就会生效，不需要改环境变量。
+ * 找不到字体时**只缓存一分钟**：管理员按提示把字体丢进 `data/fonts/` 之后，
+ * 一分钟内（或点后台的「重新探测」/ 重启）就会生效。
  *
- * @returns {Promise<{ ok: boolean, source?: string, reason?: string, font: object }>}
+ * 候选顺序：**后台指定** → `.env` 的 `CONVERT_PDF_FONT` → `data/fonts/` →
+ * 系统字体目录。前两个是"服主说用哪个就用哪个"，指定了就一定排在第一位。
+ *
+ * @returns {Promise<{ ok: boolean, source?: string, kind?: string, reason?: string, font: object }>}
  */
 export async function loadFont() {
   const candidates = candidatePaths()
-  const key = candidates.join("|")
+  const key = candidates.map((c) => `${c.explicit ? "!" : ""}${c.path}`).join("|")
   const expired = !cached || cachedKey !== key || (!cached.ok && Date.now() - cachedAt > MISS_TTL_MS)
   if (expired) {
     cached = await probeFont(candidates)
@@ -235,19 +247,76 @@ export async function loadFont() {
   const font = cached.ok
     ? createFontView(cached.parsed, cached.advanceTable, cached.map)
     : createFallbackView()
-  return { ok: cached.ok, source: cached.source, reason: cached.reason, font }
+  return { ok: cached.ok, source: cached.source, kind: cached.kind, reason: cached.reason, font }
 }
 
 /**
- * 诊断用：当前会用哪个字体（不读字体文件，只反映最近一次探测结果）。
- * 启动横幅与后台日志用它告诉管理员"PDF 里的中文到底有没有字体可排"。
+ * 诊断用：当前会用哪个字体 + 每个候选为什么被跳过。
+ *
+ * 这套信息直接呈现在「设置 → 文件转换」：用户把字体放对地方却仍然报"没有中文字体"时，
+ * 唯一能说清原因的就是"这个文件被跳过的理由"（例如 CFF2 变量字体、不含汉字、
+ * name-keyed CFF、路径不存在）。启动横幅与后台日志也用它。
  */
 export function fontStatus() {
   return {
     ok: !!(cached && cached.ok),
     source: cached?.source ?? null,
+    kind: cached?.kind ?? null,
+    bytes: cached?.bytes ?? null,
     reason: cached?.reason ?? null,
     checked: !!cached,
+    candidates: cached?.attempts ?? [],
+    dirs: {
+      dataFonts: path.join(DATA_DIR, "fonts"),
+      system: fontDirs(),
+    },
+    /** 后台显式指定的字体（空字符串 = 自动） */
+    configured: configuredFont(),
+    envFont: String(process.env.CONVERT_PDF_FONT || "").trim() || null,
+  }
+}
+
+/** 后台「设置 → 文件转换」里指定的字体路径（空 = 自动） */
+export function configuredFont() {
+  try {
+    return String(getConfig().convertPdfFont || "").trim()
+  } catch {
+    return ""
+  }
+}
+
+/** 把后台/环境变量里的路径规范化成绝对路径（相对路径按程序根目录解析） */
+export function resolveFontPath(input) {
+  const raw = String(input || "").trim()
+  if (!raw) return ""
+  return path.isAbsolute(raw) ? raw : path.join(ROOT_DIR, raw)
+}
+
+/**
+ * 校验一个"服主指定"的字体是否真的能用。
+ * 后台保存时调用：与其让他保存成功、转换时才失败，不如当场说清楚问题。
+ *
+ * @returns {Promise<{ ok: boolean, kind?: string, bytes?: number, reason?: string }>}
+ */
+export async function inspectFontFile(input) {
+  const file = resolveFontPath(input)
+  if (!file) return { ok: false, reason: "路径为空" }
+  if (!FONT_EXT.test(file)) return { ok: false, reason: "只支持 .ttf / .ttc / .otf 字体文件" }
+  let buffer
+  try {
+    buffer = await fs.promises.readFile(file)
+  } catch {
+    return { ok: false, reason: "文件不存在或没有读取权限" }
+  }
+  try {
+    const parsed = parseFont(buffer)
+    const map = charMap(parsed)
+    if (!map.has(0x4e2d) && !map.has(0x9ad8)) {
+      return { ok: false, kind: parsed.kind, bytes: buffer.length, reason: "这个字体不含汉字（认不出「中」字）" }
+    }
+    return { ok: true, kind: parsed.kind, bytes: buffer.length, glyphs: parsed.numGlyphs }
+  } catch (err) {
+    return { ok: false, reason: String(err?.message || err) }
   }
 }
 
@@ -261,37 +330,85 @@ export async function warmUpFont() {
   return fontStatus()
 }
 
-/** 依次尝试候选字体，返回解析结果（不含视图） */
+/**
+ * 依次尝试候选字体，返回解析结果（不含视图）。
+ *
+ * 三个阶段，顺序是有意的：
+ *   1. **显式指定**的字体（后台配置 / 环境变量）：不管你给的是 TrueType 还是 CFF，
+ *      说了用哪个就用哪个 —— 否则"我指定了字体却没生效"这种反馈会一直出现；
+ *   2. 其余候选里的 **TrueType**：子集只有一两百 KB；
+ *   3. 其余候选里的 **CFF**：本机实测子集 0.5~1MB（局部 Subrs 没法安全裁剪，
+ *      见 cff.js），所以能不用就不用。
+ */
 async function probeFont(candidates) {
-  let lastReason = "没有找到可用的中文字体"
-  let tried = 0
-  for (const file of candidates) {
-    if (tried >= MAX_TRIES) {
-      lastReason = `已尝试 ${tried} 个候选字体都不含中文字形（可把 .ttf/.ttc 放进 data/fonts/）`
-      break
-    }
+  const attempts = []
+  const tried = new Set()
+  const visit = async (entry, allowCff) => {
+    if (tried.has(entry.path)) return null
+    tried.add(entry.path)
     let buffer
     try {
-      buffer = await fs.promises.readFile(file)
+      buffer = await fs.promises.readFile(entry.path)
     } catch {
-      continue // 文件不存在就是最正常的跳过路径
+      attempts.push({ path: entry.path, explicit: entry.explicit, ok: false, reason: "文件不存在或不可读" })
+      return null
     }
-    tried += 1
     try {
       const parsed = parseFont(buffer)
+      if (parsed.kind === "cff" && !allowCff) {
+        attempts.push({ path: entry.path, explicit: entry.explicit, ok: false, reason: "跳过（优先 TrueType）" })
+        return null
+      }
       const map = charMap(parsed)
       // 至少要认得几个常用汉字，否则这个字体帮不上忙（例如只含拉丁的字体）
       if (!map.has(0x4e2d) && !map.has(0x9ad8)) {
-        lastReason = `${path.basename(file)} 不含中文字形`
-        continue
+        attempts.push({ path: entry.path, explicit: entry.explicit, ok: false, reason: "不含汉字（认不出「中」字）" })
+        return null
       }
-      return { ok: true, source: file, parsed, advanceTable: advances(parsed), map }
+      attempts.push({ path: entry.path, explicit: entry.explicit, ok: true, reason: "", kind: parsed.kind })
+      return {
+        ok: true,
+        source: entry.path,
+        kind: parsed.kind,
+        bytes: buffer.length,
+        parsed,
+        advanceTable: advances(parsed),
+        map,
+        attempts,
+      }
     } catch (err) {
-      // CFF / 损坏的字体：记下原因继续找下一个
-      lastReason = `${path.basename(file)}: ${err.message}`
+      // CFF2 变量字体 / name-keyed CFF / 损坏文件：记下原因继续找下一个
+      attempts.push({ path: entry.path, explicit: entry.explicit, ok: false, reason: String(err?.message || err) })
+      return null
     }
   }
-  return { ok: false, reason: lastReason }
+
+  // 1) 显式指定（允许 CFF）
+  for (const entry of candidates.filter((c) => c.explicit)) {
+    const hit = await visit(entry, true)
+    if (hit) return hit
+  }
+  // 2) 其余候选：先只认 TrueType，有上限地试
+  let budget = MAX_TRIES
+  for (const entry of candidates.filter((c) => !c.explicit)) {
+    if (budget <= 0) break
+    const before = attempts.length
+    const hit = await visit(entry, false)
+    if (hit) return hit
+    if (attempts.length > before) budget -= 1
+  }
+  // 3) 还没有：回头接受 CFF
+  for (const entry of candidates.filter((c) => !c.explicit)) {
+    const hit = await visit(entry, true)
+    if (hit) return hit
+  }
+
+  const lastReal = [...attempts].reverse().find((a) => !a.ok && a.reason !== "跳过（优先 TrueType）")
+  return {
+    ok: false,
+    reason: lastReal?.reason || "没有找到可用的中文字体",
+    attempts,
+  }
 }
 
 /** 测试用：清掉缓存（改过 CONVERT_PDF_FONT 后重新探测） */
@@ -305,27 +422,38 @@ export function resetFontCache() {
 }
 
 /**
- * 度量视图：把"字符 → 字形号 / 字宽"包成排版层能直接用的形状。
+ * 度量视图：把"字符 → 字形号 / CID / 字宽"包成排版层能直接用的形状。
  *
  * 所有宽度单位都是 **1/1000 em**（PDF 的字宽单位），这样内容流与 /W 数组共用一套数字，
  * 不会出现"排版算的和阅读器画的不一致"。
+ *
+ * 两条路径的差别只在这里收口：
+ *   - TrueType：CID == 字形号
+ *   - CFF：CID 来自字体 charset（与字形号**常常不相等**，实测 NotoSerifSC 的
+ *     「中」是 gid 8742 / cid 9562），所以内容流、/W、ToUnicode 三处都必须用 CID
  */
 function createFontView(parsed, advanceTable, map) {
   const perEm = parsed.unitsPerEm || FALLBACK_UNITS
   const toMil = (units) => Math.round((units / perEm) * 1000)
+  /** 用到的是**原始字形号**（子集化需要它们） */
   const usedGids = new Set()
-  const gidToCodePoint = new Map()
+  /** CID → 该 CID 的宽度（/W 数组按 CID 索引） */
+  const widthByCid = new Map()
+  const cidToCodePoint = new Map()
   const missing = new Set()
+  const isCff = parsed.kind === "cff"
 
   // 缺字时用它顶替（'?' 也缺就退回 0 号字形 .notdef，阅读器会画一个方框）
   const fallbackGid = map.get(0x3f) ?? 0
 
+  /** 字形号 → CID（TrueType 路径下恒等） */
+  const cidOf = (gid) => (isCff ? parsed.cidByGid[gid] ?? 0 : gid)
+
   const view = {
     ok: true,
-    kind: "truetype",
+    kind: parsed.kind,
     source: parsed,
     unitsPerEm: perEm,
-    /** 排版行高用：常规字体 ascent 大约 0.88em，descender 约 -0.12em */
     ascent: toMil(parsed.ascender),
     descent: toMil(parsed.descender),
     lineGap: toMil(parsed.lineGap),
@@ -339,7 +467,8 @@ function createFontView(parsed, advanceTable, map) {
     /** 记录"哪些字符在这个字体里没有字形"，调用方可以据此提示 */
     missingChars: missing,
     usedGids,
-    gidToCodePoint,
+    widthByCid,
+    cidToCodePoint,
     rawAdvance(gid) {
       const units = advanceTable[gid] ?? 0
       return toMil(units)
@@ -352,7 +481,9 @@ function createFontView(parsed, advanceTable, map) {
         gid = fallbackGid
       }
       usedGids.add(gid)
-      if (!gidToCodePoint.has(gid)) gidToCodePoint.set(gid, codePoint)
+      const cid = cidOf(gid)
+      if (!widthByCid.has(cid)) widthByCid.set(cid, toMil(advanceTable[gid] ?? 0))
+      if (!cidToCodePoint.has(cid)) cidToCodePoint.set(cid, codePoint)
       return gid
     },
     /** 一个字符串的字宽（单位 1/1000 em），同时把用到的字形登记下来 */
@@ -364,20 +495,24 @@ function createFontView(parsed, advanceTable, map) {
       }
       return width
     },
-    /** 生成 PDF 文本串（Identity-H：每字形两个字节的十六进制）与字宽 */
+    /** 生成 PDF 文本串（Identity-H：每个 CID 两个字节的十六进制）与字宽 */
     encode(text) {
       let hex = ""
       let width = 0
       for (const ch of text) {
         const gid = view.gidFor(ch.codePointAt(0))
-        hex += gid.toString(16).padStart(4, "0").toUpperCase()
+        const cid = cidOf(gid)
+        hex += cid.toString(16).padStart(4, "0").toUpperCase()
         width += view.rawAdvance(gid)
       }
       return { hex, width }
     },
-    /** 收尾：只保留用到的字形，返回可内嵌的 TrueType 程序 */
+    /**
+     * 收尾：生成可内嵌的字体程序。
+     * @returns {{ program: Buffer, format: "truetype"|"cff", note?: string }}
+     */
     buildSubset() {
-      return subsetFont(parsed, usedGids)
+      return buildFontProgram(parsed, usedGids)
     },
   }
   return view

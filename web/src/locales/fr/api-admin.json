@@ -11,6 +11,7 @@
   "api.admin.username_duplicate": "Nom d'utilisateur en double dans cet envoi",
   "api.admin.member_limit_reached": "Nombre maximal de membres atteint ({max})",
   "api.admin.logs_format_invalid": "format ne peut valoir que jsonl ou csv",
+  "api.admin.convert_font_invalid": "Cette police est inutilisable : {reason}",
   "api.admin.trash_restore_conflict": "Un élément du même nom occupe déjà l'emplacement de « {name} ». Renommez-le ou supprimez-le, ou choisissez d'écraser.",
   "api.auth.login_missing_credentials": "Saisissez le nom d'utilisateur et le mot de passe",
   "api.auth.login_format_invalid": "Format du nom d'utilisateur ou du mot de passe incorrect",

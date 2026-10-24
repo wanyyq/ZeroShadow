@@ -60,6 +60,20 @@
 - **WebDAV 后台卡片新增「资源管理器地址」**（Windows UNC 写法，按当前访问方式生成），并写明
   资源管理器要用「添加一个网络位置」而不是「映射网络驱动器」。
 - 新增 `scripts/webdav-test.mjs`（70 项）：照资源管理器 / Finder 的真实请求序列跑一遍 WebDAV。
+- **md→PDF 支持 CFF（OpenType）中文字体**：思源黑体、Noto Sans CJK、苹方这类 `.otf` / `.ttc`
+  以前被直接跳过。新增 `pdf/cff.js` 做 CID-keyed CFF 的**重建容器式子集**（保留 CID、只留用到的字形、
+  偏移定长占位后回填、自解析回读自检，失败回退整份内嵌）：思源黑体 14.7MB → 1MB，Noto Serif SC 10.5MB → 0.5MB。
+  PDF 侧按轮廓分派 `CIDFontType2` / `CIDFontType0` + `/FontFile3 /CIDFontType0C`。
+- **后台可指定字体**：「设置 → 文件转换」新增标签页（配置项 `convertPdfFont`），
+  可填路径、看当前生效字体与轮廓类型、看每个候选被跳过的原因、点「重新探测」即时生效；
+  保存时当场验证。新增 `GET /api/admin/convert`、`POST /api/admin/convert/rescan`。
+  探测分三阶段（显式指定 → TrueType → CFF），**显式指定一定优先**。
+- **PDF 与预览内容逐字一致**：软换行折叠成一个空格、硬换行 / `<br>` 变真换行、`~~删除线~~` 画出删除线、
+  白名单标签丢标签留文字而**白名单外的标签保留原文**、任务列表改用矢量勾选框、**图片真的嵌进 PDF**
+  （JPEG 直通 `/DCTDecode`、PNG 直通 `/Predictor 15`、其余用 sharp 解码；相对路径按 `.md` 目录解析且有边界）。
+  新增 `scripts/markdown-parity-test.mjs`（17 项）：直接编译前端预览渲染器当基准，与 PDF 侧逐行比对。
+  顺带修复预览里 `\*` 反斜杠转义会显示反斜杠的问题。
+- `scripts/convert-test.mjs` 从 44 项扩到 59 项（CFF / 字体校验 / 换行与删除线 / 图片内嵌）。
 
 ### 修复
 

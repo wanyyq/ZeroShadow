@@ -1,0 +1,20 @@
+{
+  "ui.settings.tabs.convert": "Conversión de archivos",
+  "ui.settings.convert.title": "Fuente del PDF (Markdown → PDF)",
+  "ui.settings.convert.desc": "Convertir Markdown a PDF necesita una fuente que componga chino. Elige aquí cuál; si lo dejas vacío se selecciona automáticamente (se prefiere TrueType porque su subconjunto es mucho más pequeño).",
+  "ui.settings.convert.font_ready": "Fuente disponible",
+  "ui.settings.convert.font_missing": "Falta la fuente",
+  "ui.settings.convert.current": "Fuente en uso",
+  "ui.settings.convert.cff_hint": "Contornos CFF, el PDF será algo más grande",
+  "ui.settings.convert.missing_title": "No hay ninguna fuente CJK utilizable: las conversiones con chino fallarán en lugar de generar una página llena de interrogantes",
+  "ui.settings.convert.missing_hint": "Coloca cualquier fuente .ttf / .ttc / .otf en {dir} y pulsa «Volver a detectar», o escribe abajo la ruta absoluta de un archivo de fuente.",
+  "ui.settings.convert.font_label": "Ruta del archivo de fuente",
+  "ui.settings.convert.font_placeholder": "Vacío = automático (p. ej. /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc)",
+  "ui.settings.convert.font_hint": "Se verifica al guardar: debe ser una fuente que contenga el glifo de 中. Las rutas relativas se resuelven desde la raíz del programa.",
+  "ui.settings.convert.rescan": "Volver a detectar",
+  "ui.settings.convert.rescanned": "Detección repetida",
+  "ui.settings.convert.saved": "Guardado",
+  "ui.settings.convert.diagnostics": "Diagnóstico: fuentes candidatas consideradas ({n})",
+  "ui.settings.convert.too_many": "{n} candidatas más sin mostrar",
+  "ui.settings.convert.dirs": "Detección automática: {dir}; directorios del sistema: {system}"
+}

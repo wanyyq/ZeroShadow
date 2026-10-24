@@ -1,0 +1,20 @@
+{
+  "ui.settings.tabs.convert": "文件转换",
+  "ui.settings.convert.title": "PDF 字体（Markdown → PDF）",
+  "ui.settings.convert.desc": "把 Markdown 转成 PDF 需要一个能排中文的字体。这里指定用哪一个；留空则自动挑选（优先 TrueType，因为它的子集更小）。",
+  "ui.settings.convert.font_ready": "字体可用",
+  "ui.settings.convert.font_missing": "缺少字体",
+  "ui.settings.convert.current": "当前生效的字体",
+  "ui.settings.convert.cff_hint": "CFF 轮廓，PDF 会略大一些",
+  "ui.settings.convert.missing_title": "没有找到可用的中文字体：含中文的转换会直接报错（不会输出满屏问号）",
+  "ui.settings.convert.missing_hint": "把任意 .ttf / .ttc / .otf 中文字体放进 {dir} 后点「重新探测」，或在下面填一个字体文件的绝对路径。",
+  "ui.settings.convert.font_label": "字体文件路径",
+  "ui.settings.convert.font_placeholder": "留空 = 自动（例如 /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc）",
+  "ui.settings.convert.font_hint": "保存时会当场验证：必须是能认出「中」字的字体。相对路径按程序根目录解析。",
+  "ui.settings.convert.rescan": "重新探测",
+  "ui.settings.convert.rescanned": "已重新探测",
+  "ui.settings.convert.saved": "已保存",
+  "ui.settings.convert.diagnostics": "诊断：考虑过的候选字体（{n}）",
+  "ui.settings.convert.too_many": "另有 {n} 个候选未显示",
+  "ui.settings.convert.dirs": "自动查找位置：{dir}；系统字体目录：{system}"
+}

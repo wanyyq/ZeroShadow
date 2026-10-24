@@ -65,6 +65,38 @@ md→PDF 是完全自实现的（手写 PDF 1.7 写出器 + TrueType 子集化�
 - 新增 `scripts/webdav-test.mjs`（70 项断言）：照 Windows WebClient / Finder 的真实请求序列打一遍
   `OPTIONS → PROPFIND → MKCOL → PUT → PROPPATCH → GET/HEAD → LOCK → UNLOCK → COPY → MOVE → DELETE`，
   每步按 RFC 4918 与客户端实际期望断言状态码、必需响应头和 XML 形状。
+- **md→PDF 支持 CFF（OpenType）中文字体**：思源黑体、Noto Sans CJK、苹方这类 `.otf` / `.ttc`
+  以前会被直接跳过（导致"明明装了字体还说缺字体"），现在能用了。
+  - 新增 `server/src/convert/pdf/cff.js`：解析 CID-keyed CFF（charset / FDSelect / FDArray /
+    Private / Subrs）并做**重建容器式子集**——只保留用到的字形、CID 保持原值、
+    需要重算的三类偏移一律用定长整数占位后回填；子集化完再**自解析回读自检**，
+    不通过就回退"整份内嵌"（文件大但保证能打开）。实测思源黑体 14.7MB → 1MB、Noto Serif SC 10.5MB → 0.5MB。
+  - `document.js` 按轮廓分派：TrueType → `CIDFontType2` + `/CIDToGIDMap /Identity`；
+    CFF → `CIDFontType0` + `/FontFile3` + `/Subtype /CIDFontType0C`（**没有** `/CIDToGIDMap`）。
+- **服主可以在后台指定字体**：「设置 → 文件转换」（第 13 个标签页）——填字体路径、看当前生效字体与轮廓类型、
+  看每个候选被跳过的**具体原因**、点「重新探测」立即生效（不用重启）。保存时当场验证
+  （必须存在、能解析、认得「中」字），新配置项 `convertPdfFont`。
+  - 新增 `GET /api/admin/convert` 与 `POST /api/admin/convert/rescan`。
+  - 探测分三阶段：**显式指定**（后台 / 环境变量，TrueType、CFF 都用）→ 其余候选里的 TrueType →
+    其余候选里的 CFF。显式指定**一定优先**，不会被系统字体顶掉。
+- **PDF 与预览内容逐字一致**（用户明确要求"除了字体以外其他一模一样"）：
+  - 软换行按浏览器语义折叠成**一个空格**（以前中文之间不插空格，导致两边差一个空格）；
+  - 行尾两个空格 / 反斜杠 / `<br>` 变成**真换行**（以前当成空格吞掉）；
+  - `~~删除线~~` 在 PDF 里画一条穿过的线（以前只保留文字）；
+  - 白名单 HTML 标签（`<br>` `<kbd>` `<span>` …）丢标签留文字；**白名单外的标签原样当文本**
+    （以前会被整段删掉，PDF 里凭空少一截内容）；
+  - 任务列表的勾选框改成**矢量方框 + 勾**（以前塞 `☑`/`☐` 两个码点，很多中文字体没有这两个字形，会变成 `?`）；
+  - **图片真的嵌进 PDF**：新增 `server/src/convert/pdf/image.js`，JPEG 走 `/DCTDecode` 直通、
+    非交错 8 位 PNG 走 `/Predictor 15` 直通、其余（带 alpha / 调色板 / WebP / GIF）用 sharp 解码成 RGB；
+    相对路径按 `.md` 所在目录解析，只允许读该目录及其子目录，单图上限 24MB、单篇最多 60 张；
+    取不到就退化成 `[图片: alt]` 占位文字（不抛错）；
+  - **新增 `scripts/markdown-parity-test.mjs`（17 项）**：用项目自己的 TypeScript 把**前端预览渲染器**
+    （`web/src/lib/markdown.ts`）编译出来当基准，与 PDF 侧的投影逐行比对，覆盖标题 / 软硬换行 /
+    删除线 / 白名单标签 / 未知标签 / 列表 / 任务列表 / 表格 / 引用 / 代码块 / 转义 / 空文档。
+  - 顺带修复预览的一处缺陷：`\*` 这类**反斜杠转义**以前会把反斜杠显示出来（`\*不是斜体\*` 渲染成 `\<em>不是斜体</em>\`），
+    现在按 Markdown 语义显示成字面字符，两边一致。
+- `scripts/convert-test.mjs` 从 44 项扩到 **59 项**：CFF 解析 / 子集体积 / CID 保真 / 显式指定优先级 /
+  CFF 生成的 PDF 结构、字体校验的三类拒绝、硬换行 / 删除线 / 白名单标签 / 复选框、图片内嵌与缺失退化。
 
 ### 修复
 

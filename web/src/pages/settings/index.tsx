@@ -41,6 +41,7 @@ import { TrashSection } from "@/pages/settings/trash-section"
 import { LogsMetricsSection } from "@/pages/settings/logs-metrics-section"
 import { SharesSection } from "@/pages/settings/shares-section"
 import { PluginsSection } from "@/pages/settings/plugins-section"
+import { ConvertSection } from "@/pages/settings/convert-section"
 
 export function SettingsPage() {
   const { me, ready } = useAuth()
@@ -76,6 +77,7 @@ export function SettingsPage() {
                     <TabsTrigger value="groups"><Icon name="layers" /> {t("ui.settings.tabs.groups")}</TabsTrigger>
                     <TabsTrigger value="shares"><Icon name="share-2" /> {t("ui.share.tab")}</TabsTrigger>
                     <TabsTrigger value="perms"><Icon name="shield-check" /> {t("ui.settings.tabs.perms")}</TabsTrigger>
+                    <TabsTrigger value="convert"><Icon name="file-output" /> {t("ui.settings.tabs.convert")}</TabsTrigger>
                     <TabsTrigger value="data"><Icon name="database" /> {t("ui.settings.tabs.data")}</TabsTrigger>
                     <TabsTrigger value="trash"><Icon name="trash-2" /> {t("ui.settings.tabs.trash")}</TabsTrigger>
                     <TabsTrigger value="security"><Icon name="lock" /> {t("ui.settings.tabs.security")}</TabsTrigger>
@@ -93,6 +95,7 @@ export function SettingsPage() {
                   <TabsContent value="groups"><GroupsSection /></TabsContent>
                   <TabsContent value="shares"><SharesSection /></TabsContent>
                   <TabsContent value="perms"><PermsSection /></TabsContent>
+                <TabsContent value="convert"><ConvertSection /></TabsContent>
                   <TabsContent value="data"><DataSection /></TabsContent>
                   <TabsContent value="trash"><TrashSection /></TabsContent>
                   <TabsContent value="security"><SecuritySection /></TabsContent>

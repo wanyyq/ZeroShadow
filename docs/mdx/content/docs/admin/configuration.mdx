@@ -191,31 +191,29 @@ pnpm start -- -nolog
 
 </Callout>
 
-### 1.10 文件转换的 PDF 字体 `CONVERT_PDF_FONT`
+### 1.10 文件转换的 PDF 字体（后台 `convertPdfFont` / 环境变量 `CONVERT_PDF_FONT`）
 
-md→PDF 转换需要在服务端找到一个能排中文的字体。这个变量是**可选**的，
-**不设它也能用**：服务会先枚举平台的字体目录（系统字体目录、当前用户的字体目录），
-按"常见中文字体名"的优先级挑候选，再逐个真解析验证（认得「中」字才算数）——
-所以 Windows 装在 D 盘、字体是"仅为当前用户安装"、或精简系统，都能找到。
+md→PDF 转换需要在服务端找到一个能排中文的字体。**两种指定方式**：
 
-| 变量 | 默认值 | 说明 |
+| 位置 | 字段 | 说明 |
 |:--|:--|:--|
-| `CONVERT_PDF_FONT` | 未设置 | 指向 `.ttf` / `.ttc` 的字体文件路径。**绝对路径**按原样使用，相对路径按**程序根目录**解析（源码运行 = 项目根目录，exe 运行 = exe 所在目录） |
+| 「设置 → 文件转换」 | `convertPdfFont` | **推荐**。绝对路径（相对路径按程序根目录解析）；保存即生效、不用重启；留空 = 自动 |
+| `.env` | `CONVERT_PDF_FONT` | 适合容器 / 自动化部署；`.env` 只在**启动时**读取 |
 
-- 它是**可选**项，**不是权限、也不是必需项**：不配它也能自动找；
-- 它是所有候选里**优先级最高**的一个；
-- 候选顺序是：`CONVERT_PDF_FONT` → `data/fonts/*.ttf|ttc` → 扫描平台字体目录（Windows：`%WINDIR%\Fonts`
-  与 `%LOCALAPPDATA%\Microsoft\Windows\Fonts`；macOS：`/System/Library/Fonts` 等；Linux：`/usr/share/fonts` 等）
-  → 少数几条兜底绝对路径；
-- 更省事的另一种做法：把字体文件（`.ttf` / `.ttc`）放进 **`data/fonts/`** 目录，服务会自动发现并尝试使用，
-  适合离线部署或没有任何中文字体的精简 Linux；**放进去最多一分钟生效**（不必重启）；
-- 只支持 **TrueType 轮廓**（`glyf`）的字体；**CFF / OTF（`OTTO`）会被跳过**并继续找下一个；
-  连「中」「高」都不认识的字体同样会被跳过；
-- 一个可用字体都找不到时，**含中文的转换会直接报错**（`api.fs.convert_no_cjk_font`）并提示怎么办 ——
+两者都**可选**。优先级：**后台指定** → `CONVERT_PDF_FONT` → `data/fonts/` → 扫描平台字体目录
+（Windows：`%WINDIR%\Fonts` 与 `%LOCALAPPDATA%\Microsoft\Windows\Fonts`；macOS：`/System/Library/Fonts` 等；
+Linux：`/usr/share/fonts` 等）→ 少数几条兜底绝对路径。
+
+- **显式指定的一定优先**：填了 CFF 字体就用 CFF，不会被系统里的 TrueType 顶掉；
+- 自动探测时**优先 TrueType**（子集一两百 KB），没有才用 CFF（子集约 0.5–1.5MB）；
+- 支持 **TrueType**（`.ttf` / TrueType 的 `.ttc`）与 **CID-keyed CFF**（`.otf` / CFF 的 `.ttc`，
+  思源黑体、Noto Sans CJK、苹方都属于这一类）；**CFF2 变量字体**与 **name-keyed CFF** 会被跳过并说明原因；
+- 放进 **`data/fonts/`** 也能被自动发现，最多一分钟生效，或在后台点「重新探测」立即生效；
+- 后台保存时**当场验证**：文件存在、能解析、认得「中」字，否则直接报错；
+- 一个可用字体都找不到时，**含中文的转换会直接报错**（`api.fs.convert_no_cjk_font`）——
   不会生成一份中文全变成 `?` 的 PDF；纯 ASCII 文档仍然能转（用 PDF 内置的 Helvetica）。
   启动日志里有一行 `PDF 字体: …`；找不到时后台日志会有 `pdf_font_missing` 警告；
-- 与权限完全无关：能不能转换由 `memberPerms.convertFiles`（+ 写操作总开关）决定，见 [3.5](#35-成员权限-memberperms)；
-- `.env` 只在**启动时**读取，改完请重启服务。
+- 与权限完全无关：能不能转换由 `memberPerms.convertFiles`（+ 写操作总开关）决定，见 [3.5](#35-成员权限-memberperms)。
 
 <Callout type="warn" title="它与文件转换权限是两件事">
 `CONVERT_PDF_FONT` 只影响 md→PDF 的**排版效果**，不控制功能开关。

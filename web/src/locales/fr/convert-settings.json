@@ -1,0 +1,20 @@
+{
+  "ui.settings.tabs.convert": "Conversion de fichiers",
+  "ui.settings.convert.title": "Police du PDF (Markdown → PDF)",
+  "ui.settings.convert.desc": "Convertir du Markdown en PDF nécessite une police capable de composer du chinois. Choisissez-la ici ; laissez vide pour une sélection automatique (TrueType est privilégié, son sous-ensemble est bien plus petit).",
+  "ui.settings.convert.font_ready": "Police disponible",
+  "ui.settings.convert.font_missing": "Police manquante",
+  "ui.settings.convert.current": "Police actuellement utilisée",
+  "ui.settings.convert.cff_hint": "Contours CFF, le PDF sera un peu plus volumineux",
+  "ui.settings.convert.missing_title": "Aucune police CJK utilisable : les conversions contenant du chinois échoueront au lieu de produire une page pleine de points d'interrogation",
+  "ui.settings.convert.missing_hint": "Placez une police .ttf / .ttc / .otf dans {dir} puis cliquez sur « Rescanner », ou saisissez ci-dessous le chemin absolu d'un fichier de police.",
+  "ui.settings.convert.font_label": "Chemin du fichier de police",
+  "ui.settings.convert.font_placeholder": "Vide = automatique (ex. /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc)",
+  "ui.settings.convert.font_hint": "Le fichier est vérifié à l'enregistrement : il doit contenir le glyphe de 中. Les chemins relatifs partent de la racine du programme.",
+  "ui.settings.convert.rescan": "Rescanner",
+  "ui.settings.convert.rescanned": "Analyse relancée",
+  "ui.settings.convert.saved": "Enregistré",
+  "ui.settings.convert.diagnostics": "Diagnostic : polices candidates examinées ({n})",
+  "ui.settings.convert.too_many": "{n} autres candidates non affichées",
+  "ui.settings.convert.dirs": "Recherche automatique : {dir} ; dossiers système : {system}"
+}

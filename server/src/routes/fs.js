@@ -1701,6 +1701,8 @@ async function runConvertJob(job, { abs, rel, converter, stat, req }) {
       buffer: raw,
       name: path.basename(abs),
       ext: extOf(abs),
+      /** 源文件所在目录：md→PDF 需要它来解析 `![](相对路径)` 的图片 */
+      dir: path.dirname(abs),
       job,
       onProgress: (percent) => {
         const value = Number(percent)

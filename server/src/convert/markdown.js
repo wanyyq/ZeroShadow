@@ -21,17 +21,47 @@
  * 引用式链接（[a][b]）、HTML 注释。这些都写进了使用手册的"转换限制"。
  */
 
-/** 中日韩字符：用于判断"拼接两行时要不要加空格"，以及"能否在任意位置断行" */
+/** 中日韩字符：用于判断"能否在任意位置断行" */
 const CJK_RE = /[\u2e80-\u9fff\u3000-\u303f\uff00-\uffef\uac00-\ud7af\u3040-\u30ff]/
 
 export function isWideChar(ch) {
   return CJK_RE.test(ch)
 }
 
-/** 去掉一段文本里的原始 HTML 标签（保留文字），避免标签出现在 PDF/文本里 */
-function stripHtml(text) {
-  return text.replace(/<\/?[A-Za-z][^>\n]*>/g, "")
-}
+/**
+ * 硬换行的占位符。
+ *
+ * 用 NUL 包起来的特殊字符：Markdown 正文里不可能出现，所以不会与内容撞车。
+ * 段落先把"行尾两个空格 / 反斜杠"折叠成它，再由 parseInline 变成 `{ br: true }`。
+ */
+const SENTINEL = "\u0000\u000b\u0000"
+
+/**
+ * 预览放行的少量安全 HTML 标签（与 `web/src/lib/markdown-html.ts` 的
+ * SAFE_HTML_TAGS 逐项一致）。**内容一致**的关键点：
+ *   - 白名单标签 → PDF 里丢掉标签本身、保留里面的文字（预览也是显示文字）；
+ *   - `<br>` / `<hr>` → 变成换行；
+ *   - 白名单之外的标签（`<script>` / `<div>` 之类）→ 预览会把它**当纯文本显示**，
+ *     所以这里也必须**原样保留**，不能悄悄删掉（老实现删掉了，导致 PDF 少了一截文字）。
+ */
+const SAFE_HTML_TAGS = new Set([
+  "br",
+  "hr",
+  "sub",
+  "sup",
+  "kbd",
+  "u",
+  "s",
+  "mark",
+  "small",
+  "span",
+  "div",
+  "p",
+  "center",
+])
+
+/** 匹配一个形如 `<tag>` / `</tag>` / `<tag ...>` 的片段（属性一律忽略） */
+const TAG_RE = /^<(\/?)([a-zA-Z][a-zA-Z0-9]{0,9})((?:\s+[a-zA-Z_:][\w:.-]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>]+))*)\s*\/?>/
 
 // ---------------------------------------------------------------------------
 // 行内解析
@@ -39,28 +69,33 @@ function stripHtml(text) {
 
 /**
  * 把一行（或一段）Markdown 文本切成行内 run：
- *   { text, bold?, italic?, code?, link?, image? }
+ *   { text, bold?, italic?, code?, link?, image?, strike? }
+ *   或换行 run：{ br: true }
  *
  * 相邻同样式会合并（PDF 侧按 run 计算字宽，run 太多会拖慢排版）。
  */
 export function parseInline(raw) {
   const runs = []
   const push = (text, style) => {
-    if (!text) return
+    // 换行 run 没有文字，必须放行（否则 <br> 与硬换行会被 `if (!text) return` 吃掉）
+    if (!style?.br && !text) return
     const last = runs[runs.length - 1]
     if (
       last &&
+      !last.br &&
+      !style.br &&
       !style.link &&
       !last.link &&
       !!last.image === !!style.image &&
       !!last.bold === !!style.bold &&
       !!last.italic === !!style.italic &&
-      !!last.code === !!style.code
+      !!last.code === !!style.code &&
+      !!last.strike === !!style.strike
     ) {
       last.text += text
       return
     }
-    runs.push({ text, ...style })
+    runs.push(style.br ? { br: true } : { text, ...style })
   }
 
   let i = 0
@@ -75,6 +110,14 @@ export function parseInline(raw) {
 
   while (i < source.length) {
     const ch = source[i]
+
+    // 硬换行占位（段落拼接时写入）
+    if (source.startsWith(SENTINEL, i)) {
+      flush()
+      push("", { br: true })
+      i += SENTINEL.length
+      continue
+    }
 
     // 反斜杠转义：\* 之类按字面量输出
     if (ch === "\\" && i + 1 < source.length && /[\\`*_{}[\]()#+\-.!|>~]/.test(source[i + 1])) {
@@ -95,12 +138,12 @@ export function parseInline(raw) {
       }
     }
 
-    // 图片：![alt](src)
+    // 图片：![alt](src) —— 保留 src，PDF 侧要真的把图嵌进去（预览里也是显示图片）
     if (ch === "!" && source[i + 1] === "[") {
       const m = /^!\[([^\]]*)\]\(\s*<?([^)\s>]*)>?(?:\s+"[^"]*")?\s*\)/.exec(source.slice(i))
       if (m) {
         flush()
-        push(m[1] || m[2] || "图片", { image: true })
+        push(m[1] || m[2] || "图片", { image: true, src: m[2] })
         i += m[0].length
         continue
       }
@@ -121,11 +164,37 @@ export function parseInline(raw) {
 
     // 自动链接：<https://...>
     if (ch === "<") {
-      const m = /^<((?:https?|mailto|ftp):[^>\s]+)>/i.exec(source.slice(i))
-      if (m) {
+      const auto = /^<((?:https?|mailto|ftp):[^>\s]+)>/i.exec(source.slice(i))
+      if (auto) {
         flush()
-        push(m[1], { link: m[1] })
-        i += m[0].length
+        push(auto[1], { link: auto[1] })
+        i += auto[0].length
+        continue
+      }
+      // 原始 HTML 标签：与预览的判定完全一致（见 SAFE_HTML_TAGS 的注释）。
+      // <br> / <hr> 变成换行；白名单标签丢掉标签、保留内文；其余原样当文本。
+      const tag = TAG_RE.exec(source.slice(i))
+      if (tag) {
+        const name = tag[2].toLowerCase()
+        if (SAFE_HTML_TAGS.has(name)) {
+          flush()
+          if (name === "br" || name === "hr") push("", { br: true })
+          i += tag[0].length
+          continue
+        }
+        // 不在白名单：保留原样的字面文本（预览里也是这么显示的）
+      }
+    }
+
+    // 删除线：~~text~~（预览渲染成 <del>，PDF 里画一条穿过的线）
+    if (ch === "~" && source.startsWith("~~", i)) {
+      const closeIdx = source.indexOf("~~", i + 2)
+      if (closeIdx > i + 2) {
+        flush()
+        for (const run of parseInline(source.slice(i + 2, closeIdx))) {
+          push(run.text, { ...run, strike: true })
+        }
+        i = closeIdx + 2
         continue
       }
     }
@@ -139,6 +208,10 @@ export function parseInline(raw) {
         flush()
         const innerText = source.slice(i + marker.length, closeIdx)
         for (const run of parseInline(innerText)) {
+          if (run.br) {
+            push("", { br: true })
+            continue
+          }
           push(run.text, { ...run, bold: run.bold || strong, italic: run.italic || !strong })
         }
         i = closeIdx + marker.length
@@ -151,10 +224,7 @@ export function parseInline(raw) {
   }
   flush()
 
-  // 原始 HTML 标签按纯文本处理（剥掉标签，保留内容），禁止它进入排版
-  return runs
-    .map((run) => ({ ...run, text: stripHtml(run.text) }))
-    .filter((run) => run.text.length > 0)
+  return runs.filter((run) => run.br || run.text.length > 0)
 }
 
 function findEmphasisClose(source, from, marker) {
@@ -354,20 +424,22 @@ function isBlockStart(lines, i) {
  * 纯文本侧一个空格已经足够）。
  */
 function joinSoftLines(lines) {
+  // 与**预览完全一致**（web/src/lib/markdown.ts 的 inline()）：
+  //   - 软换行（普通 \n）在浏览器里会折叠成**一个空格**，所以这里也补一个空格；
+  //     以前对"CJK 两侧不加空格"的处理看起来更漂亮，但那会让 PDF 与预览出现
+  //     "同一句话少了一个空格"的差异 —— 用户明确要求两者逐字一致，见
+  //     scripts/markdown-parity-test.mjs；
+  //   - 行尾两个以上空格或一个反斜杠 = **硬换行**（预览渲染成 <br />），
+  //     这里用 SENTINEL 占位，交给 parseInline 变成 { br: true } 的换行 run。
   let out = ""
-  for (const raw of lines) {
-    const line = raw.replace(/^\s+/, "")
-    if (!out) {
-      out = line
-      continue
-    }
-    const hardBreak = /( {2,}|\\)$/.test(out)
-    const left = out.trimEnd()
-    const right = line.trimStart()
-    const needsSpace =
-      !hardBreak && !(isWideChar(left.slice(-1)) && isWideChar(right.slice(0, 1)))
-    out = needsSpace ? `${left} ${right}` : `${left}${right}`
-  }
+  lines.forEach((raw, index) => {
+    const hardBreak = /( {2,}|\\)$/.test(raw)
+    let line = raw.replace(/\s+$/, "")
+    if (hardBreak) line = line.replace(/\\$/, "")
+    if (index > 0) out += " "
+    out += line
+    if (hardBreak && index < lines.length - 1) out += SENTINEL
+  })
   return out.replace(/[ \t]{2,}/g, " ").trim()
 }
 

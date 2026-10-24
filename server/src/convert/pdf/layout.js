@@ -80,7 +80,8 @@ export function wrapRuns(runs, maxWidth, size, font, { breakAnywhere = false } =
       !last.link &&
       !!last.bold === !!style.bold &&
       !!last.italic === !!style.italic &&
-      !!last.code === !!style.code
+      !!last.code === !!style.code &&
+      !!last.strike === !!style.strike
     ) {
       last.text += piece.text
       last.width += width
@@ -92,10 +93,16 @@ export function wrapRuns(runs, maxWidth, size, font, { breakAnywhere = false } =
   }
 
   for (const run of runs) {
+    // 硬换行（预览里是 <br />）：直接收行，后续内容从新行开始
+    if (run.br) {
+      commit()
+      continue
+    }
     const style = {
       bold: !!run.bold,
       italic: !!run.italic,
       code: !!run.code,
+      strike: !!run.strike,
       link: run.link,
     }
     const text = run.image ? `[图片: ${run.text}]` : run.text
@@ -140,17 +147,24 @@ export function wrapRuns(runs, maxWidth, size, font, { breakAnywhere = false } =
  * @param {Array<object>} options.blocks parseMarkdown 的结果
  * @param {object} options.font loadFont() 的 font 视图
  * @param {string} [options.fallbackTitle]
- * @returns {{ pages: Array<object>, pageCount: number, warnings: string[], title: string }}
+ * @param {Map<string, object>} [options.images] 图片注册表（src → PdfImage），见 pdf/image.js
+ * @returns {{ pages: Array<object>, pageCount: number, warnings: string[], title: string, images: Map<string,object> }}
  */
-export function layoutDocument({ blocks, font, fallbackTitle }) {
+export function layoutDocument({ blocks, font, fallbackTitle, images }) {
   const pages = []
   const warnings = []
   let page = null
   let y = 0
   let title = fallbackTitle || ""
 
+  /** 图片 XObject 的名字（同一张图只登记一次，多个页面共用同一个对象） */
+  const imageNames = new Map()
+  /** 真正写进 PDF 的图片（name → PdfImage） */
+  const usedImages = new Map()
+  let imageSeq = 0
+
   const startPage = () => {
-    page = { width: PAGE_WIDTH, height: PAGE_HEIGHT, ops: [], links: [] }
+    page = { width: PAGE_WIDTH, height: PAGE_HEIGHT, ops: [], links: [], imageNames: new Set() }
     pages.push(page)
     y = PAGE_HEIGHT - MARGIN_TOP
   }
@@ -163,7 +177,45 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
     return true
   }
 
-  /** 画一行文本（含链接矩形与下划线） */
+  /**
+   * 画一张图（预览里是 <img>，所以 PDF 里也必须有图，不能只留一行占位文字）。
+   *
+   * 尺寸：按 96dpi 折算（1px ≈ 0.75pt），最宽不超过版心；图太高就等比缩到整页高度以内。
+   * 找不到图（文件缺失、格式不支持、超过像素上限）时退化成 `[图片: alt]` 一行文字 ——
+   * 与老行为一致，至少不会凭空少一块。
+   */
+  const drawImage = (run, x = MARGIN_X) => {
+    const image = images?.get(run.src)
+    const fallback = () => {
+      drawParagraph([{ text: `[图片: ${run.text || run.src}]` }], { x })
+    }
+    if (!image) {
+      fallback()
+      return
+    }
+    const maxWidth = PAGE_WIDTH - MARGIN_X - x
+    let width = Math.min(maxWidth, image.width * 0.75)
+    let height = width / image.aspect
+    const maxHeight = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM - 12
+    if (height > maxHeight) {
+      height = maxHeight
+      width = height * image.aspect
+    }
+    if (!ensure(height + 8)) return
+    let name = imageNames.get(run.src)
+    if (!name) {
+      imageSeq += 1
+      name = `Im${imageSeq}`
+      imageNames.set(run.src, name)
+      usedImages.set(name, image)
+    }
+    const bottom = y - height
+    page.ops.push({ t: "image", name, x, y: bottom, w: width, h: height })
+    page.imageNames.add(name)
+    y = bottom - 8
+  }
+
+  /** 画一行文本（含链接矩形、删除线、下划线） */
   const drawLine = (line, { x, size, color = COLOR_TEXT, underlineLinks = true }) => {
     if (!line.length) {
       y -= size * LINE_FACTOR
@@ -172,6 +224,7 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
     const runs = []
     let cursor = x
     const links = []
+    const strikes = []
     for (const piece of line) {
       const { hex } = font.encode(piece.text)
       runs.push({
@@ -181,6 +234,12 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
         italic: !!piece.italic,
         width: piece.width,
       })
+      // ~~删除线~~：预览是 <del>（一条穿过的横线），这里也画一条
+      if (piece.strike) {
+        const last = strikes[strikes.length - 1]
+        if (last && Math.abs(last.x2 - cursor) < 0.01) last.x2 = cursor + piece.width
+        else strikes.push({ x1: cursor, x2: cursor + piece.width })
+      }
       if (piece.link) {
         const last = links[links.length - 1]
         if (last && last.url === piece.link && Math.abs(last.x2 - cursor) < 0.01) {
@@ -193,6 +252,17 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
     }
     const baseline = y - size * 0.28
     page.ops.push({ t: "text", x, y: baseline, size, runs, color })
+    for (const strike of strikes) {
+      page.ops.push({
+        t: "line",
+        x1: strike.x1,
+        y1: baseline + size * 0.3,
+        x2: strike.x2,
+        y2: baseline + size * 0.3,
+        width: size * 0.06,
+        color,
+      })
+    }
     if (underlineLinks) {
       for (const link of links) {
         page.ops.push({
@@ -221,6 +291,34 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
       if (!ensure(size * lineFactor)) return
       drawLine(line, { x, size, color })
     }
+    y -= spaceAfter
+  }
+
+  /**
+   * 画"可能夹着图片"的一段：把行内 run 按图片切成若干文字段 + 若干个图片块。
+   *
+   * 为什么不在 wrapRuns 里处理图片：图片的行高与基线规则和文字完全不同（要预留
+   * 整块高度、要按比例缩放、可能要翻页），混在折行逻辑里会把那段本来读得懂的代码
+   * 变成一团。切分之后两边各自简单。
+   */
+  const drawRunsWithImages = (runs, { x = MARGIN_X, color = COLOR_TEXT, spaceAfter = 0 } = {}) => {
+    let buffer = []
+    const flushText = () => {
+      // 只有换行 run 也交出去（它会推进一行，与预览里的空 <br> 一致）
+      if (buffer.length && buffer.some((r) => r.br || (r.text && r.text.trim()))) {
+        drawParagraph(buffer, { x, color })
+      }
+      buffer = []
+    }
+    for (const run of runs) {
+      if (run.image) {
+        flushText()
+        drawImage(run, x)
+        continue
+      }
+      buffer.push(run)
+    }
+    flushText()
     y -= spaceAfter
   }
 
@@ -304,25 +402,30 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
       const level = item.level || 0
       const x = MARGIN_X + level * 18
       const markerWidth = 18
+      const isTask = item.task !== null && item.task !== undefined
       const markerText = block.ordered ? `${counter}.` : "•"
       if (block.ordered && level === 0) counter += 1
-      const prefix = item.task === null || item.task === undefined ? "" : item.task ? "☑ " : "☐ "
-      const runs = parseTaskRuns(prefix, item.inlines)
+      // 任务列表的方框占位：文字从 marker 之后开始，方框在 marker 的位置上画
+      const runs = item.inlines
       const lines = wrapRuns(runs, CONTENT_WIDTH - (x - MARGIN_X) - markerWidth, BASE_SIZE, font)
       const lineHeight = BASE_SIZE * LINE_FACTOR
       if (!ensure(lineHeight * Math.min(lines.length, 2))) return
       // 项目符号对齐首行基线
       const size = BASE_SIZE
       const baseline = y - size * 0.28
-      const marker = font.encode(markerText)
-      page.ops.push({
-        t: "text",
-        x,
-        y: baseline,
-        size,
-        runs: [{ x, hex: marker.hex, width: marker.width * (size / 1000), bold: false, italic: false }],
-        color: COLOR_MUTED,
-      })
+      if (isTask) {
+        pushTaskBox(page, taskBoxGeometry(x + 1, baseline - size * 0.05, size, !!item.task))
+      } else {
+        const marker = font.encode(markerText)
+        page.ops.push({
+          t: "text",
+          x,
+          y: baseline,
+          size,
+          runs: [{ x, hex: marker.hex, width: marker.width * (size / 1000), bold: false, italic: false }],
+          color: COLOR_MUTED,
+        })
+      }
       let first = true
       for (const line of lines) {
         if (!first) {
@@ -447,7 +550,10 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
         }
         break
       case "para":
-        drawParagraph(block.inlines, {
+        // 段落里可能夹着图片（`![](a.png)` 独占一行是最常见的写法）。
+        // 逐段切分：文字走 drawParagraph，图片走 drawImage —— 这样图片是"真的图"，
+        // 与预览里的 <img> 一致，而不是一行 `[图片: alt]` 占位符。
+        drawRunsWithImages(block.inlines, {
           x: ctx.quote ? MARGIN_X + 10 : MARGIN_X,
           color: ctx.quote ? COLOR_MUTED : COLOR_TEXT,
           spaceAfter: BASE_SIZE * 0.55,
@@ -514,11 +620,44 @@ export function layoutDocument({ blocks, font, fallbackTitle }) {
     const sample = [...font.missingChars].slice(0, 8).join(" ")
     warnings.push(`字体缺少这些字符的字形，已用「?」代替：${sample}`)
   }
-  return { pages, pageCount: pages.length, warnings, title }
+  return { pages, pageCount: pages.length, warnings, title, images: usedImages }
 }
 
-/** 任务列表的勾选框前缀 + 正文 run */
-function parseTaskRuns(prefix, inlines) {
-  if (!prefix) return inlines
-  return [{ text: prefix, code: false }, ...inlines]
+/**
+ * 任务列表的勾选框。
+ *
+ * 预览里这是 `<input type="checkbox">` —— 一个**方框控件**，不是文字。所以 PDF 里也画
+ * 一个方框（+ 勾），而不是往正文里塞 `☑` / `☐`：那两个码点很多中文字体里并没有
+ * （实测 NotoSerifSC 就没有），会变成 `?`，既难看又破坏"内容一致"。
+ *
+ * @returns {{x:number,y:number,size:number,checked:boolean}} 交给调用方在正确的
+ *   基线位置画（因为折行之后才知道首行在哪）
+ */
+function taskBoxGeometry(x, baseline, size, checked) {
+  const box = size * 0.82
+  return { x, y: baseline + size * 0.06, size: box, checked }
+}
+
+/** 把"画勾选框"的几条指令塞进 page.ops */
+function pushTaskBox(page, { x, y, size, checked }) {
+  page.ops.push({ t: "rect", x, y, w: size, h: size, fill: [1, 1, 1], stroke: [0.45, 0.45, 0.45], width: 0.7 })
+  if (!checked) return
+  page.ops.push({
+    t: "line",
+    x1: x + size * 0.2,
+    y1: y + size * 0.52,
+    x2: x + size * 0.42,
+    y2: y + size * 0.26,
+    width: 0.9,
+    color: [0.12, 0.12, 0.12],
+  })
+  page.ops.push({
+    t: "line",
+    x1: x + size * 0.42,
+    y1: y + size * 0.26,
+    x2: x + size * 0.8,
+    y2: y + size * 0.74,
+    width: 0.9,
+    color: [0.12, 0.12, 0.12],
+  })
 }

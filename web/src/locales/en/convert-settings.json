@@ -1,0 +1,20 @@
+{
+  "ui.settings.tabs.convert": "File conversion",
+  "ui.settings.convert.title": "PDF font (Markdown → PDF)",
+  "ui.settings.convert.desc": "Converting Markdown to PDF needs a font that can typeset Chinese. Pick one here; leave empty to auto-select (TrueType is preferred because its subset is much smaller).",
+  "ui.settings.convert.font_ready": "Font available",
+  "ui.settings.convert.font_missing": "Font missing",
+  "ui.settings.convert.current": "Font currently in use",
+  "ui.settings.convert.cff_hint": "CFF outlines, PDF will be somewhat larger",
+  "ui.settings.convert.missing_title": "No usable CJK font found: conversions containing Chinese will fail instead of producing a page full of question marks",
+  "ui.settings.convert.missing_hint": "Drop any .ttf / .ttc / .otf CJK font into {dir} and press \"Rescan\", or type the absolute path of a font file below.",
+  "ui.settings.convert.font_label": "Font file path",
+  "ui.settings.convert.font_placeholder": "Empty = automatic (e.g. /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc)",
+  "ui.settings.convert.font_hint": "The file is verified when you save: it must contain Chinese glyphs. Relative paths resolve against the program root.",
+  "ui.settings.convert.rescan": "Rescan",
+  "ui.settings.convert.rescanned": "Rescanned",
+  "ui.settings.convert.saved": "Saved",
+  "ui.settings.convert.diagnostics": "Diagnostics: candidate fonts considered ({n})",
+  "ui.settings.convert.too_many": "{n} more candidates not shown",
+  "ui.settings.convert.dirs": "Auto-discovery: {dir}; system font directories: {system}"
+}

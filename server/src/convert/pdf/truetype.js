@@ -1,30 +1,40 @@
 /**
- * pdf/truetype.js —— 只读的 TrueType 解析 + 子集化（供 md→PDF 内嵌中文字体用）。
+ * pdf/truetype.js —— 只读的 TrueType / CFF(OpenType) 解析 + 子集化（供 md→PDF 内嵌中文字体用）。
  *
  * 为什么自己写（而不是装 pdfkit / fontkit）：
  *   - 项目对外承诺的后端依赖只有 8 个，`docs/开发者指南.md` 与「软件开源信息」页都
  *     按这个清单展示；为了一个「Markdown 转 PDF」多背两个几 MB 的库不划算。
  *   - 我们需要的功能区间其实很窄：读 cmap（字符→字形号）、读 hmtx（字宽），然后按
- *     PDF 的 CIDFontType2 + Identity-H **原样保留字形号**内嵌一份子集。不需要
- *     shaping（连字 / 阿拉伯文变形），也不需要 CFF。
+ *     PDF 的规则内嵌。不需要 shaping（连字 / 阿拉伯文变形）。
  *
- * 关键的取舍：**保留原始字形号（GID）**。
- *   PDF 侧用 Identity-H，CID 就等于 GID，于是：
- *     - 不需要重排字形号，也就不需要重写 composite glyph 的组件引用；
- *     - 只需要把"用到的字形"的轮廓拷进新的 glyf 表，其余字形留空（loca 指向同一位置），
- *       未使用字形的字宽仍然留在 hmtx 里（PDF 的 /W 与文本提取都不受影响）。
- *   代价是 hmtx / loca 仍然是 numGlyphs 条（雅黑约 3 万字形 → 各约 120KB），
- *   但相比整份 19MB 的 msyh.ttc 已经小了两个数量级。
+ * 两种轮廓各走一条路（v2.1.0 起）：
  *
- * 明确不支持：CFF/OTF（sfnt 版本 'OTTO'）、TrueType Collection 里 index > 0 的
- * 变体选择（只取调用方指定的那个 face）、以及任何需要 GSUB/GPOS 的复杂文字排版。
- * 这些都写进了 `docs/使用手册.md` 的转换限制里。
+ *   1. **TrueType（glyf）**：PDF 用 CIDFontType2 + Identity-H，CID 就等于字形号，
+ *      于是可以**保留原始字形号**做子集：只把"用到的字形"的轮廓拷进新的 glyf，
+ *      其余留空。不需要重排字形号，也就不需要重写 composite glyph 的组件引用。
+ *      代价是 hmtx / loca 仍然是 numGlyphs 条（雅黑约 3 万字形 → 各约 120KB），
+ *      但相比整份 19MB 的 msyh.ttc 已经小了两个数量级。
+ *
+ *   2. **CFF（OpenType/OTTO）**：PDF 用 CIDFontType0 + `/FontFile3 /CIDFontType0C`。
+ *      CFF 的 INDEX 结构没法"原地留空"，所以这里做的是**重建容器式的子集**
+ *      （见 `cff.js`：新字形密集重排、CID 保持原值、只在用到时保留 charstring）。
+ *      CFF 子集失败或自检不过时**回退整份内嵌**（文件会明显变大，但保证能打开）。
+ *
+ *   注意 CID 与 GID 的区别：TrueType 路径下 CID == GID；CFF 路径下必须用字体
+ *   charset 里声明的 CID（思源/Noto 里两者经常**不相等**，实测 NotoSerifSC 的
+ *   「中」gid=8742 而 cid=9562），内容流里写的是 CID。
+ *
+ * 明确不支持：CFF2（可变字体）、name-keyed CFF（非 CID-keyed 的 .otf）、
+ * 预定义 charset（ISOAdobe/Expert）的字体、以及任何需要 GSUB/GPOS 的复杂文字排版。
+ * 这些都写进了 `docs/使用手册.md` 的转换限制与「常见问题 → 文件转换」。
  */
+
+import { parseCff, subsetCff, verifySubset } from "./cff.js"
 
 /** sfnt 版本常量 */
 const SFNT_TRUETYPE = 0x00010000
 const SFNT_TRUE = 0x74727565 // 'true'
-const SFNT_OTTO = 0x4f54544f // 'OTTO'（CFF 轮廓，不能塞进 FontFile2）
+const SFNT_OTTO = 0x4f54544f // 'OTTO'（CFF 轮廓）
 const SFNT_TTCF = 0x74746366 // 'ttcf'
 
 /** 复合字形里"还有下一个组件"的标志位（TrueType 规范） */
@@ -78,12 +88,12 @@ export function parseFont(buffer, { faceIndex = 0 } = {}) {
     base = u32(buffer, 12 + idx * 4)
   }
   const version = u32(buffer, base)
+  let kind = "truetype"
   if (version === SFNT_OTTO) {
-    // 明确拒绝而不是"试着当 TrueType 解析"：CFF 轮廓塞进 FontFile2 会得到一个
-    // 所有阅读器都打不开的 PDF，错误必须在这里就暴露出来。
-    throw fail("这是 CFF 轮廓的 OpenType 字体（.otf/.ttc），不能内嵌为 TrueType")
-  }
-  if (version !== SFNT_TRUETYPE && version !== SFNT_TRUE) {
+    // CFF 轮廓：走另一条内嵌路径（见文件头）。CFF2（可变字体）的表名是 "CFF2"，
+    // 结构完全不同，明确拒绝而不是"试一下"。
+    kind = "cff"
+  } else if (version !== SFNT_TRUETYPE && version !== SFNT_TRUE) {
     throw fail(`未知的字体格式：0x${version.toString(16)}`)
   }
 
@@ -99,8 +109,21 @@ export function parseFont(buffer, { faceIndex = 0 } = {}) {
     tables.set(name, { tag: name, offset, length })
   }
 
-  for (const required of ["head", "hhea", "maxp", "hmtx", "loca", "glyf"]) {
-    if (!tables.has(required)) throw fail(`字体缺少必需的表：${required}`)
+  const required = ["head", "hhea", "maxp", "hmtx", "cmap"]
+  if (kind === "cff") {
+    if (!tables.has("CFF ")) {
+      throw fail(
+        tables.has("CFF2")
+          ? "这是 CFF2 可变字体，暂不支持（请改用静态 .ttf / .otf）"
+          : "OpenType 字体缺少 CFF 表"
+      )
+    }
+    required.push("CFF ")
+  } else {
+    required.push("loca", "glyf")
+  }
+  for (const name of required) {
+    if (!tables.has(name)) throw fail(`字体缺少必需的表：${name}`)
   }
 
   const head = tables.get("head")
@@ -128,6 +151,8 @@ export function parseFont(buffer, { faceIndex = 0 } = {}) {
     buffer,
     base,
     faceCount,
+    /** "truetype"（glyf）或 "cff"（OpenType/CFF）—— 决定 PDF 用 CIDFontType2 还是 Type0 */
+    kind,
     unitsPerEm: unitsPerEm || 1000,
     indexToLocFormat,
     bbox,
@@ -140,13 +165,57 @@ export function parseFont(buffer, { faceIndex = 0 } = {}) {
     capHeight,
     tables,
     cmap: [],
+    /** CFF 字体：字形号 → CID（TrueType 路径下恒等，这里留 null） */
+    cidByGid: null,
+    /** CFF 字体：可直接内嵌的 CFF 表字节 */
+    cffProgram: null,
     /** 字形号 → 字宽（字体单位），懒解析 */
     _advances: null,
     /** 字符 → 字形号，懒解析 */
     _charMap: null,
   }
+
+  if (kind === "cff") {
+    const parsed = parseCff(buffer, tables.get("CFF ").offset, tables.get("CFF ").length, numGlyphs)
+    font.cidByGid = parsed.cidByGid
+    font.cff = parsed
+  }
   return font
 }
+
+/**
+ * 生成可内嵌的字体程序。
+ *
+ * - TrueType：返回子集 sfnt（`/FontFile2`）
+ * - CFF：返回子集 CFF（`/FontFile3` + `/Subtype /CIDFontType0C`）；子集化或自检
+ *   失败时回退到整份 CFF，并把 `fallbackReason` 带出去（任务提示里会说明文件偏大）
+ *
+ * @param {object} font parseFont() 的结果
+ * @param {Iterable<number>} usedGids 用到的**原始字形号**
+ * @returns {{ program: Buffer, format: "truetype"|"cff", cidOfNewGid?: Uint32Array, note?: string }}
+ */
+export function buildFontProgram(font, usedGids) {
+  if (font.kind !== "cff") {
+    return { program: subsetFont(font, usedGids), format: "truetype" }
+  }
+  try {
+    const subset = subsetCff(font.buffer, font.cff, usedGids)
+    verifySubset(subset.program, font.cff, subset)
+    return { program: subset.program, format: "cff", oldGids: subset.oldGids, cidOfNewGid: subset.newCid }
+  } catch (err) {
+    // 回退：整份内嵌。宁可 PDF 变大，也不要交出打不开的文件。
+    return {
+      program: font.cff.fullProgram,
+      format: "cff",
+      fallbackReason: String(err?.message || err),
+      note: `字体子集化失败，已改为整份内嵌（PDF 会偏大）：${err?.message || err}`,
+    }
+  }
+}
+
+/* ============================================================ CFF（OpenType） == */
+// CFF 的解析与子集化都在 `cff.js` 里（那份实现同时负责"重建容器 + 回填偏移"）。
+// 这里只保留 TrueType（glyf）相关的部分。
 
 /**
  * 读 OS/2 的 sCapHeight（版本 ≥ 2 才有）；没有就退回 ascender 的 0.7 倍。

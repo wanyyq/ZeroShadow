@@ -15,7 +15,8 @@ icon: FlaskConical
 | `scripts/office-preview-test.mjs` | Office 解析单测 | 40 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/markdown-url-test.mjs` | Markdown 相对路径解析单测 | 18 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/markdown-html-test.mjs` | Markdown 安全 HTML 白名单单测 | 28 项 | **否** | 失败项数量（0 / 1） |
-| `scripts/convert-test.mjs` | 文件转换单测（Markdown 解析 / md→txt / md→PDF 结构与字体子集 / 图片互转 / 并发闸门） | 44 项 | **否** | 失败项数量（0 / 1） |
+| `scripts/convert-test.mjs` | 文件转换单测（Markdown 解析 / md→txt / md→PDF 结构与字体子集 / CFF 子集 / 图片内嵌 / 并发闸门） | 59 项 | **否** | 失败项数量（0 / 1） |
+| `scripts/markdown-parity-test.mjs` | 预览 ↔ PDF 内容一致性（编译前端预览渲染器当基准，逐行比对） | 17 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/webdav-test.mjs` | WebDAV 协议兼容性（Windows WebClient / Finder 的真实请求序列） | 70 项 | 是 | 失败项数量（0 / 1） |
 | `i18n-check.mjs` | 多语言文案校验（键完整性 + 剩余硬编码中文） | — | **否** | 错误数（0 = 通过） |
 
@@ -223,7 +224,8 @@ node --experimental-strip-types scripts/markdown-html-test.mjs  # 28 项：安�
 ## 文件转换单测 `scripts/convert-test.mjs`
 
 ```bash
-node scripts/convert-test.mjs   # 44 项：解析 / 文本 / PDF / 字体 / 图片 / 注册表 / 并发闸门
+node scripts/convert-test.mjs   # 59 项：解析 / 文本 / PDF / CFF 字体 / 图片 / 注册表 / 并发闸门
+node scripts/markdown-parity-test.mjs  # 17 项：预览 ↔ PDF 内容一致性
 ```
 
 不需要起服务、不需要浏览器；产物（示例 PDF）写到**系统临时目录**，不在仓库里留文件。

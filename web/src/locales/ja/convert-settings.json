@@ -1,0 +1,20 @@
+{
+  "ui.settings.tabs.convert": "ファイル変換",
+  "ui.settings.convert.title": "PDF フォント（Markdown → PDF）",
+  "ui.settings.convert.desc": "Markdown を PDF にするには日本語・中国語を組めるフォントが必要です。ここで指定します。空欄なら自動選択（TrueType を優先。サブセットが小さいため）。",
+  "ui.settings.convert.font_ready": "フォント利用可",
+  "ui.settings.convert.font_missing": "フォントなし",
+  "ui.settings.convert.current": "現在使用中のフォント",
+  "ui.settings.convert.cff_hint": "CFF 輪郭のため PDF はやや大きくなります",
+  "ui.settings.convert.missing_title": "使用可能な日中韓フォントが見つかりません：日本語を含む変換はエラーになります（? で埋め尽くされた PDF は作りません）",
+  "ui.settings.convert.missing_hint": ".ttf / .ttc / .otf のフォントを {dir} に置いて「再スキャン」するか、下にフォントファイルの絶対パスを入力してください。",
+  "ui.settings.convert.font_label": "フォントファイルのパス",
+  "ui.settings.convert.font_placeholder": "空欄 = 自動（例: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc）",
+  "ui.settings.convert.font_hint": "保存時に検証します：「中」の字形を含むフォントである必要があります。相対パスはプログラムのルートから解決します。",
+  "ui.settings.convert.rescan": "再スキャン",
+  "ui.settings.convert.rescanned": "再スキャンしました",
+  "ui.settings.convert.saved": "保存しました",
+  "ui.settings.convert.diagnostics": "診断：検討した候補フォント（{n}）",
+  "ui.settings.convert.too_many": "他 {n} 件の候補は非表示",
+  "ui.settings.convert.dirs": "自動検索先：{dir}；システムフォント：{system}"
+}

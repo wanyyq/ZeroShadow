@@ -322,6 +322,8 @@ export interface AdminConfig {
   webdavEnabled: boolean
   /** WebDAV 挂载路径（默认 /dav），改完保存即生效 */
   webdavPath: string
+  /** md→PDF 用的字体文件路径；空字符串 = 自动（data/fonts → 系统字体，优先 TrueType） */
+  convertPdfFont?: string
   defaultVisibility: { whitelist: string[]; blacklist: string[] }
   memberPerms: {
     fileWrite: boolean

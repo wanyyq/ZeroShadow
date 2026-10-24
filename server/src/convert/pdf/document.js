@@ -105,6 +105,15 @@ function renderContent(page, ops) {
         out.push("Q")
         break
       }
+      case "image": {
+        // 图片：用 cm 矩阵把单位正方形缩放到目标矩形，再 Do 出 XObject。
+        // PDF 的图像坐标系原点在左下角，与排版层给的 (x, y) 一致（layout 给的是左下角）。
+        out.push("q")
+        out.push(`${num(op.w)} 0 0 ${num(op.h)} ${num(op.x)} ${num(op.y)} cm`)
+        out.push(`/${op.name} Do`)
+        out.push("Q")
+        break
+      }
       default:
         break
     }
@@ -118,7 +127,8 @@ function renderContent(page, ops) {
 
 function buildToUnicode(font) {
   const entries = []
-  for (const [gid, codePoint] of font.gidToCodePoint) {
+  const pairs = font.cidToCodePoint ?? font.gidToCodePoint
+  for (const [gid, codePoint] of pairs) {
     if (gid === undefined || codePoint === undefined) continue
     const src = gid.toString(16).padStart(4, "0").toUpperCase()
     let dst
@@ -161,12 +171,13 @@ function buildToUnicode(font) {
   return lines.join("\n")
 }
 
-/** /W 数组：每个用到的 CID 单独给一个宽度 */
+/** /W 数组：每个用到的 CID 单独给一个宽度（CFF 的 CID 与字形号不同，键必须是 CID） */
 function buildWidths(font) {
   const parts = []
-  for (const gid of font.usedGids) {
-    parts.push(`${gid} [${font.rawAdvance(gid)}]`)
-  }
+  const entries = font.widthByCid
+    ? [...font.widthByCid.entries()]
+    : [...font.usedGids].map((gid) => [gid, font.rawAdvance(gid)])
+  for (const [cid, width] of entries) parts.push(`${cid} [${width}]`)
   return `[${parts.join(" ")}]`
 }
 
@@ -176,13 +187,14 @@ function buildWidths(font) {
 
 /**
  * @param {object} options
- * @param {Array<{width:number,height:number,ops:object[],links:object[]}>} options.pages
+ * @param {Array<{width:number,height:number,ops:object[],links:object[],imageNames?:Set<string>}>} options.pages
  * @param {object} options.font loadFont() 返回的 font 视图
+ * @param {Map<string, object>} [options.images] 图片 XObject 注册表（name → PdfImage）
  * @param {string} [options.title]
  * @param {string} [options.subject]
- * @returns {Buffer} 完整的 PDF 文件
+ * @returns {{ data: Buffer, fontNote: string }}
  */
-export function buildPdf({ pages, font, title, subject }) {
+export function buildPdf({ pages, font, title, subject, images }) {
   const objects = [] // 每项是 Buffer 或字符串，索引 0 => 1 号对象
   const addObject = (body) => {
     objects.push(body)
@@ -200,6 +212,32 @@ export function buildPdf({ pages, font, title, subject }) {
   const toUnicodeId = addObject("")
   const infoId = addObject("")
 
+  /** 字体子集化过程中的提示（例如"回退整份内嵌"），由调用方写进 tasks 的 notes */
+  let fontNote = ""
+
+  // 图片 XObject：每个图片一个对象，名字（/Im1…）由排版层分配，页面的 /XObject 里引用它
+  const imageIds = new Map()
+  for (const [name, image] of images || []) {
+    const data = image.filter === "/DCTDecode" ? image.data : zlib.deflateSync(image.data)
+    const head =
+      `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} ` +
+      `/ColorSpace ${image.colorSpace} /BitsPerComponent ${image.bitsPerComponent} ` +
+      `/Filter ${image.filter}` +
+      (image.decodeParms ? ` /DecodeParms << ${image.decodeParms} >>` : "") +
+      ` /Length ${data.length} >>`
+    imageIds.set(
+      name,
+      addObject(
+        Buffer.concat([
+          Buffer.from(head, "latin1"),
+          Buffer.from("\nstream\n", "latin1"),
+          data,
+          Buffer.from("\nendstream", "latin1"),
+        ])
+      )
+    )
+  }
+
   const pageIds = []
   for (const page of pages) {
     const content = Buffer.from(renderContent(page, page.ops), "latin1")
@@ -215,19 +253,27 @@ export function buildPdf({ pages, font, title, subject }) {
       link,
     }))
     const annotsRef = annots.length ? ` /Annots [${annots.map((a) => ref(a.id)).join(" ")}]` : ""
+    // 只有这一页真正画过的图片才写进它的 /XObject（否则资源字典会虚胖）
+    const used = [...(page.imageNames || [])].filter((name) => imageIds.has(name))
+    const xobjects = used.length
+      ? ` /XObject << ${used.map((name) => `/${name} ${ref(imageIds.get(name))}`).join(" ")} >>`
+      : ""
+    const procSet = used.length ? "[/PDF /Text /ImageB /ImageC /ImageI]" : "[/PDF /Text]"
     pageIds.push(
       addObject(
         `<< /Type /Page /Parent ${ref(pagesId)} /MediaBox [0 0 ${num(page.width)} ${num(page.height)}] ` +
-          `/Resources << /Font << /F1 ${ref(fontId)} >> /ProcSet [/PDF /Text] >> ` +
+          `/Resources << /Font << /F1 ${ref(fontId)} >>${xobjects} /ProcSet ${procSet} >> ` +
           `/Contents ${ref(contentId)}${annotsRef} >>`
       )
     )
   }
 
   // ---- 字体相关 ----
-  // 有中文字体时：Type0 + CIDFontType2（Identity-H）+ 子集化字体程序 + ToUnicode。
-  // 没有中文字体时（font.kind === "fallback"）：退回 PDF 内置的 Helvetica + WinAnsi，
-  // 中文由调用方替换成 '?' —— 这里绝不能内嵌一个空的字体程序，那会让阅读器直接报错。
+  // 三种情形：
+  //   1. 有中文字体 + TrueType 轮廓 → Type0 + **CIDFontType2** + `/CIDToGIDMap /Identity`
+  //   2. 有中文字体 + CFF 轮廓     → Type0 + **CIDFontType0** + `/FontFile3 /CIDFontType0C`
+  //   3. 没有中文字体（fallback）  → PDF 内置 Helvetica + WinAnsi，中文由调用方替换成 '?'
+  //      —— 绝不能内嵌一个空的字体程序，那会让阅读器直接报错。
   const simpleFont = font.kind === "fallback"
   const baseName = "ZSJPDOC+ZeroShadowCJK"
   const bbox = font.bbox || [0, -200, 1000, 900]
@@ -241,29 +287,37 @@ export function buildPdf({ pages, font, title, subject }) {
     objects[fontFileId - 1] = streamObject("", { Length: 0 })
     objects[toUnicodeId - 1] = streamObject("", { Length: 0 })
   } else {
-    const subset = font.buildSubset()
-    const fontProgram = subset ?? Buffer.alloc(0)
+    const built = font.buildSubset() || {}
+    const fontProgram = built.program ?? Buffer.alloc(0)
+    const isCff = built.format === "cff"
     objects[fontId - 1] =
       `<< /Type /Font /Subtype /Type0 /BaseFont /${baseName} /Encoding /Identity-H ` +
       `/DescendantFonts [${ref(cidFontId)}] /ToUnicode ${ref(toUnicodeId)} >>`
+    // CIDFontType0 用 CID-keyed CFF：没有 /CIDToGIDMap（CID 与字形号的对应关系写在
+    // 字体自己的 charset 里），字体程序走 /FontFile3 + /Subtype /CIDFontType0C。
     objects[cidFontId - 1] =
-      `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${baseName} ` +
+      `<< /Type /Font /Subtype /${isCff ? "CIDFontType0" : "CIDFontType2"} /BaseFont /${baseName} ` +
       `/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> ` +
-      `/FontDescriptor ${ref(descriptorId)} /DW 1000 /W ${buildWidths(font)} /CIDToGIDMap /Identity >>`
+      `/FontDescriptor ${ref(descriptorId)} /DW 1000 /W ${buildWidths(font)}` +
+      (isCff ? " >>" : " /CIDToGIDMap /Identity >>")
     objects[descriptorId - 1] =
       `<< /Type /FontDescriptor /FontName /${baseName} /Flags 4 ` +
       `/FontBBox [${bbox.map(num).join(" ")}] /ItalicAngle 0 ` +
       `/Ascent ${num(font.ascent)} /Descent ${num(font.descent)} /CapHeight ${num(font.capHeight)} ` +
-      `/StemV 80 /FontFile2 ${ref(fontFileId)} >>`
+      `/StemV 80 /${isCff ? "FontFile3" : "FontFile2"} ${ref(fontFileId)} >>`
 
     const compressedFont = zlib.deflateSync(fontProgram)
+    // /Length1 = **未压缩**的字体程序长度：FontFile2 与 FontFile3 都要求这一项，
+    // 缺了它有些阅读器会直接拒绝加载字体。
     objects[fontFileId - 1] = streamObject(compressedFont.toString("latin1"), {
       Length: compressedFont.length,
       Length1: fontProgram.length,
       Filter: "/FlateDecode",
+      ...(isCff ? { Subtype: "/CIDFontType0C" } : {}),
     })
     const cmap = Buffer.from(buildToUnicode(font), "latin1")
     objects[toUnicodeId - 1] = streamObject(cmap.toString("latin1"), { Length: cmap.length })
+    if (typeof built.note === "string" && built.note) fontNote = built.note
   }
 
   // ---- 文档树与信息 ----
@@ -301,7 +355,7 @@ export function buildPdf({ pages, font, title, subject }) {
   )
   chunks.push(trailer)
 
-  return Buffer.concat(chunks)
+  return { data: Buffer.concat(chunks), fontNote }
 }
 
 /** 流对象：字典里除了长度还可以带别的键（Filter / Length1） */
