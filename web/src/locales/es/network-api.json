@@ -1,0 +1,5 @@
+{
+  "ui.common.offline_error": "Parece que estás sin conexión. Revisa tu red.",
+  "ui.common.timeout_error": "La solicitud ha caducado (red lenta o interrumpida). Inténtalo de nuevo.",
+  "ui.common.network_unstable": "La red no es estable, inténtalo de nuevo en unos segundos"
+}

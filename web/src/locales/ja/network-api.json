@@ -1,0 +1,5 @@
+{
+  "ui.common.offline_error": "オフラインのようです。ネットワーク接続を確認してください",
+  "ui.common.timeout_error": "リクエストがタイムアウトしました（回線が遅いか切断されました）。再試行してください",
+  "ui.common.network_unstable": "ネットワークが不安定です。しばらくしてから再試行してください"
+}

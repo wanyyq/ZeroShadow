@@ -49,7 +49,7 @@ const DEPENDENCIES: { scope: Scope; name: string; version: string; license: stri
   { scope: "web", name: "@fontsource-variable/inter", version: "5.2.8", license: "OFL-1.1", unused: true },
 ]
 
-type BundledId = "lucide" | "gsap" | "tailwind" | "google-sans"
+type BundledId = "lucide" | "gsap" | "google-sans"
 
 /**
  * 随项目分发的本地静态资源（public/resources/），不经过 npm。
@@ -69,12 +69,6 @@ const BUNDLED: { id: BundledId; name: string; version: string; license: string; 
     license: "GreenSock Standard License",
     url: "https://gsap.com/standard-license",
     caution: true,
-  },
-  {
-    id: "tailwind",
-    name: "Tailwind CSS",
-    version: "4.3.2",
-    license: "MIT",
   },
   {
     id: "google-sans",
@@ -141,10 +135,6 @@ export function AboutPage() {
   const bundledText: Record<BundledId, { nameSuffix?: string; note: string }> = {
     lucide: { note: t("ui.about.bundled_note_lucide") },
     gsap: { note: t("ui.about.bundled_note_gsap") },
-    tailwind: {
-      nameSuffix: t("ui.about.bundled_name_tailwind_suffix"),
-      note: t("ui.about.bundled_note_tailwind"),
-    },
     "google-sans": { note: t("ui.about.bundled_note_google_sans") },
   }
 

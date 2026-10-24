@@ -1,0 +1,5 @@
+{
+  "ui.common.offline_error": "Vous semblez hors ligne. Vérifiez votre connexion réseau.",
+  "ui.common.timeout_error": "La requête a expiré (réseau lent ou interrompu). Réessayez.",
+  "ui.common.network_unstable": "Le réseau est instable, réessayez dans un instant"
+}

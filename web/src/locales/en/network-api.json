@@ -1,0 +1,5 @@
+{
+  "ui.common.offline_error": "You appear to be offline. Check your network connection.",
+  "ui.common.timeout_error": "Request timed out (slow or interrupted network). Please retry.",
+  "ui.common.network_unstable": "The network seems unstable, please retry shortly"
+}

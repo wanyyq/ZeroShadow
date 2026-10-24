@@ -1,0 +1,5 @@
+{
+  "ui.common.offline_error": "目前處於離線狀態，請檢查網路連線",
+  "ui.common.timeout_error": "請求逾時（網路較慢或中斷），請重試",
+  "ui.common.network_unstable": "網路不穩定，請稍後重試"
+}

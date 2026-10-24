@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { toast } from "sonner"
-import { api, setOnPermissionDenied } from "@/lib/api"
+import { api, setOnNetworkError, setOnPermissionDenied } from "@/lib/api"
 import { setCaseInsensitive } from "@/lib/conflict"
 import { useT } from "@/lib/i18n"
 import type { Me } from "@/lib/types"
@@ -77,6 +77,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })
     return () => setOnPermissionDenied(null)
   }, [refresh, t])
+
+  /**
+   * 网络异常提示（弱网 / 穿透链路）。
+   *
+   * api.ts 里对幂等请求已经自动重试两次；两次都失败才走到这里，
+   * 所以提示可以说明"网络不稳定"。**做 8 秒节流**：一次断网会让并发的
+   * 五六个请求同时失败，不节流会连弹五六个同样的 toast。
+   */
+  React.useEffect(() => {
+    let last = 0
+    setOnNetworkError(() => {
+      const now = Date.now()
+      if (now - last < 8000) return
+      last = now
+      toast.error(t("ui.common.network_unstable"))
+    })
+    return () => setOnNetworkError(null)
+  }, [t])
+
+  // 页面重新可见时补一次身份刷新：笔记本合盖 / 切走标签页期间断网，
+  // 定时器可能被浏览器节流，回来时先确认会话还在。
+  React.useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("online", onVisible)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("online", onVisible)
+    }
+  }, [refresh])
 
   React.useEffect(() => {
     const interval = setInterval(refresh, 30000)

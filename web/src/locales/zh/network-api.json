@@ -1,0 +1,5 @@
+{
+  "ui.common.offline_error": "当前处于离线状态，请检查网络连接",
+  "ui.common.timeout_error": "请求超时（网络较慢或被中断），请重试",
+  "ui.common.network_unstable": "网络不稳定，请稍后重试"
+}
