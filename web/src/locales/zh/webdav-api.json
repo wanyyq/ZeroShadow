@@ -1,0 +1,12 @@
+{
+  "api.admin.webdav_path_invalid": "webdavPath 必须是安全的挂载路径（如 /dav）",
+  "api.webdav.body_too_large": "请求体过大",
+  "api.webdav.depth_infinity_denied": "不支持 Depth: infinity（会扫描整个目录树），请改用 Depth: 0 或 1",
+  "api.webdav.destination_host_mismatch": "目标地址不属于本站点",
+  "api.webdav.mkcol_body_unsupported": "MKCOL 不接受请求体",
+  "api.webdav.put_on_directory": "目标是目录，不能用 PUT 覆盖",
+  "api.webdav.rate_limited": "WebDAV 请求过于频繁，请稍后再试",
+  "api.webdav.superadmin_denied": "WebDAV 不接受超级管理员账号，请改用团队成员账号",
+  "api.webdav.too_many_children": "目录内项目过多（超过 {limit} 项），请改用 Web 界面浏览",
+  "api.webdav.too_many_locks": "锁数量过多，请先解锁"
+}

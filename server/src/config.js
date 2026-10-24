@@ -1,5 +1,5 @@
 import path from "node:path"
-import { DATA_DIR } from "./env.js"
+import { DATA_DIR, WEBDAV_ENABLED, WEBDAV_PATH } from "./env.js"
 import { readJsonSync, withLock, writeJsonAtomic } from "./store.js"
 
 const CONFIG_FILE = path.join(DATA_DIR, "config.json")
@@ -47,6 +47,17 @@ const DEFAULTS = {
   shareEnabled: true,
   /** 匿名可访问；设为 false 则分享链接必须登录网盘账号才能打开 */
   sharePublicAccess: true,
+  // ===== WebDAV 挂载（v2.0 起为正式功能，默认仍关闭）=====
+  /**
+   * 是否启用 WebDAV。
+   *
+   * 默认值取自 `.env` 的 `WEBDAV`（老配置继续有效），但**一旦后台保存过这个字段，
+   * 就以 `data/config.json` 为准** —— 后台开关优先级高于 `.env`。
+   * 这样既不会让老部署升级后突然失去挂载，也不会让 `.env` 悄悄覆盖管理员的选择。
+   */
+  webdavEnabled: WEBDAV_ENABLED,
+  /** 挂载路径，默认 /dav（同样以 .env 的 WEBDAV_PATH 为默认值） */
+  webdavPath: WEBDAV_PATH,
   // ===== 界面语言 =====
   /** 站点默认界面语言；用户在自己浏览器里选过的语言会覆盖它 */
   defaultLang: "zh",

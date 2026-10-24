@@ -1,0 +1,12 @@
+{
+  "api.admin.webdav_path_invalid": "webdavPath debe ser una ruta de montaje segura (p. ej. /dav)",
+  "api.webdav.body_too_large": "El cuerpo de la solicitud es demasiado grande",
+  "api.webdav.depth_infinity_denied": "Depth: infinity no está admitido (recorrería todo el árbol); usa Depth: 0 o 1",
+  "api.webdav.destination_host_mismatch": "El destino no pertenece a este sitio",
+  "api.webdav.mkcol_body_unsupported": "MKCOL no acepta cuerpo de solicitud",
+  "api.webdav.put_on_directory": "El destino es un directorio; PUT no puede sobrescribirlo",
+  "api.webdav.rate_limited": "Demasiadas solicitudes WebDAV, inténtalo más tarde",
+  "api.webdav.superadmin_denied": "WebDAV no acepta cuentas de superadministrador; usa una cuenta de miembro del equipo",
+  "api.webdav.too_many_children": "El directorio tiene demasiados elementos (más de {limit}); usa la interfaz web",
+  "api.webdav.too_many_locks": "Demasiados bloqueos; libera alguno primero"
+}

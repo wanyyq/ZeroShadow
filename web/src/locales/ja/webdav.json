@@ -1,0 +1,14 @@
+{
+  "ui.settings.webdav.title": "WebDAV マウント",
+  "ui.settings.webdav.desc": "Windows エクスプローラー / macOS Finder / RaiDrive / rclone のネットワークドライブとしてマウントします。",
+  "ui.settings.webdav.on": "有効",
+  "ui.settings.webdav.off": "無効",
+  "ui.settings.webdav.enable_label": "WebDAV を有効にする",
+  "ui.settings.webdav.path_label": "マウントパス",
+  "ui.settings.webdav.path_hint": "/ で始まる必要があります。/api と /ping は予約済みです。保存すると即時反映されるため、クライアント側のアドレスも変更してください。",
+  "ui.settings.webdav.mount_url": "マウント URL",
+  "ui.settings.webdav.copied": "マウント URL をコピーしました",
+  "ui.settings.webdav.warn_title": "HTTPS または完全に信頼できるネットワークでのみ使用してください",
+  "ui.settings.webdav.warn_body": "WebDAV クライアントは通常 Basic 認証しか使えないため、ユーザー名とパスワードが毎回のリクエストで送信されます（HTTP では平文が繰り返し流れます）。スーパー管理者アカウントは拒否されます。チームメンバーアカウントで接続してください。",
+  "ui.settings.webdav.saved": "保存しました"
+}

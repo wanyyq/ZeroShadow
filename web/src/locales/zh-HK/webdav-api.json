@@ -1,0 +1,12 @@
+{
+  "api.admin.webdav_path_invalid": "webdavPath 必須是安全的掛載路徑（如 /dav）",
+  "api.webdav.body_too_large": "請求主體過大",
+  "api.webdav.depth_infinity_denied": "不支援 Depth: infinity（會掃描整個目錄樹），請改用 Depth: 0 或 1",
+  "api.webdav.destination_host_mismatch": "目標地址不屬於本站點",
+  "api.webdav.mkcol_body_unsupported": "MKCOL 不接受請求主體",
+  "api.webdav.put_on_directory": "目標是目錄，不能用 PUT 覆蓋",
+  "api.webdav.rate_limited": "WebDAV 請求過於頻繁，請稍後再試",
+  "api.webdav.superadmin_denied": "WebDAV 不接受超級管理員賬號，請改用團隊成員賬號",
+  "api.webdav.too_many_children": "目錄內項目過多（超過 {limit} 項），請改用 Web 界面瀏覽",
+  "api.webdav.too_many_locks": "鎖定數量過多，請先解鎖"
+}

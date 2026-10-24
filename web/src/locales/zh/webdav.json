@@ -1,0 +1,14 @@
+{
+  "ui.settings.webdav.title": "WebDAV 挂载",
+  "ui.settings.webdav.desc": "把网盘挂载成 Windows 资源管理器 / macOS Finder / RaiDrive / rclone 里的一个网络盘。",
+  "ui.settings.webdav.on": "已启用",
+  "ui.settings.webdav.off": "已关闭",
+  "ui.settings.webdav.enable_label": "启用 WebDAV",
+  "ui.settings.webdav.path_label": "挂载路径",
+  "ui.settings.webdav.path_hint": "以 / 开头；不能占用 /api、/ping 这类既有前缀。保存后立即生效，客户端要同步改地址。",
+  "ui.settings.webdav.mount_url": "挂载地址",
+  "ui.settings.webdav.copied": "已复制挂载地址",
+  "ui.settings.webdav.warn_title": "只建议在 HTTPS 或完全可信的内网使用",
+  "ui.settings.webdav.warn_body": "WebDAV 客户端普遍只支持 Basic 认证，用户名与密码会在每一个请求里重复发送，HTTP 下等于反复明文传输。它也不接受超级管理员账号，请使用团队成员账号连接。",
+  "ui.settings.webdav.saved": "已保存"
+}

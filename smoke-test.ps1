@@ -690,54 +690,221 @@ Check "logs-export-csv-bom" ([int][char]$r.Content[0] -eq 0xFEFF) ("首字符应
 $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/logs/export?format=xml"; WebSession = $session }
 Check "logs-export-invalid-format" ($r.Status -eq 400) "非法 format 应 400，实际 $($r.Status)"
 
-# --------------------------------------------- 14. WebDAV（实验性） -------
-Section "14. WebDAV（实验性，默认关闭）"
+# --------------------------------------------- 14. WebDAV（正式功能） -------
+Section "14. WebDAV（正式功能，默认关闭，后台可开关）"
 
 # Invoke-WebRequest 无法构造 PROPFIND 这类自定义方法（会得到状态 0），
-# 所以 DAV 断言走 .NET 的 HttpWebRequest，它能直接设置任意 Method。
+# 所以 DAV 断言走 .NET 的 HttpWebRequest，它能直接设置任意 Method 与请求体。
 function Invoke-Dav {
-  param([string]$Url, [string]$Method = "PROPFIND", [hashtable]$Headers = $null)
+  param(
+    [string]$Url,
+    [string]$Method = "PROPFIND",
+    [hashtable]$Headers = $null,
+    [byte[]]$Body = $null,
+    [string]$ContentType = $null,
+    # Range 在 HttpWebRequest 里是**受限头**，不能用 Headers.Add 设置
+    # （会抛 "The 'Range' header must be modified using the appropriate property"），
+    # 必须走 AddRange()。这里收一个 "bytes=0-4" 形式的字符串。
+    [string]$Range = ""
+  )
   $req = [System.Net.HttpWebRequest]::Create($Url)
   $req.Method = $Method
   $req.AllowAutoRedirect = $false
   $req.Timeout = 15000
-  if ($Headers) { foreach ($k in $Headers.Keys) { $req.Headers.Add($k, [string]$Headers[$k]) } }
+  if ($Headers) {
+    foreach ($k in $Headers.Keys) {
+      if ($k -ieq "Range") { continue }
+      $req.Headers.Add($k, [string]$Headers[$k])
+    }
+  }
+  if ($Range) {
+    $spec = ($Range -replace '^bytes=', '').Split('-')
+    $from = [long]$spec[0]
+    if ($spec.Length -gt 1 -and $spec[1]) { $req.AddRange($from, [long]$spec[1]) } else { $req.AddRange($from) }
+  }
+  if ($null -ne $Body) {
+    $req.ContentLength = $Body.Length
+    if ($ContentType) { $req.ContentType = $ContentType }
+    $stream = $req.GetRequestStream()
+    $stream.Write($Body, 0, $Body.Length)
+    $stream.Close()
+  }
   try {
     $resp = $req.GetResponse()
   } catch [System.Net.WebException] {
-    if ($_.Exception.Response) { $resp = $_.Exception.Response } else { return [pscustomobject]@{ Status = 0; Body = "" } }
+    if ($_.Exception.Response) { $resp = $_.Exception.Response } else { return [pscustomobject]@{ Status = 0; Body = ""; ETag = "" } }
   }
   try {
     [int]$code = [int]$resp.StatusCode
-    $body = ""
+    $etag = ""
+    try { $etag = [string]$resp.Headers["ETag"] } catch { }
+    # 注意：局部变量**不能**叫 $body —— 它与参数 [byte[]]$Body 是同一个变量
+    # （PowerShell 变量名不区分大小写），赋字符串会被强制转成 byte[]，
+    # 最后 Body 变成空数组，`-notmatch` 返回数组而不是布尔值。
+    $respText = ""
     try {
       $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
-      $body = $reader.ReadToEnd()
+      $respText = $reader.ReadToEnd()
       $reader.Dispose()
     } catch { }
-    return [pscustomobject]@{ Status = $code; Body = $body }
+    return [pscustomobject]@{ Status = $code; Body = $respText; ETag = $etag }
   } finally {
     try { $resp.Close() } catch { }
   }
 }
 
-$davProbe = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers @{ Depth = "0" }
-if ($davProbe.Status -eq 207 -or $davProbe.Status -eq 401) {
-  Note "检测到 WebDAV 已启用，改验证安全边界"
-  # 只带 Cookie（无 Basic）必须 401：否则任意网页都能借登录态发起 DAV 请求，
-  # 等于一个绕过 CSRF 的后门（DAV 请求不带 X-Requested-With，走不到 csrfGuard）。
-  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/dav/"; Method = "PROPFIND"; Headers = @{ Depth = "0" }; WebSession = $session }
+function Get-DavBasic([string]$Name, [string]$Pass) {
+  return "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Name + ":" + $Pass)))
+}
+
+# 记下原始配置，跑完原样还原（本段会开关 WebDAV、还会临时改挂载路径）
+$origCfg = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/config"; WebSession = $session }
+$origDavEnabled = $false
+$origDavPath = "/dav"
+try {
+  $origDavEnabled = [bool](($origCfg.Content | ConvertFrom-Json).webdavEnabled)
+  $origDavPath = [string](($origCfg.Content | ConvertFrom-Json).webdavPath)
+} catch { }
+
+function Set-DavConfig([hashtable]$Body) {
+  return Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes $Body)
+  }
+}
+
+$davQuery = $scratch + "/dav-probe.txt"
+$davDirRel = $scratch + "/dav-dir"
+$davMember = "_davuser-" + $suffix
+$davMemberPass = "Dav-$suffix-1"
+$davMemberId = $null
+$davUserHeader = $null
+
+try {
+  # ---- 1) 默认关闭：404 且不能是前端首页（早期会被 SPA fallback 接住）----
+  $r = Set-DavConfig @{ webdavEnabled = $false; webdavPath = "/dav" }
+  Check "webdav-config-off" ($r.Ok -and $r.Content -match '"webdavEnabled":false') "$($r.Status) $($r.Content)"
+
+  $davOff = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers @{ Depth = "0" }
+  Check "webdav-disabled-propfind" ($davOff.Status -eq 404) "未启用时 PROPFIND 应 404，实际 $($davOff.Status)"
+  Check "webdav-disabled-not-spa" ($davOff.Body -notmatch '<div id="root">') "未启用时不应返回前端首页"
+  $davGetOff = Invoke-Dav -Url "$BaseUrl/dav/" -Method "GET"
+  Check "webdav-disabled-get-404" ($davGetOff.Status -eq 404) "未启用时 GET /dav/ 应 404，实际 $($davGetOff.Status)"
+
+  # ---- 2) 打开（后台开关，实时生效、不需要重启）----
+  $r = Set-DavConfig @{ webdavEnabled = $true }
+  Check "webdav-config-on" ($r.Ok -and $r.Content -match '"webdavEnabled":true') "$($r.Status) $($r.Content)"
+
+  $opt = Invoke-Dav -Url "$BaseUrl/dav/" -Method "OPTIONS"
+  Check "webdav-options" ($opt.Status -eq 200) "OPTIONS 应 200，实际 $($opt.Status)"
+
+  # 建一个临时成员：DAV 只接受成员账号（不接受超管）
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/members"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ users = @(@{ username = $davMember; password = $davMemberPass }) })
+  }
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/members"; WebSession = $session }
+  try {
+    $davMemberId = ($r.Content | ConvertFrom-Json).members |
+      Where-Object { $_.username -eq $davMember } |
+      Select-Object -First 1 -ExpandProperty id
+  } catch { }
+  Check "webdav-member-created" ([bool]$davMemberId) "未创建出临时成员 $davMember"
+  $davUserHeader = @{ Authorization = (Get-DavBasic $davMember $davMemberPass) }
+
+  # ---- 3) 只认 Basic，绝不认 Cookie ----
+  # 直接把会话 Cookie 塞进 DAV 请求：必须 401。否则任意网页都能借登录态发起 DAV
+  # 请求，等于一个绕过 CSRF 的后门（DAV 不带 X-Requested-With，走不到 csrfGuard）。
+  $davCookie = $session.Cookies.GetCookies([uri]$BaseUrl)["zs_token"]
+  $cookieHeader = "zs_token=" + $davCookie.Value
+  $r = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers @{ Depth = "0"; Cookie = $cookieHeader }
   Check "webdav-cookie-rejected" ($r.Status -eq 401) "仅带 Cookie 的 DAV 请求必须 401，实际 $($r.Status)"
-  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/dav/"; Method = "OPTIONS" }
-  Check "webdav-options" ($r.Status -eq 200 -and ([string]$r.Headers["DAV"]) -match "1") "OPTIONS 应 200 且公告 DAV: 1"
-} else {
-  # 未启用时必须 404 且**不能**是前端首页 —— 早期 /dav 会被 SPA fallback 接住返回首页，
-  # 用户把地址填进客户端后拿到网页，非常难排查。
-  Check "webdav-disabled-propfind" ($davProbe.Status -eq 404) "未启用时 PROPFIND 应 404，实际 $($davProbe.Status)"
-  Check "webdav-disabled-not-spa" ($davProbe.Body -notmatch '<div id="root">') "未启用时不应返回前端首页"
-  # GET 也顺带验一次（这条以前用 Invoke-Api，能正常拿到状态码）
-  $davGet = Invoke-Dav -Url "$BaseUrl/dav/" -Method "GET"
-  Check "webdav-disabled-get-404" ($davGet.Status -eq 404) "未启用时 GET /dav/ 应 404，实际 $($davGet.Status)"
+
+  # ---- 4) 超管账号被拒（密码不该被客户端反复发送）----
+  $superHeader = @{ Authorization = (Get-DavBasic $User $Password); Depth = "0" }
+  $r = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers $superHeader
+  Check "webdav-superadmin-rejected" ($r.Status -eq 403) "超管 Basic 应 403，实际 $($r.Status)"
+
+  # ---- 5) 成员 Basic：PROPFIND 正常 ----
+  $davHeaders = @{ Authorization = $davUserHeader.Authorization; Depth = "0" }
+  $r = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers $davHeaders
+  Check "webdav-propfind-member" ($r.Status -eq 207 -and $r.Body -match "multistatus") "期望 207 + multistatus，实际 $($r.Status)"
+
+  # Depth: infinity 会扫描整棵树 → 明确拒绝
+  $r = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers @{ Authorization = $davUserHeader.Authorization; Depth = "infinity" }
+  Check "webdav-depth-infinity-rejected" ($r.Status -eq 403) "期望 403，实际 $($r.Status)"
+
+  # ---- 6) 写：PUT 新建 → 201；再 PUT 覆盖 → 204 ----
+  $davPut = @{ Authorization = $davUserHeader.Authorization }
+  $bytes1 = [Text.Encoding]::UTF8.GetBytes("hello webdav v2")
+  $r = Invoke-Dav -Url ("$BaseUrl/dav/" + $davQuery) -Method "PUT" -Headers $davPut -Body $bytes1 -ContentType "text/plain"
+  Check "webdav-put-create" ($r.Status -eq 201) "期望 201，实际 $($r.Status) $($r.Body)"
+  $bytes2 = [Text.Encoding]::UTF8.GetBytes("hello webdav v2 (updated)")
+  $r = Invoke-Dav -Url ("$BaseUrl/dav/" + $davQuery) -Method "PUT" -Headers $davPut -Body $bytes2 -ContentType "text/plain"
+  Check "webdav-put-overwrite" ($r.Status -eq 204) "期望 204，实际 $($r.Status)"
+
+  # ---- 7) 读：ETag / If-None-Match 304 / Range 206 ----
+  $r = Invoke-Dav -Url ("$BaseUrl/dav/" + $davQuery) -Method "GET" -Headers $davPut
+  Check "webdav-get" ($r.Status -eq 200 -and $r.Body -match "updated") "期望 200 + 新内容，实际 $($r.Status)"
+  $etag = $r.ETag
+  Check "webdav-get-etag" ([bool]$etag) "GET 应返回 ETag"
+  if ($etag) {
+    $r2 = Invoke-Dav -Url ("$BaseUrl/dav/" + $davQuery) -Method "GET" -Headers @{ Authorization = $davUserHeader.Authorization; "If-None-Match" = $etag }
+    Check "webdav-if-none-match-304" ($r2.Status -eq 304) "期望 304，实际 $($r2.Status)"
+  }
+  $r3 = Invoke-Dav -Url ("$BaseUrl/dav/" + $davQuery) -Method "GET" -Headers $davPut -Range "bytes=0-4"
+  Check "webdav-range-206" ($r3.Status -eq 206 -and ([string]$r3.Body).Length -eq 5) "期望 206 + 5 字节，实际 $($r3.Status) len=$(([string]$r3.Body).Length)"
+
+  # ---- 8) MKCOL：带请求体必须 415；正常建目录 201 ----
+  $r = Invoke-Dav -Url ("$BaseUrl/dav/" + $davDirRel) -Method "MKCOL" -Headers $davPut -Body ([Text.Encoding]::UTF8.GetBytes("<x/>")) -ContentType "application/xml"
+  Check "webdav-mkcol-body-415" ($r.Status -eq 415) "期望 415，实际 $($r.Status)"
+  $r = Invoke-Dav -Url ("$BaseUrl/dav/" + $davDirRel) -Method "MKCOL" -Headers $davPut
+  Check "webdav-mkcol" ($r.Status -eq 201) "期望 201，实际 $($r.Status)"
+
+  # ---- 9) MOVE 的 Destination 不能指向别的主机 ----
+  $r = Invoke-Dav -Url ("$BaseUrl/dav/" + $davQuery) -Method "MOVE" -Headers @{
+    Authorization = $davUserHeader.Authorization
+    Destination = "http://evil.example/dav/x.txt"
+    Overwrite = "T"
+  }
+  Check "webdav-destination-host-mismatch" ($r.Status -eq 502) "期望 502，实际 $($r.Status)"
+
+  # ---- 10) 挂载路径可改，且实时生效 ----
+  $r = Set-DavConfig @{ webdavPath = "/davcheck" }
+  Check "webdav-path-saved" ($r.Ok -and $r.Content -match '"webdavPath":"/davcheck"') "$($r.Status) $($r.Content)"
+  $newPath = Invoke-Dav -Url "$BaseUrl/davcheck/" -Method "PROPFIND" -Headers $davHeaders
+  Check "webdav-new-path-works" ($newPath.Status -eq 207) "改路径后新地址应 207，实际 $($newPath.Status)"
+  $oldPath = Invoke-Dav -Url "$BaseUrl/dav/" -Method "PROPFIND" -Headers $davHeaders
+  Check "webdav-old-path-404" ($oldPath.Status -eq 404) "改路径后旧地址应 404，实际 $($oldPath.Status)"
+  $r = Set-DavConfig @{ webdavPath = "/dav" }
+  Check "webdav-path-restored" ($r.Ok) "$($r.Status)"
+
+  # ---- 11) 非法挂载路径被拒 ----
+  $r = Set-DavConfig @{ webdavPath = "/api/webdav" }
+  Check "webdav-invalid-path-400" ($r.Status -eq 400) "占用 /api 前缀应 400，实际 $($r.Status)"
+} finally {
+  # 还原现场：关掉（或恢复原值）、删掉临时成员与探测文件
+  try {
+    $restore = @{ webdavEnabled = $origDavEnabled; webdavPath = $origDavPath }
+    $null = Set-DavConfig $restore
+  } catch { }
+  if ($davMemberId) {
+    try {
+      $null = Invoke-Api -Parameters @{
+        Uri = "$BaseUrl/api/admin/members/batch"; Method = "POST"; Headers = $jsonHeaders
+        ContentType = $jsonType; WebSession = $session
+        Body = (JsonBytes @{ action = "delete"; ids = @($davMemberId) })
+      }
+    } catch { }
+  }
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/fs/delete"; Method = "POST"; Headers = $jsonHeaders
+      ContentType = $jsonType; WebSession = $session
+      Body = (JsonBytes @{ paths = @($davDirRel, $davQuery) })
+    }
+  } catch { }
 }
 
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })

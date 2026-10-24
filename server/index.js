@@ -89,19 +89,17 @@ app.use((req, _res, next) => {
 // 请求指标采集（不阻塞请求，异常一律吞掉）
 app.use(metricsMiddleware)
 
-// ===== WebDAV（实验性，默认关闭；只能在 .env 里用 WEBDAV=1 打开）=====
-// 位置很关键，两个约束同时成立：
+// ===== WebDAV（v2.0 起为正式功能；开关与挂载点在后台「设置 → 公网 → WebDAV」，实时生效）=====
+// 位置很关键，三个约束同时成立：
 //   1. 必须挂在 body parser **之前**。WebDAV 的 PUT 是原始请求体，而 body-parser
 //      对 PUT 同样生效：一旦被 express.json() 读完，req 流就到底了，DAV 的
 //      `req.pipe(ws)` 只会写出 0 字节并以 204 成功返回 —— 用户看到"保存成功"，
 //      文件却被清空（静默数据丢失）。
 //   2. 必须挂在静态托管与 SPA fallback **之前**，否则 /dav/ 会被 fallback 吞掉、
 //      返回前端首页（浏览器里表现为"打开 /dav/ 看到网盘界面"）。
-// 未启用时完全不挂载，/dav/ 会正常 404。
-const webdav = createWebdavRouter()
-if (webdav) {
-  app.use(env.webdavPath, webdav)
-}
+//   3. 中间件本身负责"是否命中挂载点"与"是否启用"的判断（挂载点可在后台改），
+//      所以这里**无条件挂载**；未启用时它自己回 404，不会落到 fallback。
+app.use(createWebdavRouter())
 
 app.use(attachAuth)
 app.use(attachContext)
@@ -115,7 +113,7 @@ app.use("/api/fs/save-file", express.json({ limit: SAVE_FILE_MAX_BYTES }))
 app.use(express.json({ limit: "1mb" }))
 
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "ZeroShadow", version: "1.2.4" })
+  res.json({ name: "ZeroShadow", version: "2.0.0-beta" })
 })
 
 app.use("/api/auth", authRoutes)
@@ -185,23 +183,10 @@ if (fs.existsSync(WEB_DIST)) {
       },
     })
   )
-  // WebDAV 未启用时，把挂载路径显式 404 掉。
-  // 必须放在 SPA fallback **之前**：那个 app.get("*") 会接住一切 GET，
-  // 于是 /dav、/dav/ 会返回前端首页 —— 用户把 /dav 填进客户端后拿到的是
-  // 网页而不是协议错误，非常难排查（PROPFIND 之类走不到 GET 路由，所以
-  // 之前表现为"GET 拿到网页、其他方法 404"这种自相矛盾的现象）。
-  if (!env.webdavEnabled) {
-    const davPrefix = env.webdavPath
-    app.use((req, res, next) => {
-      if (req.path !== davPrefix && !req.path.startsWith(davPrefix + "/")) return next()
-      res.setHeader("Allow", "OPTIONS")
-      res.status(404).json({
-        error:
-          `WebDAV 未启用（这是实验性功能，默认关闭）。如需使用，请在 .env 中设置 WEBDAV=1 后重启服务；` +
-          `启用后挂载地址为 ${davPrefix}/`,
-      })
-    })
-  }
+  // 说明：WebDAV 的"未启用时 404"已经由前面的 createWebdavRouter() 中间件处理
+  // （它挂在 body parser 之前，未启用时会在命中挂载点时直接回 404 JSON），
+  // 因此这里**不再需要**一段静态的 404 兜底 —— 也就不会出现"改了后台开关但仍
+  // 旧行为"的两套逻辑。
 
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next()

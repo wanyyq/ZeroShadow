@@ -1007,6 +1007,118 @@ function SecuritySection() {
 }
 
 /* ==================== 公网 ==================== */
+/**
+ * WebDAV 挂载（v2.0 起为正式功能）。
+ *
+ * 放在「公网」页而不是单开一个标签页：它与 SSH 隧道回答的是同一个问题
+ * ——"别人怎么访问这台机器上的文件"。开关默认关闭，与项目"默认收紧"一致。
+ */
+function WebdavSection() {
+  const t = useT()
+  const [enabled, setEnabled] = React.useState(false)
+  const [path, setPath] = React.useState("/dav")
+  const [draft, setDraft] = React.useState("/dav")
+  const [busy, setBusy] = React.useState(false)
+  const [loaded, setLoaded] = React.useState(false)
+
+  const load = React.useCallback(() => {
+    api.get<AdminConfig>("/admin/config")
+      .then((c) => {
+        setEnabled(!!c.webdavEnabled)
+        setPath(String(c.webdavPath || "/dav"))
+        setDraft(String(c.webdavPath || "/dav"))
+        setLoaded(true)
+      })
+      .catch((e) => toast.error((e as Error).message))
+  }, [])
+  React.useEffect(() => { load() }, [load])
+
+  const patch = async (body: Record<string, unknown>) => {
+    setBusy(true)
+    try {
+      const next = await api.patch<AdminConfig>("/admin/config", body)
+      setEnabled(!!next.webdavEnabled)
+      setPath(String(next.webdavPath || "/dav"))
+      setDraft(String(next.webdavPath || "/dav"))
+      toast.success(t("ui.settings.webdav.saved"))
+    } catch (e) {
+      toast.error((e as Error).message)
+      load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 挂载地址按当前访问地址拼：用户从内网打开就是内网地址，从隧道打开就是公网地址，
+  // 这与"同一个服务可能既被内网访问、又经隧道访问"的现实一致。
+  const mountUrl = React.useMemo(() => {
+    const base = typeof window === "undefined" ? "" : window.location.origin
+    return `${base}${path.replace(/\/+$/, "")}/`
+  }, [path])
+
+  if (!loaded) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
+
+  return (
+    <div className="edge-highlight mt-5 rounded-xl border border-border bg-card p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">{t("ui.settings.webdav.title")}</h3>
+        <Badge variant={enabled ? "default" : "secondary"}>
+          {enabled ? t("ui.settings.webdav.on") : t("ui.settings.webdav.off")}
+        </Badge>
+      </div>
+      <p className="mb-4 text-xs text-muted-foreground">{t("ui.settings.webdav.desc")}</p>
+
+      <div className="grid gap-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm">{t("ui.settings.webdav.enable_label")}</span>
+          <Switch checked={enabled} disabled={busy} onCheckedChange={(v) => patch({ webdavEnabled: !!v })} />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="webdav-path">{t("ui.settings.webdav.path_label")}</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id="webdav-path"
+              className="h-8 w-44 font-mono text-xs"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="/dav"
+            />
+            <Button size="sm" variant="outline" disabled={busy || draft === path} onClick={() => patch({ webdavPath: draft })}>
+              {t("ui.common.save")}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("ui.settings.webdav.path_hint")}</p>
+        </div>
+
+        <div className="grid gap-2">
+          <Label>{t("ui.settings.webdav.mount_url")}</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input readOnly value={mountUrl} className="h-8 min-w-0 flex-1 font-mono text-xs" onFocus={(e) => e.target.select()} />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard?.writeText(mountUrl).then(
+                  () => toast.success(t("ui.settings.webdav.copied")),
+                  () => toast.error(t("ui.common.copy_failed"))
+                )
+              }}
+            >
+              <Icon name="clipboard-copy" /> {t("ui.common.copy")}
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+          <p className="mb-1 font-medium text-foreground">{t("ui.settings.webdav.warn_title")}</p>
+          <p>{t("ui.settings.webdav.warn_body")}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TunnelSection() {
   const t = useT()
   const [config, setConfig] = React.useState<{ enabled: boolean; mode: string; customHost: string } | null>(null)
@@ -1063,7 +1175,8 @@ function TunnelSection() {
   if (!config) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid gap-5">
+      <div className="grid gap-5 lg:grid-cols-2">
       {/* 配置区：行内 */}
       <div className="edge-highlight rounded-xl border border-border bg-card p-4">
         <h3 className="mb-3 text-sm font-medium">{t("ui.settings.tunnel.title")}</h3>
@@ -1112,6 +1225,10 @@ function TunnelSection() {
           <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">{status?.output?.length ? status.output.join("\n") : t("ui.settings.tunnel.no_output")}</pre>
         </ScrollArea>
       </div>
+      </div>
+
+      {/* WebDAV 挂载（正式功能，默认关闭）：与隧道同属"别人怎么访问这台机器" */}
+      <WebdavSection />
     </div>
   )
 }

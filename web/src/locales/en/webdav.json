@@ -1,0 +1,14 @@
+{
+  "ui.settings.webdav.title": "WebDAV mount",
+  "ui.settings.webdav.desc": "Mount the drive as a network disk in Windows Explorer / macOS Finder / RaiDrive / rclone.",
+  "ui.settings.webdav.on": "Enabled",
+  "ui.settings.webdav.off": "Disabled",
+  "ui.settings.webdav.enable_label": "Enable WebDAV",
+  "ui.settings.webdav.path_label": "Mount path",
+  "ui.settings.webdav.path_hint": "Must start with /; /api and /ping are reserved. Changes take effect immediately, so update your client too.",
+  "ui.settings.webdav.mount_url": "Mount URL",
+  "ui.settings.webdav.copied": "Mount URL copied",
+  "ui.settings.webdav.warn_title": "Use it over HTTPS or on a fully trusted network only",
+  "ui.settings.webdav.warn_body": "WebDAV clients usually support only Basic auth, so the username and password are resent with every request — over plain HTTP that means repeated cleartext credentials. Superadmin accounts are rejected; connect with a team member account.",
+  "ui.settings.webdav.saved": "Saved"
+}

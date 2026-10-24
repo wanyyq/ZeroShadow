@@ -1,0 +1,12 @@
+{
+  "api.admin.webdav_path_invalid": "webdavPath は安全なマウントパス（例: /dav）である必要があります",
+  "api.webdav.body_too_large": "リクエスト本文が大きすぎます",
+  "api.webdav.depth_infinity_denied": "Depth: infinity は未対応です（ディレクトリツリー全体を走査します）。Depth: 0 または 1 を使用してください",
+  "api.webdav.destination_host_mismatch": "宛先がこのサイトのものではありません",
+  "api.webdav.mkcol_body_unsupported": "MKCOL はリクエスト本文を受け付けません",
+  "api.webdav.put_on_directory": "対象はディレクトリのため PUT で上書きできません",
+  "api.webdav.rate_limited": "WebDAV リクエストが多すぎます。しばらくしてから再試行してください",
+  "api.webdav.superadmin_denied": "WebDAV ではスーパー管理者アカウントを使用できません。チームメンバーアカウントを使用してください",
+  "api.webdav.too_many_children": "ディレクトリ内の項目が多すぎます（{limit} 件超）。Web 画面で閲覧してください",
+  "api.webdav.too_many_locks": "ロックが多すぎます。先に解除してください"
+}

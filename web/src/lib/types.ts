@@ -316,6 +316,10 @@ export interface AdminConfig {
   shareEnabled: boolean
   /** 允许匿名访问分享链接；false 表示必须先登录网盘账号 */
   sharePublicAccess: boolean
+  /** WebDAV 是否启用（v2.0 起为正式功能，默认关闭） */
+  webdavEnabled: boolean
+  /** WebDAV 挂载路径（默认 /dav），改完保存即生效 */
+  webdavPath: string
   defaultVisibility: { whitelist: string[]; blacklist: string[] }
   memberPerms: {
     fileWrite: boolean
@@ -389,6 +393,8 @@ export interface ServerStatus {
   storage: { files: number; dirs: number; bytes: number; partial: boolean; root: string }
   disk: { free: number; total: number } | null
   tunnel: TunnelStatus
+  /** WebDAV 运行态（v2.0）：开关、挂载点与当前锁数量 */
+  webdav?: { enabled: boolean; path: string; experimental: boolean; lockCount: number; mountPath: string }
 }
 
 export interface LogRow {

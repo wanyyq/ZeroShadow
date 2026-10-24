@@ -503,7 +503,7 @@ Linux 归档里的 `ZeroShadow` 会带上可执行位（ZIP 的 external attribu
 ### 发布包内容
 
 ```
-ZeroShadow-1.2.4-windows-x64.zip
+ZeroShadow-2.0.0-beta-windows-x64.zip
 ├── ZeroShadow.exe   /  ZeroShadow    后端可执行文件
 ├── web/dist/                         前端静态文件
 ├── .env.example                      配置模板（首次运行自动生成 .env）

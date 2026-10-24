@@ -1,0 +1,14 @@
+{
+  "ui.settings.webdav.title": "Montage WebDAV",
+  "ui.settings.webdav.desc": "Montez le disque comme un lecteur réseau dans l'Explorateur Windows / le Finder macOS / RaiDrive / rclone.",
+  "ui.settings.webdav.on": "Activé",
+  "ui.settings.webdav.off": "Désactivé",
+  "ui.settings.webdav.enable_label": "Activer WebDAV",
+  "ui.settings.webdav.path_label": "Chemin de montage",
+  "ui.settings.webdav.path_hint": "Doit commencer par / ; /api et /ping sont réservés. Les changements s'appliquent immédiatement : mettez aussi à jour le client.",
+  "ui.settings.webdav.mount_url": "URL de montage",
+  "ui.settings.webdav.copied": "URL de montage copiée",
+  "ui.settings.webdav.warn_title": "À utiliser uniquement en HTTPS ou sur un réseau totalement fiable",
+  "ui.settings.webdav.warn_body": "Les clients WebDAV ne gèrent généralement que l'authentification Basic : l'identifiant et le mot de passe sont renvoyés à chaque requête — en HTTP, cela revient à répéter des identifiants en clair. Les comptes super-administrateur sont refusés ; connectez-vous avec un compte membre de l'équipe.",
+  "ui.settings.webdav.saved": "Enregistré"
+}

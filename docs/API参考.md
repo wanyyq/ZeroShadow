@@ -145,7 +145,7 @@ X-ZS-Group: <小组 id>
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "1.2.4" }
+{ "name": "ZeroShadow", "version": "2.0.0-beta" }
 ```
 
 > `version` 与根 `package.json` 保持一致。注意它是**写死**在代码里的，并没有从 `package.json` 读取：
@@ -1100,9 +1100,13 @@ X-ZS-Group: <小组 id>
   - 布尔：`rateLimitEnabled`、`softDirAllowCopyOut`、`jobStatusOwnerOnly`、`downloadUrlAllowPrivate`、
     `csrfOriginCheck`、`avatarEnabled`、`todoEnabled`、`backupEnabled`、`requestMetricsEnabled`、
     **`guestWrite`**（访客写权限总开关，默认 `false`）、
+    **`webdavEnabled`**（WebDAV 总开关，默认 `false`，实时生效）、
     **`shareEnabled`**、**`sharePublicAccess`**（分享的两个开关，见 [§8](#8-分享链接)）
   - 字符串：**`defaultLang`**（站点默认界面语言，必须是**当前可用**的语言代码，否则 400
-    `defaultLang 必须是当前可用的语言代码`；可用清单见 `GET /api/i18n`）
+    `defaultLang 必须是当前可用的语言代码`；可用清单见 `GET /api/i18n`）、
+    **`webdavPath`**（WebDAV 挂载路径，如 `/dav`；必须是安全路径 —— 以 `/` 开头、
+    不能占用 `/api`、`/ping`、`/s`、`/assets`、`/resources`、`/robustness` 与前端路由，
+    否则 400 `webdavPath 必须是安全的挂载路径（如 /dav）`。改完**立即生效**）
   - 对象：`memberPerms`、`guestPerms`（只覆盖传入的键，值统一按布尔处理）
   - 对象：`defaultVisibility`——传 `{ "whitelist": [...], "blacklist": [...] }` 整体替换
     （数组会按可见性规则清洗：去首尾 `/`、`\`→`/`、丢弃空串 / `.` / `..` / 含 `..` 的段，最多 200 条）
@@ -1412,12 +1416,16 @@ X-ZS-Group: <小组 id>
   "memory": { "rss": 0, "heapUsed": 0, "systemFree": 0, "systemTotal": 0 },
   "storage": { "files": 0, "dirs": 0, "bytes": 0, "partial": false, "root": "D:\\...\\data\\files" },
   "disk": { "free": 0, "total": 0 },
-  "tunnel": { "running": false, "url": null, "output": [], "startedAt": null, "restarts": 0, "lastExit": null }
+  "tunnel": { "running": false, "url": null, "output": [], "startedAt": null, "restarts": 0, "lastExit": null },
+  "webdav": { "enabled": false, "path": "/dav", "experimental": false, "lockCount": 0, "mountPath": "/dav/" }
 }
 ```
 
 - `storage` 有 30 秒缓存；`disk` 取不到时是 `null`；
-- `trustProxy` 的类型取决于配置：`false`、数字、字符串或字符串数组。
+- `trustProxy` 的类型取决于配置：`false`、数字、字符串或字符串数组；
+- `webdav`（v2.0 新增）是 WebDAV 的运行态：`enabled` 是当前开关（`data/config.json` 的
+  `webdavEnabled`），`mountPath` 可直接拿去拼挂载地址，`lockCount` 是内存里还活着的锁数量。
+  前端「设置 → 公网」用它渲染挂载地址，不必另起轮询接口。
 
 ### `GET /api/admin/tunnel`
 
@@ -1812,8 +1820,8 @@ while True:
 | `/api/groups` | 组长自助：本组成员与可见范围 | 已登录，且受组长能力约束 |
 | `/api/admin` | 配置、成员、小组、日志（含导出）、指标、备份、**回收站**、**全站分享**、状态、隧道 | **仅超级管理员** |
 | `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
-| `/dav`（可配） | **WebDAV（实验性，默认关闭）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话** | 成员账号（Basic） |
+| `/dav`（路径可配） | **WebDAV（v2.0 正式功能，默认关闭）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话**；开关与路径见 [§7 PATCH /api/admin/config](#patch-apiadminconfig) | 成员账号（Basic），超管 403 |
 | `/s/<token>` | **分享页**（前端路由，非接口）。不是接口前缀，直接由 SPA 渲染 | 由 `sharePublicAccess` 决定 |
-| 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 未启用时 `/dav*` 返回 404 并提示如何开启，不会被 SPA 接住 | — |
+| 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 命中挂载点但未启用时返回 404 JSON 并提示如何开启，不会被 SPA 接住 | — |
 
 <p align="right"><a href="开发者指南.md">← 开发者指南</a> · <a href="README.md">文档中心 →</a></p>

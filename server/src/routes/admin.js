@@ -25,6 +25,7 @@ import { emptyTrash, getTrash, listTrash, purgeTrash, restoreTrash, trashAvailab
 import { getMetrics, readMetricsHistory } from "../metrics.js"
 import { reloadShares, removeSharesByOwner, renameShareOwner } from "../shares.js"
 import { availableLangs } from "../i18n.js"
+import { normalizeDavPath, webdavStatus } from "../webdav.js"
 
 const router = Router()
 
@@ -71,6 +72,8 @@ const BOOLEAN_KEYS = [
   // 访客写权限总开关（默认关）：关掉时 guestPerms 里的 editFiles / compressZip /
   // extractZip 一律不生效，防止"顺手勾一个子项"就给了匿名访客写盘能力
   "guestWrite",
+  // v2.0：WebDAV 转为正式功能，开关进后台（默认仍是关）
+  "webdavEnabled",
 ]
 
 function cleanVisibilityPathList(value) {
@@ -131,6 +134,19 @@ router.patch("/config", async (req, res, next) => {
         blacklist: cleanVisibilityPathList(body.defaultVisibility.blacklist),
       }
     }
+    if (body.webdavPath !== undefined) {
+      // 挂载点由后台可改，但必须是一个"安全的挂载前缀"：以 / 开头、不含 ..
+      // 与查询串、不占用 /api 与 /ping 这类既有前缀（否则会和 API 打架）。
+      // 具体规范化复用 webdav.js 的 normalizeDavPath，保证前后端判断一致。
+      const raw = String(body.webdavPath || "").trim()
+      const normalized = normalizeDavPath(raw)
+      if (!raw || normalized !== raw.replace(/\/+$/, "")) {
+        throw httpError(400, "webdavPath 必须是安全的挂载路径（如 /dav）", {
+          errorKey: "api.admin.webdav_path_invalid",
+        })
+      }
+      updates.webdavPath = normalized
+    }
     for (const group of ["memberPerms", "guestPerms"]) {
       if (body[group] !== undefined) {
         if (typeof body[group] !== "object" || body[group] === null) {
@@ -150,6 +166,7 @@ router.patch("/config", async (req, res, next) => {
         if (updates[key] !== undefined) draft[key] = updates[key]
       }
       if (updates.defaultVisibility) draft.defaultVisibility = updates.defaultVisibility
+      if (updates.webdavPath !== undefined) draft.webdavPath = updates.webdavPath
       if (updates.memberPerms) Object.assign(draft.memberPerms, updates.memberPerms)
       if (updates.guestPerms) Object.assign(draft.guestPerms, updates.guestPerms)
     })
@@ -443,7 +460,10 @@ router.post("/backups/restore", async (req, res, next) => {
 // ================================================================ 状态/隧道 =
 router.get("/status", async (_req, res, next) => {
   try {
-    res.json(await getStatus())
+    const status = await getStatus()
+    // WebDAV 的运行态（开关、挂载点、锁数量）与服务器状态一起返回：
+    // 前端「设置 → 公网」用它渲染挂载地址，不必另起一个轮询接口。
+    res.json({ ...status, webdav: webdavStatus() })
   } catch (err) {
     next(err)
   }

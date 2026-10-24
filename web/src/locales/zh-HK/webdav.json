@@ -1,0 +1,14 @@
+{
+  "ui.settings.webdav.title": "WebDAV 掛載",
+  "ui.settings.webdav.desc": "把網盤掛載成 Windows 資源管理器 / macOS Finder / RaiDrive / rclone 裡的網絡磁碟。",
+  "ui.settings.webdav.on": "已啟用",
+  "ui.settings.webdav.off": "已關閉",
+  "ui.settings.webdav.enable_label": "啟用 WebDAV",
+  "ui.settings.webdav.path_label": "掛載路徑",
+  "ui.settings.webdav.path_hint": "以 / 開頭；不能佔用 /api、/ping 這類既有前綴。儲存後立即生效，客戶端要同步改地址。",
+  "ui.settings.webdav.mount_url": "掛載地址",
+  "ui.settings.webdav.copied": "已複製掛載地址",
+  "ui.settings.webdav.warn_title": "只建議在 HTTPS 或完全可信的內網使用",
+  "ui.settings.webdav.warn_body": "WebDAV 客戶端普遍只支援 Basic 認證，用戶名與密碼會在每一個請求裡重複發送，HTTP 下等於反覆明文傳輸。它也不接受超級管理員賬號，請使用團隊成員賬號連接。",
+  "ui.settings.webdav.saved": "已保存"
+}
