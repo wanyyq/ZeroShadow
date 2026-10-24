@@ -53,6 +53,58 @@ export function getErrorMessage(err: unknown, fallback = translate("ui.common.op
 
 type Query = Record<string, string | number | undefined>
 
+/* ======================================================= 弱网 / 抖动参数 == */
+
+/**
+ * 内网穿透（pinggy / serveo / Cloudflare Tunnel 之类）常见的不是"连不上"，
+ * 而是**偶发丢包、RTT 抖动、首包很慢**。这里做三件事：
+ *
+ *   1. 幂等请求（GET/HEAD）自动重试：网络错误、超时、502/503/504 各重试一次
+ *      为上限（共 2 次重试），退避 400ms → 1200ms 并带 ±20% 抖动，
+ *      避免整屋子客户端同时重试把链路再打满；
+ *   2. 每个请求带超时（AbortController），默认 20 秒 —— 慢链路不该被浏览器
+ *      默认的"无限等待"拖住，也不该像某些实现那样 5 秒就误杀；
+ *   3. 离线/网络错误统一走 `setOnNetworkError` 回调，由 App 层弹一次提示，
+ *      api 层不依赖任何 UI。
+ */
+const REQUEST_TIMEOUT_MS = 20000
+const RETRY_DELAYS_MS = [400, 1200]
+const RETRYABLE_STATUS = new Set([502, 503, 504])
+/** 只重试幂等方法：POST 重试可能造成重复创建/重复上传 */
+const RETRYABLE_METHODS = new Set(["GET", "HEAD"])
+
+let onNetworkError: (() => void) | null = null
+
+/** 注册"网络异常"回调（App 层用来提示一次，见 state/auth 里的用法） */
+export function setOnNetworkError(cb: (() => void) | null) {
+  onNetworkError = cb
+}
+
+function isOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 带抖动的退避：同一时刻大量客户端不会踩在同一个重试点上 */
+function backoffDelay(attempt: number) {
+  const base = RETRY_DELAYS_MS[attempt] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]
+  return Math.round(base * (0.8 + Math.random() * 0.4))
+}
+
+/** 请求超时：用 AbortController 而不是 Promise.race，确保底层连接真的被掐断 */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // 顶栏所选小组上下文：非默认时随所有请求发送，服务端据此收窄权限与可见范围。
 let groupContext = "default"
 
@@ -84,55 +136,86 @@ async function request<T>(
   path: string,
   options: { query?: Query; body?: unknown } = {}
 ): Promise<T> {
-  let res: Response
-  try {
-    res = await fetch(buildUrl(path, options.query), {
-      method,
-      credentials: "same-origin",
-      headers: {
-        "X-Requested-With": "XMLHttpRequest",
-        ...contextHeaders(),
-        ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-    })
-  } catch {
-    throw new ApiError(0, translate("ui.common.network_error"))
+  const url = buildUrl(path, options.query)
+  const init: RequestInit = {
+    method,
+    credentials: "same-origin",
+    headers: {
+      "X-Requested-With": "XMLHttpRequest",
+      ...contextHeaders(),
+      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   }
-  let data: unknown = null
-  try {
-    data = await res.json()
-  } catch {
-    /* non-json response */
+
+  const canRetry = RETRYABLE_METHODS.has(method)
+  let attempt = 0
+  // attempt 0 是首发；之后最多再试 RETRY_DELAYS_MS.length 次
+  for (;;) {
+    if (isOffline()) {
+      onNetworkError?.()
+      throw new ApiError(0, translate("ui.common.offline_error"))
+    }
+    let res: Response
+    try {
+      res = await fetchWithTimeout(url, init)
+    } catch (err) {
+      // 网络层失败（断网 / DNS / 连接被重置 / 超时 abort）：幂等请求才重试
+      const timedOut = err instanceof DOMException && err.name === "AbortError"
+      if (canRetry && attempt < RETRY_DELAYS_MS.length) {
+        await sleep(backoffDelay(attempt))
+        attempt += 1
+        continue
+      }
+      onNetworkError?.()
+      throw new ApiError(
+        0,
+        timedOut ? translate("ui.common.timeout_error") : translate("ui.common.network_error")
+      )
+    }
+
+    let data: unknown = null
+    try {
+      data = await res.json()
+    } catch {
+      /* non-json response */
+    }
+
+    if (!res.ok) {
+      // 网关类错误（隧道/反代常见）对幂等请求重试一次，别把 5xx 直接甩给用户
+      if (canRetry && RETRYABLE_STATUS.has(res.status) && attempt < RETRY_DELAYS_MS.length) {
+        await sleep(backoffDelay(attempt))
+        attempt += 1
+        continue
+      }
+      if (res.status === 401 || res.status === 403) {
+        onPermissionDenied?.()
+      }
+      const detail = (data && typeof data === "object" ? data : {}) as {
+        error?: string
+        errorKey?: string
+        errorParams?: Record<string, string | number>
+        code?: string
+        currentVersion?: string | null
+      }
+      /**
+       * 服务端返回的提示优先按 `errorKey` 本地化（见 server/src/http.js 的 httpError）：
+       * `error` 始终是中文原文，既做兜底也让 curl / 第三方脚本保持旧行为。
+       * 这里用 translate() 而不是 useT()：本模块不是组件，语言状态在 i18n 单例里。
+       */
+      const message = detail.errorKey
+        ? translate(detail.errorKey, detail.errorParams)
+        : detail.error
+          ? String(detail.error)
+          : translate("ui.common.request_failed", { status: res.status })
+      // 并发编辑冲突要带上服务端当前版本，前端才能提示"重新加载"
+      if (res.status === 409 && detail.code === "VERSION_CONFLICT") {
+        throw new VersionConflictError(message, detail.currentVersion ?? null)
+      }
+      throw new ApiError(res.status, message)
+    }
+    return data as T
   }
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      onPermissionDenied?.()
-    }
-    const detail = (data && typeof data === "object" ? data : {}) as {
-      error?: string
-      errorKey?: string
-      errorParams?: Record<string, string | number>
-      code?: string
-      currentVersion?: string | null
-    }
-    /**
-     * 服务端返回的提示优先按 `errorKey` 本地化（见 server/src/http.js 的 httpError）：
-     * `error` 始终是中文原文，既做兜底也让 curl / 第三方脚本保持旧行为。
-     * 这里用 translate() 而不是 useT()：本模块不是组件，语言状态在 i18n 单例里。
-     */
-    const message = detail.errorKey
-      ? translate(detail.errorKey, detail.errorParams)
-      : detail.error
-        ? String(detail.error)
-        : translate("ui.common.request_failed", { status: res.status })
-    // 并发编辑冲突要带上服务端当前版本，前端才能提示"重新加载"
-    if (res.status === 409 && detail.code === "VERSION_CONFLICT") {
-      throw new VersionConflictError(message, detail.currentVersion ?? null)
-    }
-    throw new ApiError(res.status, message)
-  }
-  return data as T
 }
 
 export const api = {

@@ -907,4 +907,159 @@ try {
   } catch { }
 }
 
+# --------------------------------------------- 15. 图片缩略图 ---------------
+Section "15. 图片缩略图（v2.0，服务端 sharp）"
+
+# 用 .NET 现画一张 64×48 的 PNG 再上传：不依赖仓库里是否存在图片文件。
+$thumbName = "缩略图测试.png"
+$thumbLocal = Join-Path ([System.IO.Path]::GetTempPath()) "zs-thumb-$suffix.png"
+$thumbUploaded = $false
+try {
+  Add-Type -AssemblyName System.Drawing
+  $bmp = New-Object System.Drawing.Bitmap 64, 48
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.Clear([System.Drawing.Color]::FromArgb(0, 120, 215))
+  $g.Dispose()
+  $bmp.Save($thumbLocal, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+
+  $tBoundary = [System.Guid]::NewGuid().ToString()
+  $tEnc = [System.Text.Encoding]::UTF8
+  $tBytes = [System.IO.File]::ReadAllBytes($thumbLocal)
+  $tPre = $tEnc.GetBytes(
+    "--$tBoundary`r`n" +
+    "Content-Disposition: form-data; name=`"files`"; filename=`"$thumbName`"`r`n" +
+    "Content-Type: image/png`r`n`r`n")
+  $tPost = $tEnc.GetBytes("`r`n--$tBoundary--`r`n")
+  $tBody = New-Object byte[] ($tPre.Length + $tBytes.Length + $tPost.Length)
+  [Array]::Copy($tPre, 0, $tBody, 0, $tPre.Length)
+  [Array]::Copy($tBytes, 0, $tBody, $tPre.Length, $tBytes.Length)
+  [Array]::Copy($tPost, 0, $tBody, $tPre.Length + $tBytes.Length, $tPost.Length)
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/fs/upload?path=" + [uri]::EscapeDataString($scratch)
+    Method = "POST"; Headers = $jsonHeaders; ContentType = "multipart/form-data; boundary=$tBoundary"
+    WebSession = $session; Body = $tBody
+  }
+  $thumbUploaded = ($r.Ok -and $r.Content -match '"ok":true')
+  Check "thumb-upload-png" $thumbUploaded "$($r.Status) $($r.Content)"
+
+  $thumbRel = "$scratch/$thumbName"
+  $thumbQuery = [uri]::EscapeDataString($thumbRel)
+
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/thumb?path=$thumbQuery&w=96"; WebSession = $session }
+  Check "thumb-image-webp" ($r.Status -eq 200 -and ([string]$r.Headers["Content-Type"]) -match "image/webp") `
+    "期望 200 image/webp，实际 $($r.Status) $([string]$r.Headers['Content-Type'])"
+  Check "thumb-cache-control" (([string]$r.Headers["Cache-Control"]) -match "max-age") "缺少 Cache-Control: $([string]$r.Headers['Cache-Control'])"
+
+  # 宽度只在白名单里就近取值，乱填不该报错（前端可能传任意值）
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/thumb?path=$thumbQuery&w=99999"; WebSession = $session }
+  Check "thumb-width-clamped" ($r.Status -eq 200) "超范围宽度应被收敛，实际 $($r.Status)"
+
+  # 非图片 → 415（网格里不会请求它，但接口不能默默生成垃圾）。
+  # 这里现建一个文本文件：section 3 上传的那个文件在后面几节里已经被删掉了。
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/fs/create-file"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ path = $scratch; name = "thumb-notimage.txt"; content = "not an image" })
+  }
+  $txtQuery = [uri]::EscapeDataString("$scratch/thumb-notimage.txt")
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/thumb?path=$txtQuery&w=96"; WebSession = $session }
+  Check "thumb-non-image-415" ($r.Status -eq 415) "文本文件应 415，实际 $($r.Status)"
+
+  # 不存在 → 404；根目录 → 400
+  $missing = [uri]::EscapeDataString("$scratch/__nope__.png")
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/thumb?path=$missing&w=96"; WebSession = $session }
+  Check "thumb-missing-404" ($r.Status -eq 404) "不存在应 404，实际 $($r.Status)"
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/thumb?path=&w=96"; WebSession = $session }
+  Check "thumb-root-400" ($r.Status -eq 400) "根目录应 400，实际 $($r.Status)"
+
+  # 访客没有 preview 时不该能拿缩略图：临时关掉 guest.preview，用无 Cookie 的会话请求
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/config"; WebSession = $session }
+  $originalGuestPreview = $true
+  try { $originalGuestPreview = [bool](($r.Content | ConvertFrom-Json).guestPerms.preview) } catch { }
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+      ContentType = $jsonType; WebSession = $session
+      Body = (JsonBytes @{ guestPerms = @{ preview = $false } })
+    }
+    $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/fs/thumb?path=$thumbQuery&w=96" }
+    Check "thumb-guest-denied-without-preview" ($r.Status -eq 401) "访客无 preview 应 401，实际 $($r.Status)"
+  } finally {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+      ContentType = $jsonType; WebSession = $session
+      Body = (JsonBytes @{ guestPerms = @{ preview = $originalGuestPreview } })
+    }
+  }
+} catch {
+  Check "thumb-section-completed" $false $_.Exception.Message
+} finally {
+  if (Test-Path $thumbLocal) { Remove-Item $thumbLocal -Force -ErrorAction SilentlyContinue }
+}
+
+# --------------------------------------------- 16. 弱网 / 缓存优化 -----------
+Section "16. 弱网优化（Service Worker / Range / 条件请求）"
+
+# 16.1 sw.js 必须由静态托管出正确的 MIME：如果它被 SPA fallback 接住返回 HTML，
+# 浏览器会以 "MIME type mismatch" 拒绝注册（而且错误信息很难懂）。
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/sw.js" }
+Check "sw-served-as-js" ($r.Status -eq 200 -and ([string]$r.Headers["Content-Type"]) -match "javascript") `
+  "sw.js 应以 javascript 返回，实际 $($r.Status) $([string]$r.Headers['Content-Type'])"
+Check "sw-no-cache" (([string]$r.Headers["Cache-Control"]) -match "no-cache") `
+  "sw.js 必须 no-cache（否则更新永远不生效），实际 $([string]$r.Headers['Cache-Control'])"
+
+# 16.2 sw.js 里的版本号必须与 package.json 一致：缓存名带版本，忘了改会导致
+# 升级后仍然命中旧缓存（"改了代码但界面没变"的经典坑）。
+$pkgVersion = ""
+try { $pkgVersion = [string]((Get-Content (Join-Path $Root "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { }
+$swSource = ""
+try { $swSource = Get-Content (Join-Path $Root "web\public\sw.js") -Raw -Encoding UTF8 } catch { }
+Check "sw-version-matches-package" ([bool]$pkgVersion -and $swSource -match [regex]::Escape('const VERSION = "' + $pkgVersion + '"')) `
+  "sw.js 的 VERSION 与 package.json($pkgVersion) 不一致"
+
+# 16.3 已删除的死资源不能再出现（269 KB 且无任何引用）。
+# 注意：未知路径会落到 SPA fallback 返回 200 HTML，所以不能只断言 404 ——
+# 真正要保证的是"不再以一个 270 KB 的 JS 文件被发出去"，以及构建产物里没有它。
+$r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/resources/tailwindcss.min.js" }
+$tlType = [string]$r.Headers["Content-Type"]
+Check "removed-tailwind-resource-not-js" ($r.Status -eq 404 -or $tlType -notmatch "javascript") `
+  "该资源已删除，不应再以 JS 返回，实际 $($r.Status) $tlType"
+Check "removed-tailwind-resource-not-built" (-not (Test-Path (Join-Path $Root "web\dist\resources\tailwindcss.min.js"))) `
+  "web/dist/resources 里仍有 tailwindcss.min.js"
+
+# 16.4 下载必须支持 Range 与条件请求：视频拖动进度、弱网重试都依赖它们
+$rangeName = "range-probe.txt"
+$rangeContent = "0123456789abcdef"
+$null = Invoke-Api -Parameters @{
+  Uri = "$BaseUrl/api/fs/create-file"; Method = "POST"; Headers = $jsonHeaders
+  ContentType = $jsonType; WebSession = $session
+  Body = (JsonBytes @{ path = $scratch; name = $rangeName; content = $rangeContent })
+}
+$rangeRel = "$scratch/$rangeName"
+$rangeUrl = "$BaseUrl/api/fs/download?path=" + [uri]::EscapeDataString($rangeRel)
+$cookieHeader = "zs_token=" + $session.Cookies.GetCookies([uri]$BaseUrl)["zs_token"].Value
+$dlHeaders = @{ Cookie = $cookieHeader; "X-Requested-With" = "XMLHttpRequest" }
+
+try {
+  $r = Invoke-Dav -Url $rangeUrl -Method "GET" -Headers $dlHeaders
+  Check "download-accept-ranges" ($r.Status -eq 200 -and $r.ETag) "期望 200 + ETag，实际 $($r.Status)"
+  if ($r.ETag) {
+    $r2 = Invoke-Dav -Url $rangeUrl -Method "GET" -Headers @{ Cookie = $cookieHeader; "X-Requested-With" = "XMLHttpRequest"; "If-None-Match" = $r.ETag }
+    Check "download-if-none-match-304" ($r2.Status -eq 304) "条件请求应 304，实际 $($r2.Status)"
+  }
+  $r3 = Invoke-Dav -Url $rangeUrl -Method "GET" -Headers $dlHeaders -Range "bytes=0-3"
+  Check "download-range-206" ($r3.Status -eq 206 -and [string]$r3.Body -eq "0123") `
+    "期望 206 + '0123'，实际 $($r3.Status) body=$([string]$r3.Body)"
+} catch {
+  Check "download-range-section" $false $_.Exception.Message
+} finally {
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/fs/delete"; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ paths = @($rangeRel) })
+  }
+}
+
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })
