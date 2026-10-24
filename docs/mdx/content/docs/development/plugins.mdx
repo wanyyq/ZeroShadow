@@ -10,7 +10,7 @@ description: manifest.json 字段、apiVersion 策略、主题令牌安全约束
 
 插件是**一个 zip 包**，里面必须有 `manifest.json`：
 
-```
+```text
 my-theme.zip
 ├── manifest.json        # 必需，唯一入口
 └── （主题插件不需要其它文件）
@@ -104,29 +104,62 @@ my-theme.zip
 
 服务端保存时**按 schema 再校验一遍**（越界 / 非枚举 / 类型不符都 400），并且只保留声明过的键。
 
+### `public`：设置项要不要下发到浏览器
+
+默认**不下发**。`GET /api/plugins/list` 匿名可访问（访客也要能预览），而设置项最自然的用途
+就是放 API key / webhook 地址——全量下发等于把管理员填的密钥公开给任何访客。
+
+需要让插件在前端读到某一项时，给该项标 `"public": true`：
+
+```json
+"settings": {
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "accent": { "type": "string", "title": "主色", "enum": ["auto", "blue"], "public": true },
+    "apiKey": { "type": "string", "title": "API Key" }
+  }
+}
+```
+
+标了才会出现在 `/api/plugins/list` 的 `settings` 与 `init.settings` 里；没标的只在服务端
+`data/plugins.json`。只下发字符串/数字/布尔标量。
+
 ## 接口
 
-```
+```text
 GET    /api/admin/plugins                    列出 + 总开关状态
 POST   /api/admin/plugins?filename=x.zip     安装（body 为 zip 原始字节，Content-Type: application/zip）
 PATCH  /api/admin/plugins/:id                { enabled?, settings? }
 POST   /api/admin/plugins/:id/theme          { active: true }
 DELETE /api/admin/plugins/:id                卸载
 GET    /api/plugins/theme                    公开：当前主题 CSS
-GET    /api/plugins/list                     公开：已启用的 fileType 插件（仅 id/name/extensions/modes/settings）
+GET    /api/plugins/list                     公开：已启用的 fileType 插件（id/name/version/kind/extensions/modes/permissions
+                                              + 仅标了 public:true 的 settings）
 GET    /api/plugins/entry/:id                插件入口 HTML（响应带 sandbox + connect-src 'none' 的 CSP）
 POST   /api/admin/plugins/:id/action         server 插件：{ action, params } → { ok, data }
 ```
+
+> 总开关 `pluginsEnabled` 关掉时，最后三条**公开**接口也一并停用：`/theme` 返回空 CSS、
+> `/list` 返回空数组、`/entry/:id` 返回 404。这样"关闭插件"才是真正的应急手段。
 
 ## 文件类型插件（沙箱 iframe）
 
 `kind: "fileType"` 负责内置渲染器不认识的格式。约束四条：`entry` 必须是**单个自包含 `.html`**、
 iframe 用 `sandbox="allow-scripts"`（无 `allow-same-origin`）、入口响应 CSP 为
-`default-src 'none'` + `connect-src 'none'`、宿主只认 `event.source === contentWindow`。
+`default-src 'none'` + `connect-src 'none'`、宿主同时校验 `event.source === contentWindow`
+**与** `event.origin === "null"`（不透明源的 origin 序列化后就是字符串 `"null"`，因此这个值
+是可用来校验的；插件把自己导航到外部站点后 origin 变成真实源，消息会被丢弃并断链）。
+
+<Callout type="warn" title="残余风险：带 fs.read 的插件只装可信的">
+CSP 没有 `navigate-to`、sandbox 也不禁止帧自我导航，所以持 `fs.read` 的插件理论上能把读到的
+内容拼进 `location.href` 带出去。宿主已把**导航之后的协议**掐断（origin 校验 + 入口文档
+再次 load 即断链），不让一次导航升级成"任意文件读取接口"，但已经读到的内容拦不住。
+</Callout>
 
 协议（`apiVersion: 1`）：
 
-```
+```text
 plugin → host   { type: "zs:ready" }
 host   → plugin { type: "zs:init", apiVersion, file, settings, canWrite, dark }
 plugin → host   { type: "zs:request", id, method, params }     // readText | readBinary | saveText | notify
@@ -138,12 +171,14 @@ plugin → host   { type: "zs:dirty", dirty: boolean }
 
 ## 服务端插件（独立子进程）
 
-先说结论：**这不是安全沙箱，是故障隔离**。子进程与主进程同一个操作系统用户，
-只装可信插件。收敛手段：环境变量白名单（不含 `JWT_SECRET`）、只转发 `actions` 里声明的动作、
+先说结论：**这不是安全沙箱，是故障隔离**。子进程与主进程同一个操作系统用户，等于
+"在服务器上以该用户身份执行任意程序"——可以直接读 `.env`（超管明文口令）与
+`data/.jwt-secret`（会话签名密钥，拿到即可伪造任意成员登录），只装可信插件。
+收敛手段：环境变量白名单（不含 `JWT_SECRET`）、只转发 `actions` 里声明的动作、
 单动作 5 秒超时（超时**杀进程**）、启动 10 秒超时、单行输出 256 KB 上限、空闲 60 秒回收、
 禁用/卸载/服务退出都会先 `shutdown` 再杀。
 
-```
+```text
 host   → plugin  {"type":"init","apiVersion":1,"settings":{}}
 plugin → host    {"type":"ready"}
 host   → plugin  {"type":"action","id":1,"action":"rebuild","params":{}}

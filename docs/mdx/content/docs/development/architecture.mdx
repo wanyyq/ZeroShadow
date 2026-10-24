@@ -203,19 +203,29 @@ icon: Boxes
   → 请求日志中间件                打印 [REQ] 方法 路径 host ip ua（静默模式下跳过）
   → 安全响应头中间件              nosniff / SAMEORIGIN / no-referrer / Permissions-Policy
   → cookieParser
-  → /api/fs/save-file 专用 json    limit = SAVE_FILE_MAX_BYTES（16MB）
-  → express.json({ limit: "1mb" }) 其余接口仍是 1MB
   → socket.setNoDelay(true)       缓解隧道代理场景的缓冲问题
   → metricsMiddleware             请求指标采集（异常一律吞掉，不阻塞请求）
+  → createWebdavRouter()          WebDAV（命中挂载点且未启用时自回 404）
   → attachAuth                    解析 Cookie 得到 req.auth = { role, username, userId }
   → attachContext                 解析小组上下文，算出 req.group / req.groupId / req.perms
   → /api 上的 csrfGuard           非 GET/HEAD/OPTIONS 校验自定义头与来源
+  → /api/fs/save-file 专用 json    limit = SAVE_FILE_MAX_BYTES（16MB）
+  → express.json({ limit: "1mb" }) 其余接口仍是 1MB
   → GET /api/meta
   → /api/auth  /api/fs  /api/admin  /api/avatars  /api/todos  /api/groups
   → /api 兜底 404 JSON
   → express.static(WEB_DIST) + 非 /api 的 SPA fallback（带应用外壳 CSP）
   → 统一错误处理（5xx 记日志，只回"服务器内部错误"）
 ```
+
+<Callout type="warn" title="两条顺序不能动">
+1. **body parser 必须在 `attachAuth` / `csrfGuard` 之后**：否则任何**未登录**者都能强迫服务把
+   16MB 请求体解析成 JSON（`/api/fs/save-file` 是单独放宽的端点），几个并发请求就能把单核打满。
+2. **`createWebdavRouter()` 必须在 body parser 之前**：WebDAV 的 `PUT` 是原始请求体，被
+   `express.json()` 读完后 `req.pipe(ws)` 只会写出 0 字节并以 204 成功返回——"保存成功"但文件被清空。
+   它也必须排在静态托管与 SPA fallback 之前，否则 `/dav/` 会被 fallback 吞掉、返回前端首页。
+   挂载点可在后台改，因此**无条件挂载**，是否启用由中间件自己判断。
+</Callout>
 
 启动时会：自检并隔离损坏的数据文件（`integrity.js`，同时清空 `data/tmp/` 残留）
 → 重载配置 / 成员 / 小组 / 待办 → 建目录 → 重建头像索引（顺手删掉尺寸或格式不合规的文件）→ 做一次每日快照；

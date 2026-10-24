@@ -153,9 +153,14 @@ cp docs/mdx/public/img/* <你的站点>/public/img/
 改完文档跑一遍这两个脚本：
 
 ```bash
-node docs/mdx/.authoring/validate-mdx.mjs docs/mdx   # 退出码 = 问题数，0 表示可安全构建
-node docs/mdx/.authoring/check-coverage.mjs docs/mdx # 退出码 = 疑似丢失的 token 数
+# 本仓库的 MDX 是按"挂进已有文档库的 /docs/zeroshadow 子目录"布局写的（站内链接都带该前缀），
+# 所以必须带 --route-prefix，否则校验器会把 116 条链接全判成"指向不存在的页面"。
+node docs/mdx/.authoring/validate-mdx.mjs docs/mdx --route-prefix=/docs/zeroshadow
+node docs/mdx/.authoring/check-coverage.mjs docs/mdx
 ```
+
+- `validate-mdx.mjs`：退出码 = 问题数，**0 表示可安全构建**；
+- `check-coverage.mjs`：退出码 = 疑似丢失的 token 数（当前非 0，属已知的内容同步债，见下方判断口径）。
 
 ### 为什么需要它们
 

@@ -29,9 +29,9 @@ ZeroShadow（产品名 EPan 网盘）的插件体系。目标是让 Agent 能**�
 
 三条必须先记住的边界：
 
-1. **插件永远不直接访问 `/api`**。iframe 是不透明源（无 `allow-same-origin`）+ CSP `connect-src 'none'`，只能 `postMessage` 求宿主代执行；宿主再走服务端 `req.perms`。
-2. **`server` 类插件不是沙箱，是故障隔离**。它和主进程同一个操作系统用户，只装可信插件。
-3. **两扇门默认关着**：总开关 `pluginsEnabled` 默认 `false`（关着时安装/启用/应用主题一律 403）；装完的插件也是**默认禁用**，主题还要再点一次「应用主题」。
+1. **插件永远不直接访问 `/api`**。iframe 是不透明源（无 `allow-same-origin`）+ CSP `connect-src 'none'`，只能 `postMessage` 求宿主代执行；宿主再走服务端 `req.perms`。**但"发不出请求"不等于完全断网**：CSP 没有 `navigate-to`、sandbox 也不禁止自身导航，所以插件可以把自己导航到外部地址。宿主已加了两道校验（消息的 `event.origin` 必须是 `"null"`、入口文档一旦被再次导航就整条会话断链），但**内容本身仍可能随那次导航被带出去**——所以带 `fs.read` 的插件一律只装可信的。
+2. **`server` 类插件不是沙箱，是故障隔离**。它和主进程**同一个操作系统用户**，等于"在服务器上以该用户身份执行任意程序"——可以直接读 `.env`（超管明文口令）与 `data/.jwt-secret`（会话签名密钥，拿到即可伪造任意成员登录）。只装可信插件。
+3. **两扇门默认关着**：总开关 `pluginsEnabled` 默认 `false`（关着时安装/启用/应用主题一律 403，**连公开的主题 CSS / 运行时清单 / 插件入口也一并停用**）；装完的插件也是**默认禁用**，主题还要再点一次「应用主题」。
 
 ## 三种类型怎么选
 
@@ -108,6 +108,8 @@ plugin → host  {type:"zs:dirty", dirty:boolean}     // 可选，驱动"未保�
 ```
 
 插件页面里**没有** `document.cookie`、**不能** `fetch('/api/...')`、**不能**加载外部脚本/字体/图片（只能 `data:` / `blob:`）。整个 UI 与 JS 必须内联在一个 HTML 里。完整可运行示例见 `references/kind-filetype.md`。
+
+> 设置项默认**不随清单下发**（`/api/plugins/list` 是匿名可访问的，全量下发会把管理员填的密钥公开给访客）。插件需要读到的值，必须在 manifest 的 `settings.properties` 里给该项标 `"public": true`；没有标注的项一律读不到（`init.settings` 里没有）。详见 `references/manifest.md` 的「`public`」一节。
 
 ## server 协议（一行版）
 

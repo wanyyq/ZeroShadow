@@ -354,12 +354,29 @@ async function collectZipItems(rels, vis) {
   const items = []
   for (const rel of rels) {
     if (!rel) continue
-    if (!vis.visible(rel)) continue
+    // 顺序很关键：**先解析再判可见性**，并且判定要用 resolveAny 返回的
+    // **规范化**相对路径（resolved.rel），不能用用户给的原串（rel）。
+    //
+    // 为什么：可见性判定（guestHiddenPaths / 小组可见范围）本质是对字符串比较，
+    // 而同一个目录在 Windows 上至少有三种写法 —— 长名、8.3 短名（`web` / `WEB~1`）、
+    // 以及经符号链接/junction 的路径。若拿原串去比，`WEB~1` 不等于配置里的 `web`，
+    // 判定放行，但下面 resolveAny 读到的却是真正的 `web` 目录 —— 于是「对访客隐藏」
+    // 的目录可以被匿名访客整包下载（safety.js:130-132 的注释说清了这条契约，
+    // 其余 handler 都遵守，只有打包/压缩这两条路径漏了）。
     const resolved = resolveAny(rel)
+    if (!vis.visible(resolved.rel)) continue
     if (isSensitiveAbs(resolved.abs)) continue
     const stat = await statSafe(resolved.abs)
     if (!stat || stat.isSymbolicLink()) continue
-    items.push({ abs: resolved.abs, rel, name: path.basename(resolved.abs), isDir: stat.isDirectory(), size: stat.isFile() ? stat.size : 0 })
+    // rel 也存规范化值：下面的 scanDirForZip / addDirToArchive 以它为递归基准，
+    // 基准是规范化的，子项由 readdir 给出的真实名拼出，整棵树才不会出现两种说法。
+    items.push({
+      abs: resolved.abs,
+      rel: resolved.rel,
+      name: path.basename(resolved.abs),
+      isDir: stat.isDirectory(),
+      size: stat.isFile() ? stat.size : 0,
+    })
   }
   return items
 }

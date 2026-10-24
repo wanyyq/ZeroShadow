@@ -155,6 +155,33 @@ export function activeThemeManifest() {
 }
 
 /**
+ * 插件设置在**浏览器侧可见**的子集：只包含 manifest 里显式标注 `public: true` 的项。
+ *
+ * 为什么默认不给：`/api/plugins/list` 是匿名可达的（访客也要能预览文件，而插件
+ * 需要自己的外观类配置），而插件设置最自然的用途恰恰是放 API key / webhook 地址。
+ * 旧实现把 `st.settings` 全量下发，等于把管理员填的密钥公开给任何访客。
+ *
+ * 需要让前端/插件读到的项，在 manifest.json 里写成：
+ *   "settings": { "properties": { "accent": { "type": "string", "public": true } } }
+ *
+ * 仍然只下发字符串/数字/布尔这类标量，避免把嵌套对象当成秘密的"意外出口"。
+ */
+function publicSettings(manifest, settings) {
+  const props = manifest?.settings?.properties
+  if (!props || !settings || typeof settings !== "object") return {}
+  const out = {}
+  for (const [key, spec] of Object.entries(props)) {
+    if (spec?.public !== true) continue
+    const value = settings[key]
+    if (value === undefined || value === null) continue
+    const type = typeof value
+    if (type !== "string" && type !== "number" && type !== "boolean") continue
+    out[key] = value
+  }
+  return out
+}
+
+/**
  * 已启用、并且带前端运行时的插件（给 `/api/plugins/list` 用）。
  *
  * 暴露「渲染一个插件需要知道的信息」：id / name / kind / extensions / modes，
@@ -162,7 +189,8 @@ export function activeThemeManifest() {
  * `sandbox="allow-scripts"` 的 iframe 承载，读写文件只能让宿主代执行，而宿主必须
  * 依据它来判断"这回该不该答应"（见 web/src/components/plugins/plugin-frame.tsx）。
  * 不下发它，清单里声明的权限就只是装饰（安全复检 M-3）。
- * sha256、settings schema、主题令牌仍然只在管理员视角出现。
+ * sha256、settings schema、主题令牌仍然只在管理员视角出现；settings 只下发
+ * 显式标了 `public: true` 的项（见 publicSettings）。
  */
 export function enabledRuntimePlugins() {
   const out = []
@@ -180,9 +208,8 @@ export function enabledRuntimePlugins() {
       modes: manifest.modes,
       // 能力白名单（安装期已按 PLUGIN_PERMISSIONS 校验过，这里原样下发）
       permissions: manifest.permissions,
-      // 插件自己的设置：由管理员在后台填，最终交给插件渲染时使用。
-      // 它属于"插件配置"而不是"网盘机密"，且拼好后的内容本来就会展示给用户。
-      settings: st.settings || {},
+      // 只给标了 public 的设置项：本接口匿名可达，全量下发会公开密钥
+      settings: publicSettings(manifest, st.settings),
     })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))

@@ -68,11 +68,55 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
   const [dirty, setDirty] = React.useState(false)
   /** 记住最近一次读到的编码/换行/版本：保存时默认沿用，避免插件把 CRLF 写成 LF */
   const lastText = React.useRef<FileTextResponse | null>(null)
+  /** 插件入口文档的 load 次数：第 1 次是插件本身，之后再出现就意味着"被导航走了" */
+  const loadCount = React.useRef(0)
+  /** 判定为被劫持后彻底断链：不再处理任何消息，也不再回包 */
+  const hijacked = React.useRef(false)
+  const entrySrc = `/api/plugins/entry/${encodeURIComponent(plugin.id)}`
+  /** 已计入的入口地址：换了插件要重新开始计数（否则新插件的第 1 次 load 会被当成"第 2 次"） */
+  const loadSrc = React.useRef(entrySrc)
+
+  // 换插件时重置导航守卫与界面状态
+  React.useEffect(() => {
+    loadSrc.current = entrySrc
+    loadCount.current = 0
+    hijacked.current = false
+    setStatus("loading")
+    setDirty(false)
+    lastText.current = null
+  }, [entrySrc])
 
   const post = React.useCallback((message: unknown, transfer?: Transferable[]) => {
     const win = frameRef.current?.contentWindow
-    if (win) win.postMessage(message, "*", transfer ?? [])
+    // targetOrigin 只能用 "*"：插件的 iframe 是 sandbox="allow-scripts"，属于
+    // **不透明源**，它的 origin 序列化成 "null"，而 postMessage 的 targetOrigin
+    // 参数只接受具体 URL 或 "*"（传 "null" 会按 URL 解析失败抛 SyntaxError）。
+    // 因此出站方向无法靠 targetOrigin 约束，安全边界放在**入站**：
+    // 见 onMessage 里的 event.origin 校验 + onLoad 的导航守卫。
+    if (win && !hijacked.current) win.postMessage(message, "*", transfer ?? [])
   }, [])
+
+  /**
+   * 入口文档每次 load 都过这里。第 1 次是正常加载；第 2 次起说明这个 iframe
+   * 已经导航到别的文档了 —— 而 CSP 的 `connect-src 'none'` / `default-src 'none'`
+   * 拦不住"帧把自己导航走"（没有 navigate-to 指令，sandbox 也不禁止自身导航），
+   * WindowProxy 又保持不变，于是导航后的文档仍能对着宿主发协议消息。
+   *
+   * 这里不尝试补救，直接断链：持 fs.read 的插件本来就能读出内容，宿主能做的
+   * 只是别把"一次导航"升级成"一个可以任意读文件的接口"。
+   */
+  const handleFrameLoad = React.useCallback(() => {
+    // 万一这次 load 属于"刚换上的新插件"（重置 effect 还没跑），把它当作新入口的第 1 次
+    if (loadSrc.current !== entrySrc) {
+      loadSrc.current = entrySrc
+      loadCount.current = 0
+      hijacked.current = false
+    }
+    loadCount.current += 1
+    if (loadCount.current <= 1) return
+    hijacked.current = true
+    setStatus("failed")
+  }, [entrySrc])
 
   const handleRequest = React.useCallback(
     async (req: FrameRequest): Promise<Outcome> => {
@@ -137,8 +181,20 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
 
   React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
+      // 已判定被导航劫持：一个字节都不再受理
+      if (hijacked.current) return
       const frame = frameRef.current
       if (!frame || event.source !== frame.contentWindow) return
+      // **必须校验来源**。sandbox 让插件文档成为不透明源，它发来的消息
+      // `event.origin` 一定是字符串 "null"；而插件一旦把自己导航到外部站点
+      // （https://attacker/），来源就变成真实 origin，这里会把整条会话掐断。
+      // 只靠 event.source === contentWindow 是不够的：导航后 WindowProxy 不变，
+      // 攻击者页面照样"就是那个窗口"。
+      if (event.origin !== "null") {
+        hijacked.current = true
+        setStatus("failed")
+        return
+      }
       const data = event.data as { type?: string; id?: number; dirty?: boolean } | null
       if (!data || typeof data !== "object" || typeof data.type !== "string") return
 
@@ -190,10 +246,11 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
       <iframe
         ref={frameRef}
         title={plugin.name}
-        src={`/api/plugins/entry/${encodeURIComponent(plugin.id)}`}
+        src={entrySrc}
         // 关键：只有 allow-scripts。加上 allow-same-origin 等于把沙箱拆了
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
+        onLoad={handleFrameLoad}
         onError={() => setStatus("failed")}
         className="min-h-0 w-full flex-1 border-0 bg-transparent"
       />

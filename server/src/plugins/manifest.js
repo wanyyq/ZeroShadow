@@ -133,6 +133,11 @@ function normalizeSettingsSchema(raw) {
     if (typeof p.title === "string") spec.title = p.title.slice(0, 60)
     if (typeof p.description === "string") spec.description = p.description.slice(0, 200)
     if (typeof p.placeholder === "string") spec.placeholder = p.placeholder.slice(0, 60)
+    // `public: true` = 这一项允许下发给**浏览器**（进而被任何能预览该文件的人看到，
+    // 包括未登录访客）。默认 false：插件设置最常见的用途就是放 API key / webhook
+    // 地址，而 /api/plugins/list 是匿名可访问的，默认全量下发等于公开密钥。
+    // 见 store.js 的 publicSettings()。
+    if (p.public === true) spec.public = true
     if (type === "boolean") {
       spec.default = p.default === true
     } else if (type === "string") {

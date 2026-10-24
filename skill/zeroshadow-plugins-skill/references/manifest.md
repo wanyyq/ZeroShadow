@@ -87,10 +87,11 @@ entry, extensions, modes, actions
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "accent":  { "type": "string",  "title": "主色", "enum": ["auto", "blue", "green"], "default": "auto" },
-    "heading": { "type": "string",  "title": "标题", "maxLength": 40, "placeholder": "留空用文件名" },
+    "accent":  { "type": "string",  "title": "主色", "enum": ["auto", "blue", "green"], "default": "auto", "public": true },
+    "heading": { "type": "string",  "title": "标题", "maxLength": 40, "placeholder": "留空用文件名", "public": true },
     "rows":    { "type": "integer", "title": "行数", "minimum": 1, "maximum": 500, "default": 50 },
-    "compact": { "type": "boolean", "title": "紧凑", "default": false }
+    "compact": { "type": "boolean", "title": "紧凑", "default": false },
+    "apiKey":  { "type": "string",  "title": "API Key" }
   }
 }
 ```
@@ -105,6 +106,24 @@ entry, extensions, modes, actions
 - `number` / `integer`：可带 `minimum` / `maximum` / 数字 `default`；`integer` 保存时会校验 `Number.isInteger`
 - 保存时：`boolean` 严格 `=== true`；`string` 带 `enum` 时必须命中，否则按 `maxLength`（默认 200）截断；`number` 用 `Number()` 转，`NaN` 直接 400
 - **只保留 schema 里声明过的键**，多余字段丢弃
+
+### `public`：这一项要不要暴露给浏览器
+
+`public: true` 表示"允许把这个设置项下发给浏览器"。**默认是 `false`（不下发）**。
+
+为什么这样做：`GET /api/plugins/list` 是**匿名可访问**的（访客也要能预览文件，插件需要自己的
+外观类配置），而插件设置最自然的用途恰恰是放 API key / webhook 地址。所以：
+
+| 设置项 | 写不写 `public` | 结果 |
+|---|---|---|
+| 主色、字号、标题前缀这类纯外观 | 写 `"public": true` | 出现在 `/api/plugins/list` 的 `settings` 里，`init.settings` 能读到 |
+| API Key、Webhook、内网地址 | **不要写** | 只留在服务端 `data/plugins.json`，浏览器/插件一律读不到 |
+
+只有字符串/数字/布尔这类标量会下发（对象/数组一律忽略）。`server` 类插件的 `init.settings`
+目前恒为 `{}`，需要配置请在**服务端**自己读取 `data/plugins.json` 或让管理员用文件保存。
+
+> **向后兼容提醒**：这条规则是在 2.0.0-beta 的安全修复里收紧的。老插件如果依赖
+> `init.settings` 拿到值，必须在 manifest 里给对应项补 `"public": true`，否则拿到的是空对象。
 
 ## 安装期与安装后的错误键
 

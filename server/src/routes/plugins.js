@@ -34,8 +34,26 @@ import {
 
 export const publicPluginRouter = Router()
 
+/**
+ * 总开关（`data/config.json` 的 `pluginsEnabled`）。
+ *
+ * 三条**公开**路由（theme / list / entry）也必须看它：它们的产物正是插件真正
+ * 作用于浏览器的那部分（主题 CSS、运行时清单、插件 HTML）。旧实现只在 admin
+ * 路由里检查，于是"关闭插件"之后主题照样生效、已启用插件的预览器照样能被加载
+ * —— 与文档承诺的"关闭后已装插件不再生效（主题自动撤销）"相反，
+ * 也让"一键停用插件"这个应急手段失效。
+ */
+function runtimePluginsEnabled() {
+  try {
+    return getConfig().pluginsEnabled === true
+  } catch {
+    return false
+  }
+}
+
 /** 当前主题（CSS 已由服务端拼好并做过值校验，前端只负责注入 <style>） */
 publicPluginRouter.get("/theme", (_req, res) => {
+  if (!runtimePluginsEnabled()) return res.json({ id: "", name: "", css: "" })
   const manifest = activeThemeManifest()
   if (!manifest) return res.json({ id: "", name: "", css: "" })
   res.setHeader("Cache-Control", "no-cache")
@@ -52,6 +70,8 @@ publicPluginRouter.get("/theme", (_req, res) => {
  */
 publicPluginRouter.get("/list", (_req, res) => {
   res.setHeader("Cache-Control", "no-cache")
+  // 总开关关掉时清单必须为空：否则预览页仍会按后缀去加载"已启用"的插件
+  if (!runtimePluginsEnabled()) return res.json({ plugins: [] })
   res.json({ plugins: enabledRuntimePlugins() })
 })
 
@@ -68,6 +88,8 @@ publicPluginRouter.get("/list", (_req, res) => {
  */
 publicPluginRouter.get("/entry/:id", async (req, res, next) => {
   try {
+    // 总开关关掉时入口也不再提供：能取到这份 HTML 就等于插件仍能被执行
+    if (!runtimePluginsEnabled()) throw httpError(404, "插件不存在或未启用", { errorKey: "api.plugins.not_found" })
     const id = String(req.params.id)
     const entry = pluginEntryFile(id)
     if (!entry) throw httpError(404, "插件不存在或未启用", { errorKey: "api.plugins.not_found" })

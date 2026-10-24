@@ -154,14 +154,19 @@ function resolveSharePath(share, requested) {
   } catch {
     throw shareError(410, "分享的内容已被移动或删除", "api.share.target_missing", { code: "SHARE_TARGET_MISSING" })
   }
+  // 下面两条安全判定统一用**规范化**后的相对路径（resolved.rel），不用拼出来的 rel。
+  // 原因：可见性判定是对字符串比较，而同一个目录可以有多种写法（Windows 8.3 短名
+  // `web` / `WEB~1`、符号链接、大小写变体）。用 rel 去比，`WEB~1` 不等于快照里的
+  // `web`，判定放行、实际读到的却是被隐藏的内容；进而在创建分享时还会把
+  // requirePassword 误算成 false，等于把隐藏内容做成了"无密码公开分享"。
   // 无密码分享按「访客视角」处理：与 /api/fs/* 的 guestBlocked 保持同一条规则。
   // 只在 list 里过滤条目是不够的 —— 知道文件名就能用 ?path= 直接下载。
-  if (!share.requirePassword && isHiddenFromGuest(rel)) {
+  if (!share.requirePassword && isHiddenFromGuest(resolved.rel)) {
     throw shareError(404, "文件或目录不存在", "api.fs.not_found")
   }
   // 创建者的可见范围快照同样要生效（与密码无关：那是"他能看到什么"，
   // 不是"谁能访问"）
-  assertShareVisible(share, rel)
+  assertShareVisible(share, resolved.rel)
   return { ...resolved, sub }
 }
 
@@ -393,13 +398,16 @@ manageShareRouter.get("/precheck", rateLimit, async (req, res, next) => {
     requireShareFeature()
     const rel = normRel(req.query.path)
     if (!rel) throw shareError(400, "不能分享网盘根目录", "api.share.path_required")
-    if (!isVisibleForContext(rel, { role: req.auth.role, group: req.group, userId: req.auth.userId })) {
+    // 与 POST /api/shares 保持同一套判定：先解析、再用规范化路径算
+    // 「是否对访客隐藏」。否则短名（`WEB~1`）会让 precheck 回答 needPassword=false，
+    // 而创建接口按规范化路径判定为 true，前端提示与服务端结果对不上。
+    const resolved = resolveAny(rel)
+    if (!isVisibleForContext(resolved.rel, { role: req.auth.role, group: req.group, userId: req.auth.userId })) {
       throw shareError(404, "文件或目录不存在", "api.fs.not_found")
     }
-    const resolved = resolveAny(rel)
     const stat = await statSafe(resolved.abs)
     if (!stat) throw shareError(404, "文件或目录不存在", "api.fs.not_found")
-    const hidden = isHiddenFromGuest(rel)
+    const hidden = isHiddenFromGuest(resolved.rel)
     const isFolder = stat.isDirectory()
     let size = 0
     let files = 0
@@ -431,10 +439,14 @@ manageShareRouter.post("/", rateLimit, async (req, res, next) => {
     requireShareFeature()
     const rel = normRel(req.body?.path)
     if (!rel) throw shareError(400, "不能分享网盘根目录", "api.share.path_required")
-    if (!isVisibleForContext(rel, { role: req.auth.role, group: req.group, userId: req.auth.userId })) {
+    // 先解析、再判定：后面所有安全判定（可见范围、是否强制密码、入库的路径）
+    // 都基于 **规范化** 的 resolved.rel，而不是请求里的原串 —— 否则 8.3 短名
+    // （`WEB~1`）能绕过 isHiddenFromGuest，把「对访客隐藏」的目录做成无密码分享。
+    const resolved = resolveAny(rel)
+    const canonicalRel = resolved.rel
+    if (!isVisibleForContext(canonicalRel, { role: req.auth.role, group: req.group, userId: req.auth.userId })) {
       throw shareError(404, "文件或目录不存在", "api.fs.not_found")
     }
-    const resolved = resolveAny(rel)
     const stat = await statSafe(resolved.abs)
     if (!stat) throw shareError(404, "文件或目录不存在", "api.fs.not_found")
 
@@ -446,7 +458,7 @@ manageShareRouter.post("/", rateLimit, async (req, res, next) => {
       throw shareError(403, "没有权限分享该内容", "api.auth.forbidden")
     }
 
-    const hidden = isHiddenFromGuest(rel)
+    const hidden = isHiddenFromGuest(canonicalRel)
     const password = req.body?.password
     if (password !== undefined && password !== null && String(password).length > 0) {
       const check = validateSharePassword(password)
@@ -455,7 +467,9 @@ manageShareRouter.post("/", rateLimit, async (req, res, next) => {
       }
     }
     const share = await createShare({
-      rel,
+      // 入库用规范化路径：分享的整个生命周期（浏览 / 下载 / 可见范围复判）
+      // 都以它为基准，存短名会让后续每次判定都要重新猜。
+      rel: canonicalRel,
       name: path.basename(resolved.abs),
       isFolder: stat.isDirectory(),
       owner: req.auth.username,

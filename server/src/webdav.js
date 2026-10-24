@@ -418,12 +418,17 @@ function resolveOrReply(req, res) {
     res.status(400).json({ error: "非法路径", errorKey: "api.webdav.path_invalid" })
     return null
   }
-  if (!visible(req, rel)) {
+  // **必须先 resolveAny 再判可见性**，并且用 resolveAny 返回的规范化相对路径去判。
+  // 可见性（对访客隐藏 / 小组可见范围）本质是字符串比较，而同一个目录至少有三种
+  // 写法：长名、8.3 短名（`web` / `WEB~1`）、经 junction 的路径。拿 URL 里的原串
+  // 去比，`WEB~1` 不等于配置里的 `web`，判定就放行，而读盘落到真正的 web 上 ——
+  // 与 routes/fs.js 的 collectZipItems 是同一类问题（见 safety.js:130-132 的契约）。
+  const resolved = resolveAny(rel)
+  if (!visible(req, resolved.rel)) {
     // 隐藏路径故意用 404：用 403 等于告诉对方"这里确实有东西"
     res.status(404).json({ error: "文件或目录不存在", errorKey: "api.webdav.not_found" })
     return null
   }
-  const resolved = resolveAny(rel)
   return resolved
 }
 
@@ -719,23 +724,26 @@ async function handleCopyMove(req, res, isMove) {
   } catch {
     return res.status(400).json({ error: "目标路径非法", errorKey: "api.webdav.destination_invalid" })
   }
-  if (!visible(req, destRel)) {
+  // 目标同样**先解析再判可见性**，判定用规范化后的相对路径（理由同 resolveOrReply）
+  const dest = resolveAny(destRel)
+  if (!visible(req, dest.rel)) {
     return res.status(404).json({ error: "目标不存在", errorKey: "api.webdav.destination_missing" })
   }
-  const dest = resolveAny(destRel)
   if (dest.isSoft) return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
-  if (!destRel) {
+  if (!dest.rel) {
     return res.status(400).json({ error: "目标不能是根目录", errorKey: "api.webdav.destination_root_denied" })
   }
+  // 下面一律用 dest.rel（规范化）做比较与入库：用词法 destRel 会让
+  // 「A → a/x」这种只差大小写/短名的写法绕过自嵌套检查。
   // 不能把目录移动/复制到它自己内部。
   // 必须用 isSameOrInside（Windows/macOS 下大小写不敏感），裸串 startsWith 会让
   // "/A" → "/a/x" 这类只差大小写的目标绕过检查（与 fs.js 的 transfer 保持一致）。
-  if (isSameOrInside(destRel, resolved.rel)) {
+  if (isSameOrInside(dest.rel, resolved.rel)) {
     return res.status(400).json({ error: "目标不能是自身或其子目录", errorKey: "api.webdav.destination_self_denied" })
   }
   // 反向也要拦：把子目录搬到它自己的祖先位置（MOVE a/b → a）时，下面的"目标已存在"
   // 会先把 a 连同源一起删掉。旧实现只查了"目标在源内部"这一个方向。
-  if (isSameOrInside(resolved.rel, destRel)) {
+  if (isSameOrInside(resolved.rel, dest.rel)) {
     return res.status(400).json({ error: "目标不能是自身的上级目录", errorKey: "api.webdav.destination_ancestor_denied" })
   }
 
@@ -754,7 +762,7 @@ async function handleCopyMove(req, res, isMove) {
     // 覆盖 = 删除目标。DELETE 需要 delete 权限、且进回收站，这里必须一致：
     // 否则只有 copy/move 权限的成员也能用 COPY+MOVE 递归销毁数据，且无从恢复。
     if (!req.dav.perms.delete) return deny(res, "delete")
-    const trashed = await moveToTrash({ abs: dest.abs, rel: destRel }, { user: req.dav.username, role: "member", ip: req.ip })
+    const trashed = await moveToTrash({ abs: dest.abs, rel: dest.rel }, { user: req.dav.username, role: "member", ip: req.ip })
     // 回收站不可用（或该条目入站失败）时才退回彻底删除 —— 与 /api/fs/delete 一致
     if (!trashed && (await statSafe(dest.abs))) {
       await fs.promises.rm(dest.abs, { recursive: true, force: true })
@@ -781,7 +789,12 @@ async function handleLock(req, res) {
   if (rel === null) return res.status(400).json({ error: "路径无效", errorKey: "api.fs.path_invalid" })
   if (!req.dav.perms.browse) return deny(res, "browse")
   if (!req.dav.perms.fileWrite) return deny(res, "fileWrite")
-  if (rel && !visible(req, rel)) return res.status(404).json({ error: "文件或目录不存在", errorKey: "api.fs.not_found" })
+  // 锁记录里存规范化路径：判定（visible）与入库（locks.set）必须用同一个值，
+  // 否则 `WEB~1` 能过可见性判定、却以短名进锁表，后续 UNLOCK/去重都对不上。
+  const locked = resolveAny(rel)
+  if (locked.rel && !visible(req, locked.rel)) {
+    return res.status(404).json({ error: "文件或目录不存在", errorKey: "api.fs.not_found" })
+  }
   sweepLocks()
   // 锁表有界：第三方客户端偶尔会忘记 UNLOCK，长跑实例不能因此无限增长
   if (locks.size >= MAX_LOCKS) {
@@ -795,7 +808,7 @@ async function handleLock(req, res) {
     return res.status(507).json({ error: "锁数量过多，请先解锁", errorKey: "api.webdav.too_many_locks" })
   }
   const token = `opaquelocktoken:${crypto.randomUUID()}`
-  locks.set(token, { rel, username: req.dav.username, expiresAt: Date.now() + LOCK_TTL_MS })
+  locks.set(token, { rel: locked.rel, username: req.dav.username, expiresAt: Date.now() + LOCK_TTL_MS })
   const body =
     '<?xml version="1.0" encoding="utf-8"?>\n' +
     '<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>' +
