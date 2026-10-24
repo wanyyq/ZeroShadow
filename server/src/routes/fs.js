@@ -57,6 +57,7 @@ import { contentDisposition, httpError } from "../http.js"
 import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolveDownloadTarget } from "../netguard.js"
 import { rateLimit } from "../ratelimit.js"
 import { createJob, failJob, finishJob, jobCreatedBy, jobStatus, patchJob } from "../jobs.js"
+import { DEFAULT_THUMB_WIDTH, ensureThumb, isThumbSource, normalizeThumbWidth } from "../thumbs.js"
 
 const router = Router()
 
@@ -1057,6 +1058,57 @@ router.get("/details", requirePerm("details"), rateLimit, async (req, res, next)
     if (!stat.isFile()) throw httpError(400, "只有文件才有这些详细信息", { errorKey: "api.fs.details_files_only" })
     const details = await inspectFile(resolved.abs, stat)
     res.json({ path: resolved.rel, softReadOnly: !!resolved.isSoft, ...details })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * 缩略图（v2.0）：网格视图用的等比小图。
+ *
+ * 为什么要单独一个端点：原来网格直接拉 `/api/fs/download` 的原图，一张 4K 照片
+ * 就是好几 MB，弱网 / 内网穿透下滚动直接卡死。这里统一出 webp 小图，
+ * 内容是**内容寻址缓存**（rel + 大小 + mtime + 宽度），所以：
+ *   - 文件改了 → 键变了 → 自动重新生成，不会拿到旧图；
+ *   - 同一个图重复请求 → 直接读缓存文件；
+ *   - 前端可以给 <img> 加 `loading="lazy"`，不需要它参与 JS 逻辑。
+ *
+ * 权限跟 `preview` 走（能预览才谈得上缩略图）；路径照样过 `resolveAny` +
+ * 上下文可见性校验，所以隐藏目录 / 小组范围外拿不到。
+ * `sharp` 不可用时回 501，前端退回原图（功能降级，不影响可用性）。
+ */
+router.get("/thumb", requirePerm("preview"), rateLimit, async (req, res, next) => {
+  try {
+    const resolved = resolveAny(normRel(req.query.path))
+    assertContextVisible(req, resolved.rel)
+    if (!resolved.rel) throw httpError(400, "不能为根目录生成缩略图", { errorKey: "api.fs.thumb_root" })
+    const stat = await assertExists(resolved.abs)
+    if (!stat.isFile()) throw httpError(400, "只有文件才有缩略图", { errorKey: "api.fs.thumb_files_only" })
+    if (!isThumbSource(resolved.rel)) {
+      throw httpError(415, "该格式不支持缩略图", { errorKey: "api.fs.thumb_unsupported" })
+    }
+    const width = normalizeThumbWidth(req.query.w ?? DEFAULT_THUMB_WIDTH)
+    const result = await ensureThumb({ abs: resolved.abs, rel: resolved.rel, stat, width })
+    if (!result.ok) {
+      if (result.reason === "no_sharp") {
+        throw httpError(501, "服务端未安装 sharp，缩略图不可用（可继续使用原图）", {
+          errorKey: "api.fs.thumb_unavailable",
+        })
+      }
+      if (result.reason === "busy") {
+        throw httpError(503, "缩略图生成队列已满，请稍后再试", { errorKey: "api.fs.thumb_busy" })
+      }
+      if (result.reason === "too_large") {
+        throw httpError(413, "图片过大，暂不生成缩略图", { errorKey: "api.fs.thumb_too_large" })
+      }
+      throw httpError(415, "无法解析该图片", { errorKey: "api.fs.thumb_broken" })
+    }
+    res.setHeader("Content-Type", "image/webp")
+    res.setHeader("Cache-Control", "public, max-age=604800")
+    res.setHeader("ETag", `"${result.key}"`)
+    res.sendFile(result.file, { cacheControl: false }, (err) => {
+      if (err && !res.headersSent) res.status(err.status || 500).end()
+    })
   } catch (err) {
     next(err)
   }

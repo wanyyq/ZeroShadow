@@ -1,0 +1,9 @@
+{
+  "api.fs.thumb_root": "No se puede generar una miniatura para la carpeta raíz",
+  "api.fs.thumb_files_only": "Solo los archivos tienen miniatura",
+  "api.fs.thumb_unsupported": "Este formato no admite miniaturas",
+  "api.fs.thumb_unavailable": "sharp no está instalado en el servidor, así que las miniaturas no están disponibles (la imagen original sigue funcionando)",
+  "api.fs.thumb_busy": "La cola de miniaturas está llena, inténtalo más tarde",
+  "api.fs.thumb_too_large": "La imagen es demasiado grande para generar una miniatura",
+  "api.fs.thumb_broken": "No se pudo decodificar esta imagen"
+}

@@ -1,0 +1,9 @@
+{
+  "api.fs.thumb_root": "Cannot generate a thumbnail for the root folder",
+  "api.fs.thumb_files_only": "Only files have thumbnails",
+  "api.fs.thumb_unsupported": "Thumbnails are not supported for this format",
+  "api.fs.thumb_unavailable": "sharp is not installed on the server, so thumbnails are unavailable (the original image still works)",
+  "api.fs.thumb_busy": "The thumbnail queue is full, please retry later",
+  "api.fs.thumb_too_large": "Image is too large to thumbnail",
+  "api.fs.thumb_broken": "This image could not be decoded"
+}

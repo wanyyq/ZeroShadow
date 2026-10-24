@@ -12,6 +12,7 @@ import { createWebdavRouter, webdavStartupNotice } from "./src/webdav.js"
 import { lanAddresses } from "./src/status.js"
 import { runIntegrityCheck } from "./src/integrity.js"
 import { sweepTrash } from "./src/trash.js"
+import { sweepThumbs } from "./src/thumbs.js"
 import { reloadUsers } from "./src/users.js"
 import { reloadGroups } from "./src/groups.js"
 import { reloadTodos } from "./src/todos.js"
@@ -238,12 +239,15 @@ const server = app.listen(env.port, env.host, () => {
   const maintenance = setInterval(() => {
     sweepLogs().catch(() => {})
     sweepTrash().catch(() => {})
+    // 缩略图缓存：清过期（30 天）+ 按总预算淘汰最旧的
+    sweepThumbs().catch(() => {})
     pruneShares().catch(() => {})
     runDailySnapshot()
   }, 6 * 60 * 60 * 1000)
   maintenance.unref?.()
   // 启动时也清一次回收站：长时间不重启的实例靠定时器，频繁重启的实例靠这里
   sweepTrash().catch(() => {})
+  sweepThumbs().catch(() => {})
   if (!NOLOG) {
     console.log("")
     console.log("  ZeroShadow 网盘已启动")

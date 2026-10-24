@@ -204,6 +204,17 @@ export function canPreview(name: string): boolean {
   return previewType(name) !== null || officePreviewKind(name) !== null
 }
 
+/**
+ * 是不是"能给缩略图的图片"。
+ *
+ * 与服务端 `server/src/thumbs.js` 的 `INPUT_EXTS` 保持同一份口径：
+ * 含 jpg/jpeg/png/webp/gif/avif/tiff/tif/bmp，**不含 svg**（复杂 SVG 光栅化
+ * 可能长时间占用 CPU）。两边不一致会导致网格里出现一堆 415。
+ */
+export function isThumbSourceName(name: string): boolean {
+  return previewType(name) === "image" && ext(name) !== "svg"
+}
+
 export function parentOf(path: string): string {
   const i = path.lastIndexOf("/")
   return i > 0 ? path.slice(0, i) : ""

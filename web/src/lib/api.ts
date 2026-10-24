@@ -158,6 +158,17 @@ export function downloadUrl(path: string, inline = false) {
   return `/api/fs/download?path=${encodeURIComponent(path)}${inline ? "&inline=1" : ""}${groupQuery()}`
 }
 
+/**
+ * 网格视图缩略图地址（v2.0）。
+ *
+ * 为什么不是 downloadUrl：原图动辄几 MB，弱网 / 内网穿透下滚动会卡死。
+ * 服务端按 `rel + 大小 + mtime + 宽度` 做内容寻址缓存，所以这里可以放心
+ * 让浏览器长期缓存（响应带 `max-age`）。`w` 只接受服务端白名单里的档位。
+ */
+export function thumbUrl(path: string, w = 256) {
+  return `/api/fs/thumb?path=${encodeURIComponent(path)}&w=${w}${groupQuery()}`
+}
+
 export function zipUrl(paths: string[]) {
   return `/api/fs/zip?paths=${encodeURIComponent(JSON.stringify(paths))}${groupQuery()}`
 }

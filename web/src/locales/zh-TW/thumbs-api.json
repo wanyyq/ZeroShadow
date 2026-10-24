@@ -1,0 +1,9 @@
+{
+  "api.fs.thumb_root": "不能為根目錄產生縮圖",
+  "api.fs.thumb_files_only": "只有檔案才有縮圖",
+  "api.fs.thumb_unsupported": "此格式不支援縮圖",
+  "api.fs.thumb_unavailable": "伺服器未安裝 sharp，縮圖不可用（仍可使用原圖）",
+  "api.fs.thumb_busy": "縮圖產生佇列已滿，請稍後再試",
+  "api.fs.thumb_too_large": "圖片過大，暫不產生縮圖",
+  "api.fs.thumb_broken": "無法解析此圖片"
+}

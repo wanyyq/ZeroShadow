@@ -18,9 +18,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Icon } from "@/components/icon"
-import { api, downloadUrl, triggerDownload, zipUrl } from "@/lib/api"
-import { fileKind, formatBytes, formatDate, joinPath, canPreview } from "@/lib/format"
+import { api, downloadUrl, thumbUrl, triggerDownload, zipUrl } from "@/lib/api"
+import { fileKind, formatBytes, formatDate, joinPath, canPreview, isThumbSourceName } from "@/lib/format"
 import { animateListIn } from "@/lib/lucide"
+import { useProgressiveReveal, useVirtualRows } from "@/lib/virtual"
 import type { Entry, SearchResult } from "@/lib/types"
 import { useAuth } from "@/state/auth"
 import { useGroups } from "@/state/groups"
@@ -75,6 +76,36 @@ function anySoftReadOnly(entries: Entry[]) {
 }
 function isInSoftDir(entry?: Entry) {
   return entry?.softReadOnly === true
+}
+
+/**
+ * 网格卡片里的缩略图（v2.0）。
+ *
+ * 为什么要组件化：`onError` 要落到每个卡片自己的状态上（某一张图解码失败
+ * 不能影响别的卡片），而且服务端在没装 sharp / 图片过大时会回 501/413，
+ * 那时必须**安静地退回图标**，不能弹一堆报错。
+ *
+ * 图片本身用 `loading="lazy"` + `decoding="async"`：浏览器只在接近视口时才请求，
+ * 卡片再多也不会一次性打满请求。尺寸固定 `h-16`，避免卡片高度跳动。
+ */
+function EntryThumb({ path, name, icon, alt }: { path: string; name: string; icon: string; alt: string }) {
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => { setFailed(false) }, [path])
+  if (failed) {
+    return <Icon name={icon} className="size-9 text-muted-foreground" strokeWidth={1.5} aria-label={alt} />
+  }
+  return (
+    <img
+      src={thumbUrl(path)}
+      alt={alt}
+      title={name}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      onError={() => setFailed(true)}
+      className="h-16 w-full rounded-md object-cover"
+    />
+  )
 }
 
 export function BrowserPage() {
@@ -205,6 +236,30 @@ export function BrowserPage() {
   }, [entries, settings.sortBy, settings.sortDir, settings.foldersFirst])
 
   const isCurrentSoft = sorted.length > 0 && sorted.every((e) => e.softReadOnly)
+
+  /* ---------------- 列表虚拟滚动 / 网格渐进渲染（v2.0） ----------------
+   * 列表行是等高的（高度只由 CSS 的 --row-py 与 text-sm 决定），所以量一次就能
+   * 做窗口化渲染；网格卡片高度会随文件名换行变化，强制定高会裁内容，因此网格
+   * 用"滚到底再追加一批"的渐进渲染。
+   * 两者的切换键都是「当前目录 + 搜索词 + 视图」，换目录时滚动位置必须归零。 */
+  const listKey = `${path}|${query}|${settings.view}|${settings.density}`
+  // 滚动容器的 ref 由页面持有（而不是从 hook 返回），见 lib/virtual.ts 的说明
+  const listScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const [rowHeight, setRowHeight] = React.useState(32)
+  React.useEffect(() => {
+    if (settings.view !== "list") return
+    const el = listRef.current?.querySelector<HTMLElement>("[data-file-row]")
+    const h = el?.offsetHeight || 0
+    // 只在明显不同的时候 setState，避免每次渲染都触发一轮重排
+    if (h > 0 && Math.abs(h - rowHeight) > 1) setRowHeight(h)
+  }, [listKey, sorted.length, settings.view, rowHeight])
+  const virt = useVirtualRows(listScrollRef, sorted.length, rowHeight, listKey)
+  const grid = useProgressiveReveal(sorted.length, 120, listKey)
+  const onGridScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    // 距底部还有一屏时就开始追加，滚动过程中不会出现空白等待
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - el.clientHeight) grid.revealMore()
+  }
 
   const goto = (p: string) => setParams(p ? { path: p } : {})
   const displayName = (entry: Entry) => entry.shortcut?.displayName || entry.name
@@ -1068,6 +1123,7 @@ export function BrowserPage() {
                 <div
                   ref={dblClickRef(entry)}
                   data-animate-item
+                  data-file-row
                   className={cn(
                     "group dense-row flex cursor-default items-center gap-3 rounded-md px-2 transition-colors select-none",
                     isSelected ? "bg-accent" : "hover:bg-muted/70"
@@ -1115,7 +1171,20 @@ export function BrowserPage() {
                 />
               }
             >
-              <Icon name={kind.icon} className={cn("size-9", entry.type === "dir" ? "text-foreground" : "text-muted-foreground")} strokeWidth={1.5} />
+              {/* 图片走缩略图（服务端 webp 小图），其它类型仍是图标；
+                  固定 h-16 让两种卡片高度一致，网格滚动更稳 */}
+              <div className="flex h-16 w-full items-center justify-center overflow-hidden">
+                {entry.type === "file" && isThumbSourceName(entry.name) ? (
+                  <EntryThumb
+                    path={entry.fullPath ?? joinPath(path, entry.name)}
+                    name={displayName(entry)}
+                    icon={kind.icon}
+                    alt={displayName(entry)}
+                  />
+                ) : (
+                  <Icon name={kind.icon} className={cn("size-9", entry.type === "dir" ? "text-foreground" : "text-muted-foreground")} strokeWidth={1.5} />
+                )}
+              </div>
               <span className="w-full truncate text-center text-xs" title={displayName(entry)}>{displayName(entry)}</span>
               <span className="text-[10px] text-muted-foreground">{entry.type === "dir" ? kind.label : formatBytes(entry.size)}</span>
               {entry.hiddenFromGuest && me.role !== "guest" && <Icon name="eye-off" className="absolute top-2 right-2 size-3 text-muted-foreground" />}
@@ -1302,11 +1371,19 @@ export function BrowserPage() {
                   <span className="hidden w-18 shrink-0 text-right sm:block">{t("ui.common.size")}</span>
                   <span className="hidden w-32 shrink-0 text-right lg:block">{t("ui.browser.mtime")}</span>
                 </div>
-                <div className="flex-1 overflow-auto">{sorted.map(renderRow)}</div>
+                {/* 窗口化渲染：只挂视口附近的行，上下用等高占位块撑出滚动条长度 */}
+                <div ref={listScrollRef} onScroll={virt.onScroll} className="flex-1 overflow-auto">
+                  <div style={{ height: virt.padTop }} aria-hidden />
+                  {sorted.slice(virt.start, virt.end).map((entry, i) => renderRow(entry, virt.start + i))}
+                  <div style={{ height: virt.padBottom }} aria-hidden />
+                </div>
               </div>
             ) : (
-              <div className="flex-1 overflow-auto p-2">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">{sorted.map(renderCard)}</div>
+              <div className="flex-1 overflow-auto p-2" onScroll={onGridScroll}>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">{sorted.slice(0, grid.limit).map(renderCard)}</div>
+                {!grid.done && (
+                  <div className="py-3 text-center text-xs text-muted-foreground">{t("ui.common.loading")}</div>
+                )}
               </div>
               )}
               </div>

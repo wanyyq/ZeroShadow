@@ -1,0 +1,9 @@
+{
+  "api.fs.thumb_root": "ルートフォルダのサムネイルは生成できません",
+  "api.fs.thumb_files_only": "サムネイルはファイルのみです",
+  "api.fs.thumb_unsupported": "この形式はサムネイルに対応していません",
+  "api.fs.thumb_unavailable": "サーバーに sharp が導入されていないため、サムネイルは利用できません（元画像は使用できます）",
+  "api.fs.thumb_busy": "サムネイル生成の待ち行列が満杯です。しばらくしてから再試行してください",
+  "api.fs.thumb_too_large": "画像が大きすぎるため、サムネイルを生成しません",
+  "api.fs.thumb_broken": "この画像を解析できませんでした"
+}
