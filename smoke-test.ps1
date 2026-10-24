@@ -1373,4 +1373,147 @@ try {
   }
 }
 
+# --------------------------------------------- 19. 插件服务端运行时（P4）------
+Section "19. 插件服务端运行时（server 子进程 + actions 白名单）"
+
+$svWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-sv-$suffix"
+$svZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-sv-$suffix.zip"
+$svId = "org.zeroshadow.smoke-server"
+$origSvEnabled = $false
+try {
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/config"; WebSession = $session }
+  try { $origSvEnabled = [bool](($r.Content | ConvertFrom-Json).pluginsEnabled) } catch { }
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ pluginsEnabled = $true })
+  }
+
+  # 19.1 构造一个最小的 server 插件（只实现协议，不做别的事）
+  New-Item -ItemType Directory -Path $svWork -Force | Out-Null
+  @{
+    id = $svId; name = "冒烟服务端插件"; version = "1.0.0"; apiVersion = 1; kind = "server"
+    entry = "index.mjs"; actions = @("echo", "sleep")
+  } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $svWork "manifest.json") -Encoding UTF8
+
+  $code = @'
+process.stdin.setEncoding("utf8")
+let buf = ""
+process.stdin.on("data", (chunk) => {
+  buf += chunk
+  let i
+  while ((i = buf.indexOf("\n")) >= 0) {
+    const line = buf.slice(0, i).trim()
+    buf = buf.slice(i + 1)
+    if (!line) continue
+    let msg
+    try { msg = JSON.parse(line) } catch { continue }
+    if (msg.type === "init") {
+      process.stdout.write(JSON.stringify({ type: "ready" }) + "\n")
+    } else if (msg.type === "action") {
+      if (msg.action === "echo") {
+        process.stdout.write(JSON.stringify({ type: "result", id: msg.id, ok: true, data: msg.params }) + "\n")
+      } else if (msg.action === "sleep") {
+        // 故意不回复：用来验证宿主超时后会杀掉进程
+      } else {
+        process.stdout.write(JSON.stringify({ type: "result", id: msg.id, ok: false, error: "unknown" }) + "\n")
+      }
+    } else if (msg.type === "shutdown") {
+      process.exit(0)
+    }
+  }
+})
+'@
+  [System.IO.File]::WriteAllText((Join-Path $svWork "index.mjs"), $code, (New-Object System.Text.UTF8Encoding($false)))
+  if (Test-Path $svZip) { Remove-Item $svZip -Force }
+  Compress-Archive -Path (Join-Path $svWork "*") -DestinationPath $svZip -Force
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=sv.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session
+    Body = ([System.IO.File]::ReadAllBytes($svZip))
+  }
+  Check "plugin-server-install" ($r.Status -eq 201) "$($r.Status) $($r.Content)"
+
+  $actionUrl = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($svId) + "/action"
+
+  # 19.2 未启用时不能调用
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "echo"; params = @{ a = 1 } })
+  }
+  Check "plugin-server-needs-enable" ($r.Status -eq 400) "未启用应 400，实际 $($r.Status)"
+
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($svId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ enabled = $true })
+  }
+
+  # 19.3 声明过的动作可以调用，参数原样往返
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "echo"; params = @{ a = 1; b = "x" } })
+  }
+  Check "plugin-server-action-echo" ($r.Ok -and $r.Content -match '"a":1') "$($r.Status) $($r.Content)"
+
+  # 19.4 未声明的动作被拒（宿主不会把任意方法名转发给插件）
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "rm -rf"; params = @{} })
+  }
+  Check "plugin-server-action-whitelist" ($r.Status -eq 400) "未声明动作应 400，实际 $($r.Status)"
+
+  # 19.5 挂住的动作会被超时杀掉（默认 5 秒），且随后还能重新拉起
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "sleep"; params = @{} })
+  }
+  Check "plugin-server-action-timeout" ($r.Status -eq 504) "挂住的动作应 504，实际 $($r.Status)"
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "echo"; params = @{ after = "kill" } })
+  }
+  Check "plugin-server-recovers-after-timeout" ($r.Ok -and $r.Content -match '"after":"kill"') `
+    "超时杀进程后应能重新拉起: $($r.Status) $($r.Content)"
+
+  # 19.6 禁用后不能再调用；卸载后彻底消失
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($svId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ enabled = $false })
+  }
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "echo"; params = @{} })
+  }
+  Check "plugin-server-disabled-blocked" ($r.Status -eq 400) "禁用后应 400，实际 $($r.Status)"
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($svId); Method = "DELETE"
+    Headers = $jsonHeaders; WebSession = $session
+  }
+  $r = Invoke-Api -Parameters @{
+    Uri = $actionUrl; Method = "POST"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ action = "echo"; params = @{} })
+  }
+  Check "plugin-server-removed-404" ($r.Status -eq 404) "卸载后应 404，实际 $($r.Status)"
+} catch {
+  Check "plugin-server-section" $false $_.Exception.Message
+} finally {
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($svId); Method = "DELETE"
+      Headers = $jsonHeaders; WebSession = $session
+    }
+  } catch { }
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+      ContentType = $jsonType; WebSession = $session
+      Body = (JsonBytes @{ pluginsEnabled = $origSvEnabled })
+    }
+  } catch { }
+  foreach ($p in @($svWork, $svZip)) {
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+}
+
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })

@@ -265,6 +265,8 @@ export interface PluginInfo {
   author: string
   homepage: string
   permissions: string[]
+  /** server 插件才有：它愿意被调用哪些动作 */
+  actions?: string[]
   /** 只有当插件声明了 settings 时才有值（JSON Schema 子集） */
   settings?: {
     type: "object"

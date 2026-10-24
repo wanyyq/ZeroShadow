@@ -22,5 +22,12 @@
     "api.plugins.unpacked_too_large":  "El complemento descomprimido es demasiado grande",
     "api.plugins.zip_slip":  "El paquete contiene una ruta ilegal",
     "api.plugins.entry_invalid":  "El entry de un complemento fileType debe ser un .html incluido (archivo único autocontenido)",
-    "api.plugins.extensions_missing":  "Un complemento fileType debe declarar extensions"
+    "api.plugins.extensions_missing":  "Un complemento fileType debe declarar extensions",
+    "api.plugins.process_gone":  "El proceso del complemento no está disponible",
+    "api.plugins.not_server":  "Solo los complementos server admiten llamadas de acción",
+    "api.plugins.action_timeout":  "La acción del complemento caducó",
+    "api.plugins.entry_missing":  "El archivo de entrada del complemento no existe",
+    "api.plugins.action_not_allowed":  "Acción no declarada por el complemento",
+    "api.plugins.start_timeout":  "El complemento tardó demasiado en arrancar",
+    "api.plugins.actions_missing":  "Un complemento server debe declarar actions"
 }

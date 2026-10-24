@@ -3,9 +3,8 @@ title: 插件开发
 description: manifest.json 字段、apiVersion 策略、主题令牌安全约束、权限白名单与 JSON Schema 设置
 ---
 
-对应版本：**v2.0.0-beta**。插件体系目前处于 **P1 阶段**：`theme`（主题）插件已完整可用；
-`fileType`（预览/编辑）与 `server`（服务端）插件**可以安装、启停**，但运行时在后续版本接入，
-列表里会明确标注"暂不生效"。
+对应版本：**v2.0.0-beta**。三种类型都已可用：`theme`（声明式 CSS）、`fileType`（沙箱 iframe）、
+`server`（独立子进程 + actions 白名单）。
 
 ## 它是什么
 
@@ -114,7 +113,45 @@ PATCH  /api/admin/plugins/:id                { enabled?, settings? }
 POST   /api/admin/plugins/:id/theme          { active: true }
 DELETE /api/admin/plugins/:id                卸载
 GET    /api/plugins/theme                    公开：当前主题 CSS
+GET    /api/plugins/list                     公开：已启用的 fileType 插件（仅 id/name/extensions/modes/settings）
+GET    /api/plugins/entry/:id                插件入口 HTML（响应带 sandbox + connect-src 'none' 的 CSP）
+POST   /api/admin/plugins/:id/action         server 插件：{ action, params } → { ok, data }
 ```
+
+## 文件类型插件（沙箱 iframe）
+
+`kind: "fileType"` 负责内置渲染器不认识的格式。约束四条：`entry` 必须是**单个自包含 `.html`**、
+iframe 用 `sandbox="allow-scripts"`（无 `allow-same-origin`）、入口响应 CSP 为
+`default-src 'none'` + `connect-src 'none'`、宿主只认 `event.source === contentWindow`。
+
+协议（`apiVersion: 1`）：
+
+```
+plugin → host   { type: "zs:ready" }
+host   → plugin { type: "zs:init", apiVersion, file, settings, canWrite, dark }
+plugin → host   { type: "zs:request", id, method, params }     // readText | readBinary | saveText | notify
+host   → plugin { type: "zs:response", id, ok, result?, error? }
+plugin → host   { type: "zs:dirty", dirty: boolean }
+```
+
+`saveText` 带最近一次读到的 `baseVersion`，文件被改过时服务端 409、宿主原样回报，**不会静默覆盖**。
+
+## 服务端插件（独立子进程）
+
+先说结论：**这不是安全沙箱，是故障隔离**。子进程与主进程同一个操作系统用户，
+只装可信插件。收敛手段：环境变量白名单（不含 `JWT_SECRET`）、只转发 `actions` 里声明的动作、
+单动作 5 秒超时（超时**杀进程**）、启动 10 秒超时、单行输出 256 KB 上限、空闲 60 秒回收、
+禁用/卸载/服务退出都会先 `shutdown` 再杀。
+
+```
+host   → plugin  {"type":"init","apiVersion":1,"settings":{}}
+plugin → host    {"type":"ready"}
+host   → plugin  {"type":"action","id":1,"action":"rebuild","params":{}}
+plugin → host    {"type":"result","id":1,"ok":true,"data":{}}
+```
+
+失败语义：未启用 400、动作未声明 400、超时 504、进程启动失败 502。
+调试信息请写 stderr（宿主保留最近 20 行），stdout 只应输出 JSON 行。
 
 ## 自测清单
 
@@ -124,12 +161,15 @@ GET    /api/plugins/theme                    公开：当前主题 CSS
 - [ ] 应用后 `/api/plugins/theme` 的 CSS 含 `data-theme-plugin` 与自己的变量
 - [ ] 设置越界值返回 400
 - [ ] 卸载后主题自动恢复默认
+- [ ] fileType：未启用时不在 `/api/plugins/list`、入口 404；启用后入口 CSP 含 `sandbox allow-scripts`
+- [ ] fileType：`entry` 写 `.js` 或缺 `extensions` 安装被拒
+- [ ] server：未启用 400、未声明动作 400、超时 504 且随后能重新拉起、禁用 400 / 卸载 404
 
 ## 已知边界
 
-- `fileType` / `server` 运行时尚未接入（可装可启停，不生效）；
+- 服务端插件**不是安全沙箱**：同用户进程，只装可信插件；
 - 同一时间只能有一个主题生效；
-- 插件不能加自己的路由、不能读写任意路径、不能直连网络；
+- 插件不能加自己的路由、不能直连网络；
 - 插件**不会**自动更新：更新意味着权限可能变化，必须由管理员重新确认。
 
 <Cards>

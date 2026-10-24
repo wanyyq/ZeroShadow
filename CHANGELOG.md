@@ -42,10 +42,21 @@ v2.0 的第一个 beta。**产品定位从「局域网网盘」调整为「工�
 - **插件体系**（`server/src/plugins/`、`web/src/pages/settings/plugins-section.tsx`）：
   `manifest.json` + `apiVersion` + `kind` / `permissions` 白名单 + 未知字段直接拒绝；
   安装时逐条解 zip（拒 `..` / 绝对路径 / 符号链接，2 MB 包 / 10 MB 解压 / 300 条目）；
-  **总开关默认关、装完默认禁用**；主题插件声明式令牌（名与值都校验，禁止 `;{}@<>\\`、`url(`）；
-  插件设置用 **JSON Schema** 声明，后台自动渲染表单，服务端二次校验。
-  `data/plugins.json` 已纳入备份与完整性检查。
-- 文档：新增 [插件开发](docs/插件开发.md)；`管理员指南` 增加「插件」整章与十二个标签页；
+  **总开关默认关、装完默认禁用**；插件设置用 **JSON Schema** 声明，后台自动渲染表单，服务端二次校验；
+  `data/plugins.json` 已纳入备份与完整性检查。三种类型：
+  - **`theme`**：声明式 CSS 令牌（名与值都校验，禁止 `;{}@<>\\`、`url(`），服务端拼 CSS、
+    作用域 `html[data-theme-plugin="<id>"]`，前端只注入不拼接；同一时间只有一个主题生效。
+  - **`fileType`**（P2）：预览页的沙箱宿主 —— `entry` 必须是自包含单 `.html`，
+    iframe `sandbox="allow-scripts"`（**无** `allow-same-origin`）、入口 CSP
+    `default-src 'none'` + `connect-src 'none'`；读写只能走 `postMessage` RPC
+    （`readText` / `readBinary` / `saveText` / `notify`）由宿主代执行，保存带 `baseVersion`
+    冲突即 409、不静默覆盖。插件只接管**内置渲染器不支持**的后缀。
+  - **`server`**（P4）：独立子进程 + `actions` 白名单；环境变量白名单（不含 `JWT_SECRET`）、
+    单动作 5 秒超时（超时杀进程）、启动 10 秒超时、单行输出 256 KB、空闲 60 秒回收，
+    禁用 / 卸载 / 服务退出都先 `shutdown` 再杀。**明确不是 OS 级沙箱**（同用户进程），
+    文档里写了两次"只装可信插件"。
+- 文档：新增 [插件开发](docs/插件开发.md)（含 P2/P4 协议与最小可运行示例）；
+  `管理员指南` 增加「插件」整章与十二个标签页；
   安全设计补「插件」「Service Worker 边界」「缩略图」三节；开发者指南补 §4.7–§4.11。
 
 ### 变更

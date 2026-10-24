@@ -8,6 +8,7 @@ import { readJsonSync, withLock, writeJsonAtomic } from "../store.js"
 import { httpError } from "../http.js"
 import { info, warn } from "../logger.js"
 import { hashDirectory, ManifestError, normalizeManifest } from "./manifest.js"
+import { stopPlugin } from "./runner.js"
 
 // ============================================================================
 //  plugins/store.js - 插件的安装 / 启停 / 卸载 / 私有设置
@@ -132,6 +133,8 @@ export function listPlugins() {
             homepage: manifest.homepage,
             permissions: manifest.permissions,
             settings: manifest.settings,
+            // server 插件才有：它愿意被调用哪些动作（前端用来渲染"测试"按钮/文档）
+            actions: manifest.actions || [],
           }
         : null,
       settings: st.settings,
@@ -347,6 +350,8 @@ export async function setPluginEnabled(id, enabled) {
     // 关掉主题插件时同时把"当前主题"清掉，否则主题会继续生效却显示为未启用
     if (!enabled && draft.activeTheme === id) draft.activeTheme = ""
   })
+  // server 插件：禁用后立刻回收子进程，不让它在后台继续跑
+  if (!enabled) stopPlugin(id, "插件被禁用")
   info("plugin_toggle", { msg: `${id} -> ${enabled ? "enabled" : "disabled"}` })
   return listPlugins().find((p) => p.id === id) || null
 }
@@ -374,6 +379,8 @@ export async function setActiveTheme(id) {
 
 export async function uninstallPlugin(id) {
   if (!state.plugins[id]) throw httpError(404, "插件不存在", { errorKey: "api.plugins.not_found" })
+  // 先停进程再删目录：Windows 上目录被占用是删不掉的
+  stopPlugin(id, "插件被卸载")
   await persist((draft) => {
     delete draft.plugins[id]
     if (draft.activeTheme === id) draft.activeTheme = ""

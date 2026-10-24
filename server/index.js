@@ -33,6 +33,7 @@ import { SHELL_CSP } from "./src/csp.js"
 import { adminShareRouter, manageShareRouter, publicShareRouter } from "./src/routes/shares.js"
 import { adminPluginRouter, publicPluginRouter } from "./src/routes/plugins.js"
 import { reloadPlugins } from "./src/plugins/store.js"
+import { stopAllPlugins } from "./src/plugins/runner.js"
 
 // 启动自检：隔离损坏的 JSON、清理 tmp 残留，然后重载内存态
 const integrity = runIntegrityCheck()
@@ -319,6 +320,8 @@ process.on("uncaughtException", (err) => {
 function shutdown() {
   stopTunnel()
   stopMetrics()
+  // 插件子进程不能留成孤儿：先发 shutdown 再杀，Windows 上尤其重要
+  stopAllPlugins()
   // 分享访问统计是节流落盘的：退出前补一次，避免最后几十秒的计数丢失
   void flushShareStats()
   server.close(() => process.exit(0))

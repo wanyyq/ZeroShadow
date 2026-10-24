@@ -22,5 +22,12 @@
     "api.plugins.unpacked_too_large":  "插件解压后过大",
     "api.plugins.zip_slip":  "插件包包含非法路径",
     "api.plugins.entry_invalid":  "fileType 插件的 entry 必须是包内的 .html（自包含单文件）",
-    "api.plugins.extensions_missing":  "fileType 插件必须声明 extensions"
+    "api.plugins.extensions_missing":  "fileType 插件必须声明 extensions",
+    "api.plugins.process_gone":  "插件进程不可用",
+    "api.plugins.not_server":  "只有 server 类插件支持动作调用",
+    "api.plugins.action_timeout":  "插件执行超时",
+    "api.plugins.entry_missing":  "插件入口文件不存在",
+    "api.plugins.action_not_allowed":  "未声明的动作",
+    "api.plugins.start_timeout":  "插件启动超时",
+    "api.plugins.actions_missing":  "server 插件必须声明 actions"
 }

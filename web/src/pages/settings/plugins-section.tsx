@@ -139,6 +139,25 @@ export function PluginsSection() {
     }
   }
 
+  /**
+   * 手动调用 server 插件的某个动作（空的 params）。
+   *
+   * 只用来"验证插件装好没有"：动作由插件清单声明，宿主不会转发任意方法名；
+   * 结果直接以 JSON 形式弹出来，够排查就够了。
+   */
+  const runAction = async (row: PluginRow, action: string) => {
+    try {
+      const result = await api.post<{ ok: boolean; data: unknown }>(
+        `/admin/plugins/${encodeURIComponent(row.id)}/action`,
+        { action, params: {} }
+      )
+      const text = JSON.stringify(result.data ?? null)
+      toast.success(t("ui.plugins.action_result", { action, result: text.length > 160 ? `${text.slice(0, 160)}…` : text }))
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
   if (!data) {
     return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
   }
@@ -248,9 +267,22 @@ export function PluginsSection() {
                     </div>
 
                     {info?.kind === "server" && (
-                      <p className="mt-2 rounded-md bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
-                        {t("ui.plugins.runtime_later")}
-                      </p>
+                      <div className="mt-2 rounded-md bg-muted/40 px-2 py-1.5">
+                        <p className="text-[11px] text-muted-foreground">{t("ui.plugins.runtime_later")}</p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {(info.actions || []).map((action) => (
+                            <Button
+                              key={action}
+                              size="xs"
+                              variant="outline"
+                              disabled={!row.enabled}
+                              onClick={() => void runAction(row, action)}
+                            >
+                              <Icon name="play" /> {action}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     {schema && openSettings === row.id && (

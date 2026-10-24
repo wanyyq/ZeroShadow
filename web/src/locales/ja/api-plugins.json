@@ -22,5 +22,12 @@
     "api.plugins.unpacked_too_large":  "展開後のサイズが大きすぎます",
     "api.plugins.zip_slip":  "パッケージに不正なパスが含まれています",
     "api.plugins.entry_invalid":  "fileType プラグインの entry は同梱の .html（自己完結した単一ファイル）である必要があります",
-    "api.plugins.extensions_missing":  "fileType プラグインは extensions を宣言する必要があります"
+    "api.plugins.extensions_missing":  "fileType プラグインは extensions を宣言する必要があります",
+    "api.plugins.process_gone":  "プラグインのプロセスを利用できません",
+    "api.plugins.not_server":  "アクション呼び出しは server プラグインのみ対応しています",
+    "api.plugins.action_timeout":  "プラグインの実行がタイムアウトしました",
+    "api.plugins.entry_missing":  "プラグインのエントリーファイルがありません",
+    "api.plugins.action_not_allowed":  "宣言されていないアクションです",
+    "api.plugins.start_timeout":  "プラグインの起動がタイムアウトしました",
+    "api.plugins.actions_missing":  "server プラグインは actions を宣言する必要があります"
 }

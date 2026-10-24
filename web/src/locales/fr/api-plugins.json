@@ -22,5 +22,12 @@
     "api.plugins.unpacked_too_large":  "L\u0027extension décompressée est trop volumineuse",
     "api.plugins.zip_slip":  "Le paquet contient un chemin illégal",
     "api.plugins.entry_invalid":  "L\u0027entry d\u0027une extension fileType doit être un .html inclus (fichier unique autonome)",
-    "api.plugins.extensions_missing":  "Une extension fileType doit déclarer extensions"
+    "api.plugins.extensions_missing":  "Une extension fileType doit déclarer extensions",
+    "api.plugins.process_gone":  "Le processus de l\u0027extension est indisponible",
+    "api.plugins.not_server":  "Seules les extensions server acceptent des appels d\u0027action",
+    "api.plugins.action_timeout":  "L\u0027action de l\u0027extension a expiré",
+    "api.plugins.entry_missing":  "Le fichier d\u0027entrée de l\u0027extension est absent",
+    "api.plugins.action_not_allowed":  "Action non déclarée par l\u0027extension",
+    "api.plugins.start_timeout":  "L\u0027extension a mis trop de temps à démarrer",
+    "api.plugins.actions_missing":  "Une extension server doit déclarer actions"
 }

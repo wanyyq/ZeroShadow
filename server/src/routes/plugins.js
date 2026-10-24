@@ -5,6 +5,7 @@ import { getConfig } from "../config.js"
 import { httpError } from "../http.js"
 import { info } from "../logger.js"
 import { themeCss } from "../plugins/manifest.js"
+import { callPluginAction, logActionCall } from "../plugins/runner.js"
 import {
   activeThemeManifest,
   enabledRuntimePlugins,
@@ -188,6 +189,42 @@ adminPluginRouter.delete("/theme/active", async (_req, res, next) => {
     ensurePluginsEnabled()
     await setActiveTheme("")
     res.json({ ok: true, activeTheme: "" })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * 调用 `server` 插件的某个动作（**仅超管**）。
+ *
+ * 两道白名单：
+ *   1. 插件自身必须已启用（未启用的插件连进程都不该起）；
+ *   2. `action` 必须出现在 manifest 的 `actions` 里 —— 宿主不会把任意方法名转发给插件。
+ *
+ * 真正的隔离来自 `plugins/runner.js`：独立子进程、清洗过的环境变量、
+ * 5 秒默认超时（上限 30 秒）、输出上限。**它不是操作系统级沙箱**，
+ * 所以"只装可信插件"仍然是前提。
+ */
+adminPluginRouter.post("/:id/action", async (req, res, next) => {
+  try {
+    ensurePluginsEnabled()
+    const id = String(req.params.id)
+    const action = String(req.body?.action || "")
+    const row = listPlugins().find((p) => p.id === id)
+    if (!row) throw httpError(404, "插件不存在", { errorKey: "api.plugins.not_found" })
+    if (row.broken) throw httpError(400, "插件清单已损坏", { errorKey: "api.plugins.manifest_broken" })
+    if (!row.enabled) throw httpError(400, "请先启用插件", { errorKey: "api.plugins.not_enabled" })
+    if (row.manifest?.kind !== "server") {
+      throw httpError(400, "只有 server 类插件支持动作调用", { errorKey: "api.plugins.not_server" })
+    }
+    const allowed = row.manifest.actions || []
+    if (!action || !allowed.includes(action)) {
+      throw httpError(400, "未声明的动作", { errorKey: "api.plugins.action_not_allowed" })
+    }
+    const params = req.body?.params && typeof req.body.params === "object" ? req.body.params : {}
+    logActionCall(id, action)
+    const data = await callPluginAction(id, action, params)
+    res.json({ ok: true, data })
   } catch (err) {
     next(err)
   }

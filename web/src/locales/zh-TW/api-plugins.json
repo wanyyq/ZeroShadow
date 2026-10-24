@@ -22,5 +22,12 @@
     "api.plugins.unpacked_too_large":  "外掛解壓後過大",
     "api.plugins.zip_slip":  "外掛套件包含非法路徑",
     "api.plugins.entry_invalid":  "fileType 外掛的 entry 必須是包內的 .html（自包含單檔）",
-    "api.plugins.extensions_missing":  "fileType 外掛必須宣告 extensions"
+    "api.plugins.extensions_missing":  "fileType 外掛必須宣告 extensions",
+    "api.plugins.process_gone":  "外掛行程不可用",
+    "api.plugins.not_server":  "只有 server 類外掛支援動作呼叫",
+    "api.plugins.action_timeout":  "外掛執行逾時",
+    "api.plugins.entry_missing":  "外掛入口檔案不存在",
+    "api.plugins.action_not_allowed":  "未宣告的動作",
+    "api.plugins.start_timeout":  "外掛啟動逾時",
+    "api.plugins.actions_missing":  "server 外掛必須宣告 actions"
 }

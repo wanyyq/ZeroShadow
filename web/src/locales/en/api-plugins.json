@@ -22,5 +22,12 @@
     "api.plugins.unpacked_too_large":  "The unpacked plugin is too large",
     "api.plugins.zip_slip":  "The plugin package contains an illegal path",
     "api.plugins.entry_invalid":  "The entry of a fileType plugin must be a bundled .html (self-contained single file)",
-    "api.plugins.extensions_missing":  "A fileType plugin must declare extensions"
+    "api.plugins.extensions_missing":  "A fileType plugin must declare extensions",
+    "api.plugins.process_gone":  "The plugin process is unavailable",
+    "api.plugins.not_server":  "Only server plugins support action calls",
+    "api.plugins.action_timeout":  "The plugin action timed out",
+    "api.plugins.entry_missing":  "The plugin entry file does not exist",
+    "api.plugins.action_not_allowed":  "Action is not declared by the plugin",
+    "api.plugins.start_timeout":  "The plugin took too long to start",
+    "api.plugins.actions_missing":  "A server plugin must declare actions"
 }

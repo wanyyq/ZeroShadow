@@ -347,7 +347,7 @@ ZeroShadow/
 ├── Auto-building.bat       # Windows 一键打包（build-release.ps1 的薄封装）
 ├── package-release.ps1     # 发布打包 + 文档暂存 + 密钥门禁
 ├── security-test.ps1       # 安全回归测试（19 组断言）
-├── smoke-test.ps1          # 冒烟测试（65 项断言，跑完自动还原现场）
+├── smoke-test.ps1          # 冒烟测试（137 项断言，跑完自动还原现场）
 ├── encoding-test.mjs       # 在线编辑器编码单测（60 项断言，node encoding-test.mjs）
 ├── i18n-check.mjs          # 多语言文案校验（键完整性 + 剩余硬编码中文统计）
 ├── scripts/office-preview-test.mjs  # Office 解析器单测（纯 Node，不依赖浏览器）
@@ -384,7 +384,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
 成员创建与登录、复制 / 重命名 / 移动 / 详情 / 删除、禁用成员后会话失效、ZIP 打包、
 搜索、日志、服务器状态、隧道状态、SPA 与静态资源、兼容模式页（含首页静态兜底入口）、
 回收站、并发编辑保护（`baseVersion` / 409）、审计日志导出、WebDAV 关闭语义等
-**15 组共 65 项断言**。
+**20 组共 137 项断言**。
 
 脚本的行为约定：
 

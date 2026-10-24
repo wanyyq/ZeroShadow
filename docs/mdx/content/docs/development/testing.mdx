@@ -9,8 +9,8 @@ icon: FlaskConical
 
 | 脚本 | 定位 | 断言数 | 需要起服务 | 退出码 |
 |:--|:--|:--|:--|:--|
-| `smoke-test.ps1` | 端到端功能冒烟 | 65 项 | 是 | 失败项数量 |
-| `security-test.ps1` | 安全回归 | 19 组（93 项） | 是 | 失败项数量 |
+| `smoke-test.ps1` | 端到端功能冒烟 | 137 项 | 是 | 失败项数量 |
+| `security-test.ps1` | 安全回归 | 20 组（95 项） | 是 | 失败项数量 |
 | `encoding-test.mjs` | 在线编辑器编码单测 | 60 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/office-preview-test.mjs` | Office 解析单测 | 40 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/markdown-url-test.mjs` | Markdown 相对路径解析单测 | 18 项 | **否** | 失败项数量（0 / 1） |
@@ -60,10 +60,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File smoke-test.ps1 -BaseUrl http
    服务器状态、隧道状态结构
 10. **SPA 与静态资源**：首页 HTML、`/resources/lucide.min.js`（前端未构建时跳过）
 
-<Callout type="info" title="以脚本里的 Section 为准">
-`smoke-test.ps1` 头部的注释里写的组数是旧的（写着 15 组），**实际执行的是 `Section "0."` ～ `Section "9."`
-共 10 个 Section**、38 项断言；脚本会逐项打印 `PASS` / `FAIL` / `SKIP`，最后给一行汇总，
-汇总里的数字来自实跑统计，不是写死的。
+<Callout type="info" title="以脚本的运行结果为准">
+`smoke-test.ps1` 现在有 `Section "0."` ～ `Section "19."` 共 **20 组、137 项断言**；
+`security-test.ps1` 共 **20 组、95 项**。脚本逐项打印 `PASS` / `FAIL` / `SKIP`，最后给一行汇总，
+汇总数字来自实跑统计而不是写死的常量 —— 文档里的数字若与脚本输出不一致，以输出为准。
 </Callout>
 
 运行时逐项打印结果，形如 `PASS csrf-blocked` / `FAIL xxx`；
@@ -182,8 +182,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File security-test.ps1 -BaseUrl h
 
 <Callout type="info" title="断言总数与可选开关">
 脚本里共 **98 处 `Check` 调用**，其中 **14 处只在带可选开关时执行**（第 5b 组 3 处需 `-PositiveProbeUrl`、
-第 10 组 3 处需 `-TestLockout`、第 13 组 3 处需 `-SoftDirName`、第 14 组 5 处需 `-TestJobOwnership`）。
-有若干断言写在循环里，所以默认路径实际执行 **93 项**（不是 98 − 14）。
+（`security-test.ps1` 有 5 处 `Check` 需要可选开关，默认路径执行 95 项。）
 </Callout>
 
 ## 编码单测 `encoding-test.mjs`
@@ -344,3 +343,4 @@ git ls-files -i -c --exclude-standard
 要让忽略规则真正生效，需要 `git rm --cached <文件>` 把它们移出索引。
 注意这**不会**减小历史体积——要真正瘦身得用 `git filter-repo` 重写历史。
 </Callout>
+
