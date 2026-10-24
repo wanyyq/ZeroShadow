@@ -118,7 +118,7 @@
   "ui.settings.data.file_users": "Comptes des membres",
   "ui.settings.data.file_groups": "Groupes",
   "ui.settings.data.no_backups": "Aucune sauvegarde",
-  "ui.settings.data.backup_hint": "Les sauvegardes sont stockées dans data/backups/ et ne contiennent que les quatre fichiers de données config/users/groups/todos.",
+  "ui.settings.data.backup_hint": "Les sauvegardes sont stockées dans data/backups/ et couvrent six fichiers de données : config/users/groups/todos/shares/plugins.",
   "ui.settings.data.restore": "Restaurer",
   "ui.settings.data.restore_confirm_title": "Restaurer cette sauvegarde ?",
   "ui.settings.data.restore_confirm_description": "La sauvegarde choisie remplacera l'état actuel de « {name} ». L'état actuel sera d'abord sauvegardé automatiquement, pour pouvoir revenir en arrière.",

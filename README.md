@@ -512,7 +512,7 @@ Linux 归档里的 `ZeroShadow` 会带上可执行位（ZIP 的 external attribu
 ### 发布包内容
 
 ```
-ZeroShadow-2.0.0-beta-windows-x64.zip
+ZeroShadow-2.0.0-windows-x64.zip
 ├── ZeroShadow.exe   /  ZeroShadow    后端可执行文件
 ├── web/dist/                         前端静态文件
 ├── .env.example                      配置模板（首次运行自动生成 .env）
@@ -560,7 +560,16 @@ ZeroShadow-2.0.0-beta-windows-x64.zip
 
 完整的版本变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-**v1.2.4（当前版本）** 修好 Markdown 预览的三个实际缺陷，并把文档对齐到代码：
+**v2.0.0（当前版本）** 首个正式版：把 beta1–beta5 的成果合并发布，并完成一轮完整的安全审计与修复。
+
+- **WebDAV 转为正式功能**：后台「设置 → 公网 → WebDAV」开关与挂载点实时生效，可挂进 Windows 资源管理器 / Finder / RaiDrive / rclone；只认 Basic 认证、不认 Cookie（避免成为绕过 CSRF 的后门），覆盖已有文件需要「删除」权限且旧内容进回收站。
+- **网格缩略图 + 虚拟滚动**：缩略图由服务端 `sharp` 生成 WebP、按内容寻址缓存；列表与网格只渲染视口附近的行，几万个文件也不卡。
+- **弱网与内网穿透优化**：幂等请求自动重试 + 超时 + 离线判定，网络异常提示做 8 秒节流；Service Worker 缓存带内容哈希的静态资源，**不接管** `/api`、`/dav` 与页面导航。
+- **插件体系**：`manifest.json` + `apiVersion` + 权限白名单 + JSON Schema 设置，三种类型（主题 / 文件类型渲染器 / 服务端子进程）；总开关默认关闭、装完默认禁用，插件设置只有标了 `public` 的才会下发到浏览器。
+- **安全**：一轮完整审计（新增 20 项发现）+ 前两轮遗留项的修复，重点包括「对访客隐藏」可被 Windows 8.3 短名绕过、WebDAV `PUT` 覆盖绕过回收站、分享密码可换 IP 爆破、WebMCP 默认授权等。
+- **文档**：新增《[服主入门](docs/服主入门.md)》，并把中间件顺序、插件设置下发规则、备份文件清单等重新与代码对齐。
+
+**v1.2.4** 修好 Markdown 预览的三个实际缺陷，并把文档对齐到代码：
 
 - **`.md` 里的简单 HTML 能渲染了**：`<br>` / `<kbd>` / `<sub>` / `<span>` / `<div>` 等 13 个
   **无属性**标签正常显示，属性一律丢弃；`<script>` / `<iframe>` 等仍按纯文本显示（安全前提不变）。

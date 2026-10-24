@@ -11,6 +11,70 @@
 
 ---
 
+## [2.0.0] - 2026-10-25
+
+首个正式版：把 beta1–beta5 的成果（WebDAV 转正、缩略图与虚拟滚动、弱网优化、插件体系、品牌改造）合并发布，并补上一整轮安全审计与修复，同时把文档重新与代码对齐。
+
+> 一句话：**2.0.0 = beta1–beta5 的功能全量落地 + 一轮完整安全审计（20 项新发现、7 项当轮修完）+ 文档与代码重新对齐**。
+
+### 修复
+
+**安全（本轮审计修复，均附回归断言或实测证据）**
+
+- **「对访客隐藏」可被 Windows 8.3 短名绕过**（匿名可触发，`routes/fs.js` / `webdav.js` / `routes/shares.js`）：
+  打包下载与在线压缩的 `collectZipItems` 原来是"用**词法**相对路径判可见性、用**规范化**绝对路径读盘"，
+  于是 `?path=WEB~1` 能过判定却读到真正的 `web`。现在四处（zip/compress、WebDAV 的读写删与加锁、
+  分享的隐藏判定与创建）统一改为**先解析、再用 `resolved.rel` 判定**，并让归档名与递归基准一并规范化。
+  按本机 17 条 `guestHiddenPaths` 实测，修复前有 9 条存在可用短名。
+- **WebDAV `PUT` 覆盖绕过回收站**（`webdav.js`）：覆盖已有文件现在先收完请求体到临时文件，
+  再校验 `delete` 权限、把旧文件移入回收站，最后原子 rename；权限不足时返回 403 且**原文件不动**。
+  与 Web 端 `/upload`、`/rename` 的 `removeForOverwrite` 语义一致（此前与本文件头部注释、`安全设计.md` 都矛盾）。
+- **分享密码可换 IP 爆破**（`routes/shares.js` / `shares.js`）：`POST /api/share/:token/verify` 挂上接口限流
+  （每次失败都要跑 bcrypt，原来可当 CPU 放大器）；锁定在原有「IP」「IP×分享」之外新增「**按分享 token 全局**」
+  维度（15 分钟 50 次），伪造 `X-Forwarded-For` 换 IP 不再能绕开。
+- **插件总开关不生效**（`routes/plugins.js`）：`pluginsEnabled` 原来只在 admin 路由检查，
+  `/api/plugins/theme`、`/list`、`/entry/:id` 三条**公开**路由照常工作 —— "一键停用插件"是假的。
+  现在关闭时分别返回空 CSS / 空清单 / 404。
+- **插件设置对匿名访客可见**（`plugins/store.js`、`plugins/manifest.js`）：`/api/plugins/list` 匿名可达，
+  原来把 `settings` 全量下发。现在只下发 manifest 里显式标注 `"public": true` 的标量项，其余留在服务端。
+- **插件沙箱可被导航劫持**（`components/plugins/plugin-frame.tsx`）：iframe 消息增加 `event.origin === "null"` 校验，
+  并按入口文档的 load 次数判定是否被导航走，一旦被导航立即断链 —— 避免把"一次导航"升级成"任意文件读取接口"。
+- **WebMCP 默认授权**（`state/webmcp.tsx`、`lib/webmcp.ts`、`client-settings.tsx`）：注册的工具包含
+  建文件与生成公开分享链接，原来登录即注册、无任何提示。现在**默认关闭**，需在「设置 → 外观」显式开启，
+  关闭开关或登出立即 `clearContext()`。
+
+**文档与界面的事实性错误**
+
+- 两棵文档树的**中间件顺序画反了**（把 body parser 画在 `attachAuth` / `csrfGuard` 之前，与代码相反），
+  且都漏了 `createWebdavRouter()`；已按真实顺序重写并补上"两条顺序不能动"的告警。
+- 设置页备份提示写"仅包含 config/users/groups/todos **四个**文件"，实际 `MANAGED_FILES` 是**六个**
+  （含 `shares.json`、`plugins.json`）——8 种语言文案一并修正。
+- `validate-mdx.mjs` 的用法命令缺 `--route-prefix`（照文档执行必然 116 个假问题）；`plugins.mdx` 4 处代码围栏补语言标注。
+
+### 变更
+
+- 版本号 `2.0.0-beta` → `2.0.0`，同步 6 处：根 / `server` / `web` 三个 `package.json`、`server/index.js` 的 `/api/meta`、
+  `web/src/version.ts`、`web/public/sw.js`。`version.ts` 的注释原本只列了 3 处（漏掉 `sw.js`，而冒烟测试恰好断言它），
+  已补全为 6 处。
+- `README.md` 的「更新日志」区补上 v2.0.0 摘要；`SECURITY-AUDIT.md` 里"当前版本是 v1.2.4"改为
+  "本报告写作时的最新版本是 v1.2.4"（该文件是历史快照，不再冒充当前版本）。
+
+### 新增（文档）
+
+- 《[服主入门](docs/服主入门.md)》：面向刚部署完的人的管理清单 —— 首次登录与改密码、六步安全基线、
+  建成员与小组、19 项权限基线与各类上限、日常运维四件事、四个按需开启的能力、一页验收清单、十种常见误配。
+  MDX 文档站同步一篇（`admin/owner-onboarding`），两处索引与导航均已接入。
+- 插件设置的 `public` 规则、WebMCP 的授权与提示注入链路、分享密码的三维限速、备份受管文件清单，
+  已分别写入 `插件开发.md` / `SKILL.md` / `安全设计.md` / 使用手册与对应 MDX 页面。
+
+### 升级说明
+
+- 从任意 `2.0.0-beta` 升级：**无需改配置**。但插件设置若依赖 `init.settings` 拿到值，需在 manifest 里
+  给对应项补 `"public": true`，否则读到空对象（这是有意的默认收紧）。
+- 从 `1.2.x` 升级：见下面 `2.0.0-beta` 一节的升级说明。
+
+---
+
 ## [2.0.0-beta] - 2026-10-25
 
 v2.0 的第一个 beta。**产品定位从「局域网网盘」调整为「工作室网盘」**：服务端一个命令跑起来、

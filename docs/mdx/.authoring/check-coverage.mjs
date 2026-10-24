@@ -34,6 +34,7 @@ const mdxRoot = path.join(bundleRoot, "content", "docs")
 // 源文件 -> 目标 MDX（开发者指南被拆成四页，所以是数组）
 const PAIRS = [
   ["快速开始.md", ["getting-started/quickstart.mdx"]],
+  ["服主入门.md", ["admin/owner-onboarding.mdx"]],
   ["常见问题.md", ["getting-started/faq.mdx"]],
   ["使用手册.md", ["guide/manual.mdx"]],
   ["权限与角色.md", ["guide/permissions.mdx"]],

@@ -392,11 +392,30 @@ function buildTools(me: Me, expiry: ShareExpiryOption[]): ModelContextTool[] {
 }
 
 /**
+ * 撤销所有已注册的工具（把上下文清空）。
+ *
+ * 用在"用户把开关关掉"和"登出"两个场景：`installWebMcpTools` 返回的清理函数只在
+ * 组件卸载/依赖变化时执行，而"关掉开关"要求**立刻**让工具从代理那边消失。
+ */
+export function clearWebMcpTools(): void {
+  const mc = modelContext()
+  if (!mc) return
+  try {
+    mc.clearContext?.()
+  } catch {
+    /* 浏览器实现差异，忽略 */
+  }
+}
+
+/**
  * 把当前会话的能力注册成 WebMCP 工具，返回一个"注销"函数。
  *
  * 调用方是 `state/webmcp.tsx` 里的 `<WebMcpBridge />`：它在登录态 / 权限 /
  * 小组上下文变化时重新调用本函数（`provideContext` 是整体替换语义，
  * 所以每次变化都重建一次最省心），卸载或登出时执行返回的清理函数。
+ *
+ * **调用方必须先取得用户同意**（`ClientSettings.webmcpEnabled`，默认 false）：
+ * 这些工具里有建文件、建公开分享链接这类能力，注册即等于授权。
  */
 export function installWebMcpTools(me: Me, expiry: ShareExpiryOption[]): () => void {
   const mc = modelContext()

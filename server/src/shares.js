@@ -418,6 +418,18 @@ export function verifyTicket(ticket, shareToken) {
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000
 const PER_SHARE_MAX = 8
 const PER_IP_MAX = 20
+/**
+ * 同一个 token 的**全局**失败上限（不分 IP）。
+ *
+ * 为什么需要它：前两个维度都以 `req.ip` 为键，而开 `TRUST_PROXY` 后 ip 取自
+ * `X-Forwarded-For`，攻击者每次换一个值就得到一套全新的计数桶 —— 等于把锁定整个
+ * 废掉，可以无限次试 6~10 位密码（bcrypt 还能顺带当 CPU 放大器）。
+ * 这里补一个只按 token 计的桶，无法通过换 IP 规避。
+ *
+ * 上限取 50（远大于前两个维度）是刻意的权衡：既让"猜密码"在数学上不可行，
+ * 又不会让一个陌生人用 8 次失败就把分享主人锁在门外（那是另一种 DoS）。
+ */
+const PER_TOKEN_MAX = 50
 const ATTEMPT_CAP = 3000
 const attempts = new Map()
 
@@ -448,9 +460,10 @@ function bucket(key, now) {
 /** @returns {number} 剩余锁定分钟数（0 表示未锁定） */
 export function passwordLocked(ip, token) {
   const now = Date.now()
-  const a = attempts.get(`s:${ip}:${token}`)
-  const b = attempts.get(`i:${ip}`)
-  const until = Math.max(a?.lockedUntil || 0, b?.lockedUntil || 0)
+  const byShare = attempts.get(`s:${ip}:${token}`)
+  const byIp = attempts.get(`i:${ip}`)
+  const byToken = attempts.get(`t:${token}`)
+  const until = Math.max(byShare?.lockedUntil || 0, byIp?.lockedUntil || 0, byToken?.lockedUntil || 0)
   return until > now ? Math.ceil((until - now) / 60000) : 0
 }
 
@@ -470,10 +483,19 @@ export function recordPasswordFail(ip, token) {
     perIp.count = 0
     perIp.first = now
   }
+  // 只按 token 计：换 IP 也绕不过这一层
+  const perToken = bucket(`t:${token}`, now)
+  perToken.count += 1
+  if (perToken.count >= PER_TOKEN_MAX) {
+    perToken.lockedUntil = now + ATTEMPT_WINDOW_MS
+    perToken.count = 0
+    perToken.first = now
+  }
 }
 
 export function clearPasswordFails(ip, token) {
   attempts.delete(`s:${ip}:${token}`)
+  attempts.delete(`t:${token}`)
 }
 
 /** 供测试/诊断：当前限速表大小 */

@@ -118,7 +118,7 @@
   "ui.settings.data.file_users": "Cuentas de miembros",
   "ui.settings.data.file_groups": "Grupos",
   "ui.settings.data.no_backups": "Sin copias de seguridad",
-  "ui.settings.data.backup_hint": "Las copias se guardan en data/backups/ y solo incluyen los cuatro archivos de datos config/users/groups/todos.",
+  "ui.settings.data.backup_hint": "Las copias se guardan en data/backups/ e incluyen seis archivos de datos: config/users/groups/todos/shares/plugins.",
   "ui.settings.data.restore": "Revertir",
   "ui.settings.data.restore_confirm_title": "¿Revertir a esta copia?",
   "ui.settings.data.restore_confirm_description": "Se sobrescribirá «{name}» con la copia elegida. Antes se hará una copia automática del estado actual por si hay que deshacerlo.",

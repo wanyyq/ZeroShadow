@@ -21,7 +21,7 @@ docs/mdx/
         ├── index.mdx
         ├── getting-started/   quickstart · faq
         ├── guide/             manual · permissions
-        ├── admin/             admin-guide · configuration · tunnel
+        ├── admin/             owner-onboarding · admin-guide · configuration · tunnel
         ├── security/          design
         ├── development/       architecture · build · testing · release
         └── api/               reference
@@ -107,9 +107,10 @@ cp docs/mdx/public/img/* <你的站点>/public/img/
 | 介绍 | `/docs` | 产品定位、功能特性、权限概览、技术栈、阅读指引 |
 | 快速开始 | `/docs/getting-started/quickstart` | 环境要求、三步启动、开发模式、工作目录规则、从发布包运行 |
 | 常见问题 | `/docs/getting-started/faq` | 按现象分类的排查清单 |
+| 服主入门 | `/docs/admin/owner-onboarding` | 首次登录与改密码、六步安全基线、建成员与小组、19 项权限基线与上限、日常运维四件事、四个按需开启的能力、一页验收清单、十种常见误配 |
 | 使用手册 | `/docs/guide/manual` | 界面、小组切换、上传下载、预览（含 Markdown 渲染与兼容模式）、文件属性（签名 / 哈希 / EXIF / 文档作者 / 媒体信息）、在线编辑（编码 / 换行符 / 查找替换 / 并发冲突）、搜索、压缩解压、快捷方式、链接下载器、团队待办（含组长管理对话框）、头像（含默认头像规则）、冲突处理、右键菜单、快捷键、回收站、软件开源信息页 |
 | 权限与角色 | `/docs/guide/permissions` | 三角色完整权限矩阵、权限依赖、小组收窄与组长能力、访客隐藏规则 |
-| 管理员指南 | `/docs/admin/admin-guide` | 设置页十一个标签页逐项说明（含小组、分享、数据与保留、回收站、日志与指标） |
+| 管理员指南 | `/docs/admin/admin-guide` | 设置页十二个标签页逐项说明（含小组、分享、数据与保留、回收站、日志与指标） |
 | 配置参考 | `/docs/admin/configuration` | `.env` 全部变量 + `config.json` 全部字段与默认值 + **界面语言（`data/lang`）** + 浏览器本地存储键 |
 | 公网访问与隧道 | `/docs/admin/tunnel` | 四种隧道模式、真实 ssh 命令、`TRUST_PROXY` 用法与排查 |
 | 安全设计 | `/docs/security/design` | 认证、CSRF、路径安全、SSRF 防护、沙箱、限流与资源上限、在线编辑的编码与二进制拦截、密钥卫生 |

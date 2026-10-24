@@ -74,13 +74,15 @@ export default function App() {
               <AvatarSync />
               {/* WebMCP：把当前账号的能力注册成浏览器 AI 代理可调用的工具。
                   只有支持 navigator.modelContext 的浏览器才会下载并执行这段代码，
-                  其余浏览器既不多请求、也不多解析。 */}
-              {hasWebMcp && (
-                <Suspense fallback={null}>
-                  <WebMcpBridge />
-                </Suspense>
-              )}
+                  其余浏览器既不多请求、也不多解析。
+                  它挂在 ClientSettingsProvider **内部**（见下），因为注册前必须先看
+                  用户的显式授权（「设置 → 外观 → 允许浏览器 AI 调用网盘」，默认关）。 */}
               <ClientSettingsProvider>
+                {hasWebMcp && (
+                  <Suspense fallback={null}>
+                    <WebMcpBridge />
+                  </Suspense>
+                )}
                 <ClipboardProvider>
                   <UploadsProvider>
                     <OperationsProvider>

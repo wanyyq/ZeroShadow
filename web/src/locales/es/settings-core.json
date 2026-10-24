@@ -37,6 +37,8 @@
   "ui.settings.appearance.noise_hint": "Textura sutil de ruido en el fondo de la página; al desactivarla el fondo queda más limpio.",
   "ui.settings.appearance.reduce_motion_label": "Reducir animaciones",
   "ui.settings.appearance.reduce_motion_hint": "Desactiva las animaciones de entrada de páginas y listas, y las transiciones de la interfaz.",
+  "ui.settings.appearance.webmcp_label": "Permitir que la IA del navegador use la nube",
+  "ui.settings.appearance.webmcp_hint": "Si se activa, un agente de IA en este navegador (WebMCP) podrá listar, crear archivos y generar enlaces de compartir públicos con los permisos de tu cuenta. Desactivado por defecto: actívalo solo si confías en ese agente.",
   "ui.settings.appearance.file_browse_defaults_title": "Valores de navegación de archivos",
   "ui.settings.appearance.file_browse_defaults_desc": "Vista y orden iniciales al abrir la página de archivos (puedes cambiarlos en la página; los cambios también se guardan aquí)",
   "ui.settings.appearance.view_legend": "Vista",

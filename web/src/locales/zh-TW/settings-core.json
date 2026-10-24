@@ -37,6 +37,8 @@
   "ui.settings.appearance.noise_hint": "頁面底層的細微雜訊紋理，關掉後背景更純淨。",
   "ui.settings.appearance.reduce_motion_label": "減少動畫",
   "ui.settings.appearance.reduce_motion_hint": "關閉頁面與清單的進場動畫、以及介面過場效果。",
+  "ui.settings.appearance.webmcp_label": "允許瀏覽器 AI 使用網盤",
+  "ui.settings.appearance.webmcp_hint": "開啟後，此瀏覽器內的 AI 代理（WebMCP）可用你目前帳號的權限列出目錄、建立檔案、產生公開分享連結。預設關閉，僅在你信任該代理時開啟。",
   "ui.settings.appearance.file_browse_defaults_title": "檔案瀏覽預設值",
   "ui.settings.appearance.file_browse_defaults_desc": "開啟檔案頁時使用的初始檢視與排序（頁面上隨時可改，改完同樣會記在這裡）",
   "ui.settings.appearance.view_legend": "檢視",

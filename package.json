@@ -1,7 +1,7 @@
 {
   "name": "zeroshadow",
   "private": true,
-  "version": "2.0.0-beta",
+  "version": "2.0.0",
   "description": "ZeroShadow - lightweight LAN cloud drive (Node + React)",
   "type": "module",
   "scripts": {

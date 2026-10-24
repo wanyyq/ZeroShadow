@@ -37,6 +37,8 @@
   "ui.settings.appearance.noise_hint": "ページ下層の微細なノイズテクスチャ。オフにすると背景がよりすっきりします。",
   "ui.settings.appearance.reduce_motion_label": "アニメーションを減らす",
   "ui.settings.appearance.reduce_motion_hint": "ページやリストの入場アニメーションと、画面のトランジション効果をオフにします。",
+  "ui.settings.appearance.webmcp_label": "ブラウザの AI にドライブの利用を許可",
+  "ui.settings.appearance.webmcp_hint": "オンにすると、このブラウザの AI エージェント（WebMCP）が現在のアカウントの権限で一覧表示・ファイル作成・公開共有リンクの生成を行えます。既定ではオフです。信頼できるエージェントのみ有効にしてください。",
   "ui.settings.appearance.file_browse_defaults_title": "ファイル閲覧の既定値",
   "ui.settings.appearance.file_browse_defaults_desc": "ファイルページを開いたときの初期ビューと並べ替え（ページ上でいつでも変更でき、変更内容もここに記録されます）",
   "ui.settings.appearance.view_legend": "表示",

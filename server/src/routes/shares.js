@@ -259,8 +259,13 @@ publicShareRouter.get("/:token", rateLimit, async (req, res, next) => {
   }
 })
 
-/** 校验密码 → 发票据。失败次数按 IP + token 双维度限制。 */
-publicShareRouter.post("/:token/verify", async (req, res, next) => {
+/**
+ * 校验密码 → 发票据。失败次数按 **IP + 分享 + token 全局** 三个维度限制。
+ *
+ * `rateLimit` 是必需的第一道：这个接口每次失败都要跑一次 bcrypt（约 100ms），
+ * 没有限流时匿名者用极少的请求就能把单核打满，而它原来恰恰是唯一没挂限流的公开分享接口。
+ */
+publicShareRouter.post("/:token/verify", rateLimit, async (req, res, next) => {
   try {
     assertPublicAccess(req)
     const share = loadShare(req)

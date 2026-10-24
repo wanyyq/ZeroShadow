@@ -196,13 +196,15 @@ X-Requested-With: XMLHttpRequest
 - 响应：
 
 ```json
-{ "name": "ZeroShadow", "version": "2.0.0-beta" }
+{ "name": "ZeroShadow", "version": "2.0.0" }
 ```
 
-<Callout type="info" title="version 是写死的，改版本号要动三处">
+<Callout type="info" title="version 是写死的，改版本号要动 6 处">
 `version` 与根 `package.json` 一致，但它是**写死**在代码里的，并没有从 `package.json` 读取。
-发版时三处必须同步修改：根 `package.json`、`server/index.js` 里的 `/api/meta`、
-以及前端唯一的版本号来源 `web/src/version.ts`（导出 `VERSION`，供「软件开源信息」页与侧边栏共用）。
+发版时六处必须同步修改：根 `package.json`、`server/package.json`、`web/package.json`、
+`server/index.js` 里的 `/api/meta`、前端唯一的版本号来源 `web/src/version.ts`（导出 `VERSION`，
+供「软件开源信息」页与侧边栏共用），以及 `web/public/sw.js` 的 `VERSION`（缓存名；
+`smoke-test.ps1` 第 16 组会断言它等于根 `package.json` 的 `version`）。
 </Callout>
 
 ### GET /api/i18n

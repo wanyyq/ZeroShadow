@@ -634,6 +634,33 @@ async function handlePut(req, res) {
     return res.status(500).json({ error: "写入失败", errorKey: "api.webdav.write_failed" })
   }
 
+  // 覆盖 = 删除。与 /api/fs/upload、/rename 的 removeForOverwrite 保持同一套规则：
+  //   1. 需要 **delete** 权限 —— 否则只有 upload 权限的成员写一次同名文件，
+  //      就能永久销毁别人的数据；
+  //   2. 旧文件要进**回收站** —— 否则一次误覆盖就彻底没了。
+  // 旧实现直接 rename(tmp, dest)，这两条都不满足（而本文件头部注释与
+  // docs/安全设计.md 却都写着"覆盖类操作还要 delete 权限并进回收站"）。
+  //
+  // 顺序刻意放在**请求体收完之后**：先收进 tmp 再动原文件，中途失败/断流时
+  // 旧文件仍然完好，不会出现"删了旧的、新的没写进来"。
+  if (existing) {
+    if (!req.dav.perms.delete) {
+      await fs.promises.rm(tmp, { force: true }).catch(() => {})
+      return res.status(403).json({
+        error: "覆盖会删除已有的同名文件，需要「删除」权限",
+        errorKey: "api.fs.overwrite_needs_delete",
+      })
+    }
+    const trashed = await moveToTrash(
+      { abs: resolved.abs, rel: resolved.rel },
+      { user: req.dav.username, role: "member", ip: req.ip }
+    )
+    // 回收站不可用（目录只读 / 磁盘满）时才退回彻底删除 —— 与 COPY/MOVE 的覆盖分支一致
+    if (!trashed && (await statSafe(resolved.abs))) {
+      await fs.promises.rm(resolved.abs, { recursive: true, force: true })
+    }
+  }
+
   try {
     // 原子替换：与在线编辑器同一套做法，避免写盘中断留下半个文件
     await fs.promises.rename(tmp, resolved.abs).catch(async () => {

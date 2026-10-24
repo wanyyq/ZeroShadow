@@ -19,7 +19,7 @@
  * 不是这里的 bug；隧道自带 https，所以"穿透 + 弱网"场景正好被覆盖。
  */
 
-const VERSION = "2.0.0-beta"
+const VERSION = "2.0.0"
 const ASSET_CACHE = `zs-assets-${VERSION}`
 const RESOURCE_CACHE = `zs-resources-${VERSION}`
 const KEEP = new Set([ASSET_CACHE, RESOURCE_CACHE])

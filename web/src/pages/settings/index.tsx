@@ -130,6 +130,8 @@ function AppearanceSection() {
   const settings = useClientSettings()
   const confirm = useConfirm()
   const t = useT()
+  // 浏览器不支持 WebMCP 时不显示这一项：显示了也只会是个无效开关
+  const webMcpAvailable = typeof navigator !== "undefined" && "modelContext" in navigator
 
   const themeOptions = [
     ["light", "sun", t("ui.common.platform_theme_light")],
@@ -237,6 +239,18 @@ function AppearanceSection() {
                     onCheckedChange={(v) => settings.update({ reduceMotion: !!v })}
                   />
                 </SettingRow>
+
+                {webMcpAvailable && (
+                  <SettingRow
+                    label={t("ui.settings.appearance.webmcp_label")}
+                    hint={t("ui.settings.appearance.webmcp_hint")}
+                  >
+                    <Switch
+                      checked={settings.webmcpEnabled}
+                      onCheckedChange={(v) => settings.update({ webmcpEnabled: !!v })}
+                    />
+                  </SettingRow>
+                )}
               </div>
             </FieldSet>
           </FieldGroup>

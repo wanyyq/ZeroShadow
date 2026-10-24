@@ -37,6 +37,8 @@
   "ui.settings.appearance.noise_hint": "页面底层的细微噪点纹理，关掉后背景更纯净。",
   "ui.settings.appearance.reduce_motion_label": "减少动画",
   "ui.settings.appearance.reduce_motion_hint": "关闭页面与列表的入场动画、以及界面过渡效果。",
+  "ui.settings.appearance.webmcp_label": "允许浏览器 AI 调用网盘",
+  "ui.settings.appearance.webmcp_hint": "开启后，本浏览器里的 AI 代理（WebMCP）可以用你当前账号的权限列目录、建文件、生成公开分享链接。默认关闭，仅在你信任该代理时开启。",
   "ui.settings.appearance.file_browse_defaults_title": "文件浏览默认值",
   "ui.settings.appearance.file_browse_defaults_desc": "打开文件页时使用的初始视图与排序（页面上随时可改，改完同样会记在这里）",
   "ui.settings.appearance.view_legend": "视图",

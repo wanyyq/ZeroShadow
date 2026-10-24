@@ -118,7 +118,7 @@
   "ui.settings.data.file_users": "成员账户",
   "ui.settings.data.file_groups": "小组",
   "ui.settings.data.no_backups": "暂无备份",
-  "ui.settings.data.backup_hint": "备份保存在 data/backups/，仅包含 config/users/groups/todos 四个数据文件。",
+  "ui.settings.data.backup_hint": "备份保存在 data/backups/，包含 config/users/groups/todos/shares/plugins 六个数据文件。",
   "ui.settings.data.restore": "回滚",
   "ui.settings.data.restore_confirm_title": "回滚到该备份？",
   "ui.settings.data.restore_confirm_description": "将用所选备份覆盖当前的「{name}」。当前状态也会先自动快照一份以便反悔。",

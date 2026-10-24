@@ -118,7 +118,7 @@
   "ui.settings.data.file_users": "Member accounts",
   "ui.settings.data.file_groups": "Groups",
   "ui.settings.data.no_backups": "No backups",
-  "ui.settings.data.backup_hint": "Backups live in data/backups/ and cover only the four data files config/users/groups/todos.",
+  "ui.settings.data.backup_hint": "Backups live in data/backups/ and cover six data files: config/users/groups/todos/shares/plugins.",
   "ui.settings.data.restore": "Roll back",
   "ui.settings.data.restore_confirm_title": "Roll back to this backup?",
   "ui.settings.data.restore_confirm_description": "The selected backup will overwrite the current “{name}”. The current state is snapshotted first so you can undo this.",

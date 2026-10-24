@@ -500,6 +500,25 @@ frame-ancestors 'self'
 | `/resources/*`（字体、图标库、动画库） | `public, max-age=86400` |
 | 其它（含 `index.html`） | `no-cache` |
 
+### 浏览器内 AI 代理（WebMCP）：默认关闭，必须显式授权
+
+浏览器支持 `navigator.modelContext`（W3C WebMCP）时，前端可以把当前账号的能力注册成一组
+工具供浏览器里的 AI 代理调用：`list_files` / `search_files` / `file_details` /
+`get_download_url` / `create_folder` / `create_text_file` / `share_create` /
+`share_list` / `share_revoke` / `whoami` / `shared_download_url`。
+
+风险不在"工具能不能被调用"，而在**谁在调用**：
+
+- **注册即授权**：一旦注册，浏览器里任何接入的代理都能以当前用户权限直接使用，界面没有任何提示；
+- **网盘里的文本就是提示注入载体**：打开一个内容恶意的 Markdown，就可能诱导代理走
+  "`get_download_url` 取直链 → `share_create` 造公开链接 → 外带"这条链；
+- 因此这一项**默认关闭**（`ClientSettings.webmcpEnabled`，存在 `localStorage` 的
+  `zs-client-settings` 里）。要在「设置 → 外观 → 允许浏览器 AI 调用网盘」里显式打开；
+  关掉开关或登出时，前端会立刻 `clearContext()` 把工具全部撤销。
+
+开启后，服务端仍然按 `req.perms` 逐请求判定 —— 工具只是把"用户本来就有的能力"换了个入口，
+越不过权限；`share_create` 也照样受"对访客隐藏的内容必须设密码"约束。
+
 ## 资源上限与限流
 
 ### 体积与数量上限

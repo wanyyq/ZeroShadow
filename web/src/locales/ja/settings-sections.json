@@ -118,7 +118,7 @@
   "ui.settings.data.file_users": "メンバーアカウント",
   "ui.settings.data.file_groups": "グループ",
   "ui.settings.data.no_backups": "バックアップはありません",
-  "ui.settings.data.backup_hint": "バックアップは data/backups/ に保存され、config/users/groups/todos の 4 つのデータファイルのみを含みます。",
+  "ui.settings.data.backup_hint": "バックアップは data/backups/ に保存され、config/users/groups/todos/shares/plugins の 6 つのデータファイルを含みます。",
   "ui.settings.data.restore": "ロールバック",
   "ui.settings.data.restore_confirm_title": "このバックアップにロールバックしますか？",
   "ui.settings.data.restore_confirm_description": "選択したバックアップで現在の「{name}」を上書きします。現在の状態も先に自動スナップショットされるので、やり直せます。",

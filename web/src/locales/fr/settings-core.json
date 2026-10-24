@@ -37,6 +37,8 @@
   "ui.settings.appearance.noise_hint": "Fine texture de bruit au fond de la page ; désactivée, le fond est plus net.",
   "ui.settings.appearance.reduce_motion_label": "Réduire les animations",
   "ui.settings.appearance.reduce_motion_hint": "Désactive les animations d'entrée des pages et des listes, ainsi que les transitions de l'interface.",
+  "ui.settings.appearance.webmcp_label": "Autoriser l'IA du navigateur à utiliser le lecteur",
+  "ui.settings.appearance.webmcp_hint": "Activé, un agent IA de ce navigateur (WebMCP) peut lister, créer des fichiers et générer des liens de partage publics avec les droits de votre compte. Désactivé par défaut — à n'activer que si vous faites confiance à cet agent.",
   "ui.settings.appearance.file_browse_defaults_title": "Valeurs par défaut de navigation",
   "ui.settings.appearance.file_browse_defaults_desc": "Vue et tri initiaux à l'ouverture de la page des fichiers (modifiables à tout moment, les changements sont mémorisés ici)",
   "ui.settings.appearance.view_legend": "Affichage",

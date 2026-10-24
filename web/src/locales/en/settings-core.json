@@ -37,6 +37,8 @@
   "ui.settings.appearance.noise_hint": "A subtle noise texture behind the page; turning it off gives a cleaner background.",
   "ui.settings.appearance.reduce_motion_label": "Reduce motion",
   "ui.settings.appearance.reduce_motion_hint": "Turns off entrance animations for pages and lists, along with interface transitions.",
+  "ui.settings.appearance.webmcp_label": "Allow in-browser AI to use the drive",
+  "ui.settings.appearance.webmcp_hint": "When on, an AI agent in this browser (WebMCP) can list folders, create files and mint public share links with your account's permissions. Off by default - enable only if you trust that agent.",
   "ui.settings.appearance.file_browse_defaults_title": "File browsing defaults",
   "ui.settings.appearance.file_browse_defaults_desc": "The initial view and sorting used when opening the files page (you can still change them there, and the change is recorded here as well)",
   "ui.settings.appearance.view_legend": "View",

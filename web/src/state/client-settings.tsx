@@ -23,6 +23,14 @@ export interface ClientSettings {
   noise: boolean
   /** 桌面侧边栏默认折叠 */
   sidebarCollapsed: boolean
+  /**
+   * 是否允许把当前账号的能力注册成 WebMCP 工具，交给浏览器里的 AI 代理调用。
+   *
+   * **默认 false**：注册的工具里包含"建文件 / 建公开分享链接"这类写与分享能力，
+   * 一旦注册，浏览器中任何接入的 AI 代理都能以当前用户权限直接使用，且界面上
+   * 没有任何提示。这属于"必须由用户显式同意"的能力，不能默认打开。
+   */
+  webmcpEnabled: boolean
 }
 
 const DEFAULTS: ClientSettings = {
@@ -35,6 +43,7 @@ const DEFAULTS: ClientSettings = {
   reduceMotion: false,
   noise: true,
   sidebarCollapsed: false,
+  webmcpEnabled: false,
 }
 
 const STORAGE_KEY = "zs-client-settings"
@@ -68,6 +77,8 @@ function load(): ClientSettings {
         : "base",
       reduceMotion: parsed.reduceMotion === true,
       noise: parsed.noise !== false,
+      // 必须显式 `=== true`：这一项是"授权"，任何"缺省即为真"的读法都是错的
+      webmcpEnabled: parsed.webmcpEnabled === true,
       sidebarCollapsed:
         typeof parsed.sidebarCollapsed === "boolean"
           ? parsed.sidebarCollapsed

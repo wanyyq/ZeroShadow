@@ -1,6 +1,7 @@
 {
   "title": "管理员",
   "pages": [
+    "owner-onboarding",
     "admin-guide",
     "configuration",
     "tunnel"
