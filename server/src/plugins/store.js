@@ -157,8 +157,12 @@ export function activeThemeManifest() {
 /**
  * 已启用、并且带前端运行时的插件（给 `/api/plugins/list` 用）。
  *
- * 只暴露"渲染一个插件需要知道的信息"：id / name / kind / extensions / modes。
- * **不含** permissions、sha256、settings schema、主题令牌 —— 那些是管理员视角的数据。
+ * 暴露「渲染一个插件需要知道的信息」：id / name / kind / extensions / modes，
+ * 外加 **permissions**。permissions 不是管理信息而是**能力声明**：插件被
+ * `sandbox="allow-scripts"` 的 iframe 承载，读写文件只能让宿主代执行，而宿主必须
+ * 依据它来判断"这回该不该答应"（见 web/src/components/plugins/plugin-frame.tsx）。
+ * 不下发它，清单里声明的权限就只是装饰（安全复检 M-3）。
+ * sha256、settings schema、主题令牌仍然只在管理员视角出现。
  */
 export function enabledRuntimePlugins() {
   const out = []
@@ -174,6 +178,8 @@ export function enabledRuntimePlugins() {
       kind: manifest.kind,
       extensions: manifest.extensions,
       modes: manifest.modes,
+      // 能力白名单（安装期已按 PLUGIN_PERMISSIONS 校验过，这里原样下发）
+      permissions: manifest.permissions,
       // 插件自己的设置：由管理员在后台填，最终交给插件渲染时使用。
       // 它属于"插件配置"而不是"网盘机密"，且拼好后的内容本来就会展示给用户。
       settings: st.settings || {},

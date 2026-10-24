@@ -6,6 +6,7 @@
   "api.fs.invalid_params": "参数格式错误",
   "api.fs.soft_read_only": "外部映射目录仅支持只读操作",
   "api.fs.soft_copy_out_forbidden": "只读映射目录的内容不允许复制到网盘目录（可在后台设置中放开）",
+  "api.fs.copy_source_sensitive": "该目录包含服务自身的配置或运行数据（.env / data/），不允许复制到网盘内",
   "api.fs.name_invalid": "名称无效",
   "api.fs.name_empty": "名称不能为空",
   "api.fs.name_too_long": "名称过长",

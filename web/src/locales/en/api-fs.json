@@ -6,6 +6,7 @@
   "api.fs.invalid_params": "Invalid request parameters",
   "api.fs.soft_read_only": "Mapped external folders are read-only",
   "api.fs.soft_copy_out_forbidden": "Files in a read-only mapped folder cannot be copied into the drive (an admin can allow this in settings)",
+  "api.fs.copy_source_sensitive": "That folder contains the service's own configuration or runtime data (.env / data/), so it cannot be copied into the drive",
   "api.fs.name_invalid": "Invalid name",
   "api.fs.name_empty": "The name cannot be empty",
   "api.fs.name_too_long": "The name is too long",

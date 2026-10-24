@@ -4,5 +4,6 @@
   "ui.preview.plugin_dirty": "Unsaved changes",
   "ui.preview.plugin_read_failed": "The plugin could not read the file",
   "ui.preview.plugin_too_large": "File is too large for the plugin to read",
-  "ui.preview.plugin_readonly": "No edit permission — the plugin is read-only"
+  "ui.preview.plugin_readonly": "No edit permission — the plugin is read-only",
+  "ui.preview.plugin_permission_denied": "The plugin did not declare the “{perm}” permission, so this request was denied. Ask the administrator to repackage it with that capability listed under permissions in its manifest."
 }

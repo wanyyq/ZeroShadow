@@ -46,6 +46,8 @@ publicPluginRouter.get("/theme", (_req, res) => {
  * 已启用的「前端运行时」插件清单。
  *
  * 给预览页用：它只知道"这个后缀交给哪个插件渲染"，不需要任何管理信息。
+ * 唯一的例外是 `permissions` —— 那是**能力声明**而不是管理数据：宿主在替插件
+ * 读写文件前必须依据它放行/拒绝（见 components/plugins/plugin-frame.tsx）。
  * 未启用的插件、主题插件、损坏的插件都不会出现在这里。
  */
 publicPluginRouter.get("/list", (_req, res) => {

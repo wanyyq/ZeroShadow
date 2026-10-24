@@ -7,6 +7,10 @@ import { ext } from "@/lib/format"
  * 只做一件事：告诉预览等页面「这个后缀该交给哪个插件渲染」。
  * 数据来自 `GET /api/plugins/list`（已启用的 `fileType` 插件，不含管理信息）。
  *
+ * `permissions` 是插件清单里声明的**能力**（fs.read / fs.write / ui.toast /
+ * settings.rw）。宿主在替插件执行 readText / saveText 之前必须先查它 ——
+ * 插件自己跑在不透明源的 iframe 里，宿主是唯一能拦住越权读写的环节。
+ *
  * 缓存策略：**进程内缓存一次**。插件启停需要管理员操作，且页面刷新后就会重新拉；
  * 为它加轮询/订阅不值得。失败也不缓存（下次进预览会重试）。
  */
@@ -17,6 +21,8 @@ export interface PluginRuntime {
   kind: string
   extensions: string[]
   modes: string[]
+  /** 能力声明：宿主据此决定允不允许代执行（空数组 = 不允许任何读写） */
+  permissions: string[]
   settings: Record<string, unknown>
 }
 

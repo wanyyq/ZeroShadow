@@ -10,6 +10,7 @@ import { TMP_DIR } from "../env.js"
 import { requirePerm, requireRole } from "../auth.js"
 import { effectivePerms, downloadUrlLimitBytes, getConfig, saveConfig, uploadLimitBytes, uploadLimitMB, zipLimits } from "../config.js"
 import {
+  exposesServiceFiles,
   getSoftDirEntries,
   guestBlocked,
   isHiddenFromGuest,
@@ -84,6 +85,25 @@ function blockSoftCopyOut(rel) {
     err.errorKey = "api.fs.soft_copy_out_forbidden"
     throw err
   }
+}
+
+/**
+ * 复制来源的"祖先目录"预检（安全复检 D-1）。
+ *
+ * `blockSoftCopyOut` 只是一道**开关**（默认关，管理员可在后台放开），而
+ * `isSensitiveAbs` 只能拦被点名的那个路径：它拦得住「复制 软件/data」，
+ * 却拦不住「复制 软件/proj」—— proj 自己不敏感，但子树里有 proj\.env 与
+ * proj\data\，而复制走的是 `fs.cp(recursive)`，不做逐条过滤。
+ * 打包路径（scanDirForZip / addDirToArchive）有逐条过滤，复制路径没有，这里补齐。
+ *
+ * 注意：这条与开关无关、始终生效 —— 管理员放开"允许复制出去"的意思是
+ * "可以把映射目录里的普通文件搬进来"，不该等于"可以把凭据搬进来"。
+ */
+function assertCopySourceSafe(abs) {
+  if (!exposesServiceFiles(abs)) return
+  throw httpError(403, "该目录包含服务自身的配置或运行数据（.env / data/），不允许复制到网盘内", {
+    errorKey: "api.fs.copy_source_sensitive",
+  })
 }
 
 // 小组上下文可见性：选中小组后，只有白名单内且不在黑名单的目录可见。
@@ -959,7 +979,10 @@ async function transfer(req, res, next, mode) {
     for (const p of sources) {
       const src = resolveSafe(p)
       if (mode === "move") blockSoft(src.rel)
-      if (mode === "copy") blockSoftCopyOut(src.rel)
+      if (mode === "copy") {
+        blockSoftCopyOut(src.rel)
+        assertCopySourceSafe(src.abs)
+      }
       assertContextVisible(req, src.rel)
       if (!src.rel) throw httpError(400, "非法来源", { errorKey: "api.fs.source_invalid" })
       const stat = await assertExists(src.abs)

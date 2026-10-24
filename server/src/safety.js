@@ -178,6 +178,12 @@ const SENSITIVE_DATA_ENTRIES = new Set([
  * 这样即使有人把 FILES_DIR 设成项目根目录（那样 .env 与 data/ 都落在"网盘里"），
  * 凭据与运行数据依然拿不到。
  */
+/** 统一归一（resolve + 大小写折叠）：用于比较两个绝对路径是不是同一位置 */
+function normPath(value) {
+  const abs = path.resolve(value)
+  return CASE_INSENSITIVE ? abs.toLowerCase() : abs
+}
+
 export function isSensitiveAbs(abs) {
   const resolved = path.resolve(abs)
   // Windows / macOS 的文件系统不区分大小写：`.ENV`、`Data\Config.json` 与真实文件
@@ -196,14 +202,49 @@ export function isSensitiveAbs(abs) {
   if (norm === (CASE_INSENSITIVE ? envFile.toLowerCase() : envFile)) return true
   const dataRoot = path.resolve(DATA_DIR)
   const dataNorm = CASE_INSENSITIVE ? dataRoot.toLowerCase() : dataRoot
-  // data/ 目录**本身**放行：FILES_DIR 有可能就设在 data/ 上（把文件直接放在
-  // 配置旁边），那样网盘根目录就是 data/，把根目录整个挡掉会让网盘全空。
-  // 需要挡的是它里面的具体条目（下一段的判断）。
-  if (norm === dataNorm) return false
+  // data/ 目录**本身**要不要放行，取决于部署布局，不能无条件放行：
+  //   - FILES_DIR 就是 data/（部署者把文件直接放在配置旁边）时，这个路径代表
+  //     "网盘根目录"，必须放行，否则网盘整个是空的；
+  //   - 其余情况下（默认 FILES_DIR=data/files）`data` 只是"一个装着凭据的普通目录名"，
+  //     必须按敏感目录拦掉。
+  // 旧实现无条件放行，于是「复制映射目录下的 data」能把它整个搬进网盘
+  // （安全复检 D-1：copyEntry 走 fs.cp 递归复制，没有逐条过滤）。
+  if (norm === dataNorm) return norm !== normPath(FILES_DIR)
   if (!norm.startsWith(dataNorm + path.sep)) return false
   const firstRaw = norm.slice(dataNorm.length + 1).split(path.sep)[0]
   const first = CASE_INSENSITIVE ? firstRaw.toLowerCase() : firstRaw
   return SENSITIVE_DATA_ENTRIES.has(first)
+}
+
+/**
+ * "复制这个目录"会不会把服务自身的凭据与运行数据一起带走？
+ *
+ * `isSensitiveAbs` 只能拦**被点名的那个路径**：它拦得住「复制 软件/data」
+ * （`data` 是敏感目录名），却拦不住「复制 软件/proj」—— proj 本身不敏感，
+ * 但子树里有 proj\.env 与 proj\data\，而复制走的是 `fs.cp(recursive)`，
+ * 不做逐条过滤（打包路径 scanDirForZip / addDirToArchive 才有逐条过滤）。
+ *
+ * 与其遍历整棵树，这里做一个 **O(1) 的结构判断**：只要被复制的目录是
+ * `.env` 或 `data/` 的**祖先（或就是它本身）**，复制结果里就必然包含它们。
+ * 用于 `routes/fs.js` 的 copy/move，与 `isSensitiveAbs` 配合（安全复检 D-1）。
+ *
+ * 例（默认布局，FILES_DIR=data/files）：
+ *   软件/proj  → 是 proj\.env 与 proj\data 的祖先 → true（拒绝）
+ *   软件/data  → 就是 data 本身              → true（拒绝）
+ *   软件/data/files → data 的后代，不含凭据   → false（放行，这是网盘内容本体）
+ */
+export function exposesServiceFiles(abs) {
+  const target = path.resolve(abs)
+  for (const guarded of [path.resolve(ENV_FILE), path.resolve(DATA_DIR)]) {
+    // path.relative 在 win32 下按大小写不敏感比较，正好符合这里的需求
+    const rel = path.relative(target, guarded)
+    // rel === ""            → target 就是这个路径本身
+    // 不以 ".." 开头且非绝对 → target 是它的祖先
+    if (!rel || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))) {
+      return true
+    }
+  }
+  return false
 }
 
 export function getSoftDirEntries() {

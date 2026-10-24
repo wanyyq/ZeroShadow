@@ -16,7 +16,10 @@ import type { PluginRuntime } from "@/lib/plugin-registry"
  *   2. 服务端给入口 HTML 的 CSP 是 `default-src 'none'` + `connect-src 'none'`，
  *      插件是**自包含单文件**，连子资源都发不出去；
  *   3. 所以插件要读写文件，只能 `postMessage` 回来，由**宿主**用自己的会话代执行 ——
- *      宿主再走既有接口，服务端 `req.perms` 才是最终裁判。
+ *      宿主再走既有接口，服务端 `req.perms` 才是最终裁判；
+ *   4. 代执行之前，宿主还必须检查插件清单声明的 `permissions`
+ *      （`fs.read` / `fs.write` / `ui.toast`）：不声明就不代做。插件是第三方内容，
+ *      声明即边界；不查这一项，清单里的能力声明就只是装饰（安全复检 M-3）。
  *
  * 消息协议（v1，`apiVersion: 1`）：
  *   plugin → host  { type: "zs:ready" }
@@ -75,13 +78,25 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
     async (req: FrameRequest): Promise<Outcome> => {
       const params = req.params || {}
       const targetPath = typeof params.path === "string" && params.path ? params.path : path
+      // 插件清单声明的能力。**宿主是唯一的执法点**：插件跑在不透明源的 iframe 里，
+      // 拿不到 Cookie、也发不出请求，所有读写都必须经这里代执行 —— 所以"该不该答应"
+      // 的判断必须落在这里，而不能指望"插件不会越界"（安全复检 M-3：
+      // 旧实现完全不看 permissions，零声明的插件照样能读写任意文件）。
+      const perms = Array.isArray(plugin.permissions) ? plugin.permissions : []
+      const requirePerm = (perm: string) => {
+        if (!perms.includes(perm)) {
+          throw new Error(t("ui.preview.plugin_permission_denied", { perm }))
+        }
+      }
       try {
         if (req.method === "readText") {
+          requirePerm("fs.read")
           const data = await fetchFileText(targetPath, typeof params.encoding === "string" ? params.encoding : undefined)
           lastText.current = data
           return { ok: true, result: data }
         }
         if (req.method === "readBinary") {
+          requirePerm("fs.read")
           const res = await fetch(downloadUrl(targetPath, true), {
             credentials: "same-origin",
             headers: { "X-Requested-With": "XMLHttpRequest" },
@@ -93,6 +108,7 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
         }
         if (req.method === "saveText") {
           if (!canWrite) throw new Error(t("ui.preview.plugin_readonly"))
+          requirePerm("fs.write")
           const base = lastText.current
           const saved = await saveFileText({
             path: targetPath,
@@ -107,6 +123,7 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
           return { ok: true, result: saved }
         }
         if (req.method === "notify") {
+          requirePerm("ui.toast")
           toast.message(String(params.message ?? ""))
           return { ok: true, result: null }
         }
@@ -115,7 +132,7 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
         return { ok: false, error: (err as Error).message || t("ui.common.operation_failed") }
       }
     },
-    [canWrite, path, t]
+    [canWrite, path, plugin.permissions, t]
   )
 
   React.useEffect(() => {
@@ -152,7 +169,7 @@ export function PluginFrame({ plugin, path, name, size, mtime, canWrite, onDirty
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [canWrite, handleRequest, mtime, name, onDirtyChange, path, plugin.settings, post, size])
+  }, [canWrite, handleRequest, mtime, name, onDirtyChange, path, plugin.permissions, plugin.settings, post, size])
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">

@@ -4,5 +4,6 @@
   "ui.preview.plugin_dirty": "有未保存的改动",
   "ui.preview.plugin_read_failed": "插件读取文件失败",
   "ui.preview.plugin_too_large": "文件过大，插件无法读取",
-  "ui.preview.plugin_readonly": "没有编辑权限，插件只能查看"
+  "ui.preview.plugin_readonly": "没有编辑权限，插件只能查看",
+  "ui.preview.plugin_permission_denied": "插件未声明「{perm}」权限，这次操作已被拒绝。请联系管理员重新打包插件，在 manifest 的 permissions 里补上该能力。"
 }
