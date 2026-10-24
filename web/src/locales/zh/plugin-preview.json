@@ -1,0 +1,8 @@
+{
+  "ui.preview.plugin_loading": "正在用插件「{name}」渲染…",
+  "ui.preview.plugin_failed": "插件加载失败",
+  "ui.preview.plugin_dirty": "有未保存的改动",
+  "ui.preview.plugin_read_failed": "插件读取文件失败",
+  "ui.preview.plugin_too_large": "文件过大，插件无法读取",
+  "ui.preview.plugin_readonly": "没有编辑权限，插件只能查看"
+}

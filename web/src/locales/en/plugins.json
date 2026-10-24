@@ -1,7 +1,7 @@
 {
   "ui.settings.tabs.plugins": "Plugins",
   "ui.plugins.title": "Installed plugins",
-  "ui.plugins.desc": "Plugins extend the drive. This version supports themes; more file types for preview and editing come later.",
+  "ui.plugins.desc": "Plugins extend the drive: themes apply instantly, and file-type plugins can open formats the built-in previewer does not support.",
   "ui.plugins.enable": "Enable plugins",
   "ui.plugins.enable_hint": "Off by default. Plugins are third-party content; once enabled you can install and manage them. Disabling stops them from taking effect (files are kept).",
   "ui.plugins.install": "Install plugin…",

@@ -1243,4 +1243,134 @@ try {
   }
 }
 
+# --------------------------------------------- 18. 插件前端运行时（P2）--------
+Section "18. 插件前端运行时（fileType 沙箱宿主）"
+
+$ftWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-ft-$suffix"
+$ftZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-ft-$suffix.zip"
+$ftId = "org.zeroshadow.smoke-filrtype"
+$origFtEnabled = $false
+try {
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/admin/config"; WebSession = $session }
+  try { $origFtEnabled = [bool](($r.Content | ConvertFrom-Json).pluginsEnabled) } catch { }
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+    ContentType = $jsonType; WebSession = $session
+    Body = (JsonBytes @{ pluginsEnabled = $true })
+  }
+
+  # 18.1 构造一个最小的 fileType 插件：entry 是自包含单文件 HTML
+  New-Item -ItemType Directory -Path $ftWork -Force | Out-Null
+  @{
+    id = $ftId; name = "冒烟看图"; version = "1.0.0"; apiVersion = 1; kind = "fileType"
+    entry = "app.html"; extensions = @("dwgsmoke"); modes = @("preview")
+    description = "smoke fileType plugin"
+  } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $ftWork "manifest.json") -Encoding UTF8
+  $html = '<!doctype html><meta charset="utf-8"><body><p id="t">plugin</p><script>parent.postMessage({type:"zs:ready"},"*")</script></body>'
+  [System.IO.File]::WriteAllText((Join-Path $ftWork "app.html"), $html, (New-Object System.Text.UTF8Encoding($false)))
+  if (Test-Path $ftZip) { Remove-Item $ftZip -Force }
+  Compress-Archive -Path (Join-Path $ftWork "*") -DestinationPath $ftZip -Force
+
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=ft.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session
+    Body = ([System.IO.File]::ReadAllBytes($ftZip))
+  }
+  Check "plugin-filetype-install" ($r.Status -eq 201) "$($r.Status) $($r.Content)"
+
+  # 18.2 未启用：不出现在运行时清单里，入口也拿不到
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/list" }
+  Check "plugin-filetype-hidden-when-disabled" ($r.Content -notmatch [regex]::Escape($ftId)) `
+    "未启用的插件不应出现在运行时清单: $($r.Content)"
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/entry/" + [uri]::EscapeDataString($ftId) }
+  Check "plugin-filetype-entry-blocked" ($r.Status -eq 404) "未启用时入口应 404，实际 $($r.Status)"
+
+  # 18.3 启用后：进入运行时清单，入口带沙箱 CSP
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($ftId); Method = "PATCH"
+    Headers = $jsonHeaders; ContentType = $jsonType; WebSession = $session; Body = (JsonBytes @{ enabled = $true })
+  }
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/list" }
+  Check "plugin-filetype-listed" ($r.Content -match [regex]::Escape($ftId) -and $r.Content -match "dwgsmoke") `
+    "启用后应出现在运行时清单: $($r.Content)"
+
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/entry/" + [uri]::EscapeDataString($ftId) }
+  $csp = [string]$r.Headers["Content-Security-Policy"]
+  Check "plugin-filetype-entry-ok" ($r.Status -eq 200 -and ([string]$r.Headers["Content-Type"]) -match "text/html") `
+    "入口应 200 text/html，实际 $($r.Status) $([string]$r.Headers['Content-Type'])"
+  Check "plugin-filetype-entry-sandbox-csp" ($csp -match "sandbox allow-scripts" -and $csp -match "connect-src 'none'" -and $csp -match "default-src 'none'") `
+    "入口 CSP 应锁死网络并加 sandbox: $csp"
+  Check "plugin-filetype-entry-has-inline-script" ($r.Content -match "zs:ready") "入口内容应原样返回"
+
+  # 18.4 清单校验：fileType 的 entry 必须是 .html，且必须声明 extensions
+  $badEntryWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-ftbad-$suffix"
+  New-Item -ItemType Directory -Path $badEntryWork -Force | Out-Null
+  @{
+    id = "org.zeroshadow.bad-entry"; name = "bad entry"; version = "1.0.0"; apiVersion = 1; kind = "fileType"
+    entry = "main.js"; extensions = @("xxx")
+  } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $badEntryWork "manifest.json") -Encoding UTF8
+  [System.IO.File]::WriteAllText((Join-Path $badEntryWork "main.js"), "console.log(1)", (New-Object System.Text.UTF8Encoding($false)))
+  $badEntryZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-ftbad-$suffix.zip"
+  if (Test-Path $badEntryZip) { Remove-Item $badEntryZip -Force }
+  Compress-Archive -Path (Join-Path $badEntryWork "*") -DestinationPath $badEntryZip -Force
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=bad-entry.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session
+    Body = ([System.IO.File]::ReadAllBytes($badEntryZip))
+  }
+  Check "plugin-filetype-entry-must-be-html" ($r.Status -eq 400) "entry=main.js 应被拒，实际 $($r.Status)"
+
+  $noExtWork = Join-Path ([System.IO.Path]::GetTempPath()) "zs-ftnoext-$suffix"
+  New-Item -ItemType Directory -Path $noExtWork -Force | Out-Null
+  @{
+    id = "org.zeroshadow.no-ext"; name = "no ext"; version = "1.0.0"; apiVersion = 1; kind = "fileType"
+    entry = "app.html"
+  } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $noExtWork "manifest.json") -Encoding UTF8
+  [System.IO.File]::WriteAllText((Join-Path $noExtWork "app.html"), "<p>x</p>", (New-Object System.Text.UTF8Encoding($false)))
+  $noExtZip = Join-Path ([System.IO.Path]::GetTempPath()) "zs-ftnoext-$suffix.zip"
+  if (Test-Path $noExtZip) { Remove-Item $noExtZip -Force }
+  Compress-Archive -Path (Join-Path $noExtWork "*") -DestinationPath $noExtZip -Force
+  $r = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins?filename=no-ext.zip"; Method = "POST"
+    Headers = $jsonHeaders; ContentType = "application/zip"; WebSession = $session
+    Body = ([System.IO.File]::ReadAllBytes($noExtZip))
+  }
+  Check "plugin-filetype-extensions-required" ($r.Status -eq 400) "缺少 extensions 应被拒，实际 $($r.Status)"
+
+  # 18.5 清理：卸载后运行时清单与入口一起消失
+  $null = Invoke-Api -Parameters @{
+    Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($ftId); Method = "DELETE"
+    Headers = $jsonHeaders; WebSession = $session
+  }
+  $r = Invoke-Api -Parameters @{ Uri = "$BaseUrl/api/plugins/list" }
+  Check "plugin-filetype-removed" ($r.Content -notmatch [regex]::Escape($ftId)) "卸载后不应再出现: $($r.Content)"
+} catch {
+  Check "plugin-filetype-section" $false $_.Exception.Message
+} finally {
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($ftId); Method = "DELETE"
+      Headers = $jsonHeaders; WebSession = $session
+    }
+  } catch { }
+  foreach ($id in @("org.zeroshadow.bad-entry", "org.zeroshadow.no-ext")) {
+    try {
+      $null = Invoke-Api -Parameters @{
+        Uri = "$BaseUrl/api/admin/plugins/" + [uri]::EscapeDataString($id); Method = "DELETE"
+        Headers = $jsonHeaders; WebSession = $session
+      }
+    } catch { }
+  }
+  try {
+    $null = Invoke-Api -Parameters @{
+      Uri = "$BaseUrl/api/admin/config"; Method = "PATCH"; Headers = $jsonHeaders
+      ContentType = $jsonType; WebSession = $session
+      Body = (JsonBytes @{ pluginsEnabled = $origFtEnabled })
+    }
+  } catch { }
+  foreach ($p in @($ftWork, $ftZip, $badEntryWork, $badEntryZip, $noExtWork, $noExtZip)) {
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+}
+
 Get-Finished $(if ($script:Fail -gt 0) { $script:Fail } else { 0 })

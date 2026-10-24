@@ -651,10 +651,11 @@ ZeroShadow 的机密只放在下面三个位置，务必分别对待：
 - `.env` 里的超管密码由回归测试检查是否明显弱口令；
 - `data/logs/` 下的日志含用户名与 IP（但不含密码与令牌），注意与 `data/` 一起管理权限。
 
-## WebDAV（实验性，默认关闭）
+## WebDAV（v2.0 起为正式功能，默认关闭）
 
-WebDAV 默认**完全关闭**，只能在 `.env` 里用 `WEBDAV=1` 打开（挂载点由 `WEBDAV_PATH` 决定，默认 `/dav`）。
-之所以给它一个独立的章节，是因为它引入了一类 **Web 端不存在的风险**：WebDAV 客户端普遍只支持 HTTP Basic 认证，
+v2.0 起 WebDAV 不再标"实验性"：开关进后台（`webdavEnabled`）**即时生效**，`.env` 的
+`WEBDAV` / `WEBDAV_PATH` 退为默认值。之所以仍给它独立章节，是因为它引入了一类
+**Web 端不存在的风险**：WebDAV 客户端普遍只支持 HTTP Basic 认证，
 **用户名密码会在每一个请求里重复发送**。这是协议层面的限制，不是实现取舍。
 
 因此在实现上做了这些收窄：
@@ -662,13 +663,26 @@ WebDAV 默认**完全关闭**，只能在 `.env` 里用 `WEBDAV=1` 打开（挂�
 | 约束 | 原因 |
 |:----------------------- |:--------------------------------------- |
 | **只接受 Basic 认证，绝不接受 Cookie 会话** | 这是最关键的一条。如果 DAV 也认会话 Cookie，任意网页都能借用户浏览器里已有的登录态发起 `PROPFIND` / `PUT`，相当于一个**绕过 CSRF 校验的后门**（DAV 请求不会带 `X-Requested-With`，也走不到 `csrfGuard`） |
-| **不接受超级管理员账号** | 超管密码只应存在于 `.env` 与本机。让它在每个 DAV 请求里反复明文出现，与超管权限的组合风险过高。DAV 只对成员账号（bcrypt）开放 |
+| **不接受超级管理员账号** | 超管密码只应存在于 `.env` 与本机。DAV 只对成员账号（bcrypt）开放，命中超管账号直接 403 |
 | **权限判定与 Web 端同一套** | 复用 `effectivePerms(role, group)`：`PROPFIND` 查浏览、`GET` 查下载、`PUT` 查上传、`MKCOL` 查新建、`DELETE` 查删除、`COPY` / `MOVE` 查复制 / 移动；小组收窄同样生效 |
 | **路径解析复用同一套** | `normRel` + `resolveAny`，因此 `..`、NUL 字节、越界与只读映射目录的限制与 Web 端完全一致 |
-| **隐藏路径返回 404 而非 403** | 访客隐藏目录与小组不可见范围在 DAV 下同样生效。用 403 等于告诉对方"这里确实有东西"，所以统一按"不存在"处理 |
+| **隐藏路径返回 404 而非 403** | 访客隐藏目录与小组不可见范围在 DAV 下同样生效。用 403 等于告诉对方"这里确实有东西" |
 | **上传受同一套体积上限** | `PUT` 按角色的 `uploadLimitBytes` 限制，超限即断开并返回 413；写入同样走"临时文件 + rename"的原子替换 |
-| **`GET` 强制 `attachment`** | 网盘里可能存有用户上传的 HTML / SVG，不能让它以页面身份在浏览器上下文里执行 |
-| **未启用时明确 404** | `/dav` 未启用时返回 404 并提示如何在 `.env` 开启，**不会**被 SPA fallback 接住返回前端首页 |
+| **`GET` 强制 `attachment`** | 网盘里可能存有用户上传的 HTML / SVG，不能让它以页面身份在浏览器上下文里执行；另按扩展名给正确 MIME |
+| **未启用时明确 404 JSON** | 命中挂载点但未启用时返回 404 JSON（`api.webdav.disabled` + `Allow: OPTIONS`），**不会**被 SPA fallback 接住返回前端首页 |
+| **挂载点不能抢占保留前缀** | `normalizeDavPath()` 拒绝 `/api` `/ping` `/s` `/assets` `/resources` `/robustness` 与前端路由，避免 DAV 中间件挡住静态资源或接口 |
+
+正式化后补的**滥用限制**（都在服务端生效）：
+
+| 限制 | 值 | 挡住什么 |
+|:--|:--|:--|
+| `PROPFIND Depth: infinity` | 403 | 一个请求扫全盘 |
+| 单次列目录子项 | 5000（超出 507） | 超大目录拼出几十 MB XML |
+| 锁表 / 单账号锁 | 2000 / 200（超出 507） | 锁表无限增长 |
+| 非 `PUT` 请求体 | 64 KB（418/413） | 用 PROPFIND 塞大包 |
+| 每 IP 每分钟 | 1200 次（超出 429） | 请求洪水 |
+| `Destination` 主机 | 必须与请求 Host 一致（否则 502） | 借服务端去打别的地址 |
+| Basic 凭据校验缓存 | 60 秒（键是 `sha256(user\\0password)`） | 每个请求一次 bcrypt（约 100ms）被脚本打满 CPU |
 
 `OPTIONS` 是唯一不需要认证的方法（客户端用它探测服务端能力），其余方法都必须先通过 Basic 认证。
 删除同样走回收站：`DELETE` 与 Web 端一样先尝试把内容移入 `data/trash/`，只有回收站不可用时才退回真删。
@@ -677,12 +691,13 @@ WebDAV 默认**完全关闭**，只能在 `.env` 里用 `WEBDAV=1` 打开（挂�
 
 | 开关 / 项 | 默认值 | 作用 |
 |:--|:--|:--|
-| `WEBDAV` | 未设置（关闭） | 设为 `1` / `true` / `yes` / `on` 才开启挂载 |
-| `WEBDAV_PATH` | `/dav` | 挂载路径，可改成任意路径，会自动补前导斜杠 |
+| `webdavEnabled` | `.env` 的 `WEBDAV`（未设置时 `false`） | 后台总开关，**改完立即生效** |
+| `webdavPath` | `.env` 的 `WEBDAV_PATH`（默认 `/dav`） | 挂载路径，后台可改 |
 | 认证方式 | 仅 HTTP Basic，仅成员账号 | 不接受 Cookie 会话，也不接受超级管理员账号 |
-| 上传上限 | 按角色的 `uploadLimitBytes`（成员即 `memberUploadLimitMB`） | 超限断开并返回 413 |
-| 下载响应 | `Content-Disposition: attachment` | 强制下载，HTML / SVG 不在浏览器上下文里执行 |
+| 上传上限 | 按角色的 `uploadLimitBytes` | 超限断开并返回 413 |
+| 下载响应 | `Content-Disposition: attachment` + 按扩展名 MIME | 强制下载，HTML / SVG 不在浏览器上下文里执行 |
 | `ETag` / `If-Match` | 与编辑器同一套 `mtime-size-<内容哈希>` | 支持 `If-Match` 的客户端可做乐观并发控制，不一致返回 412 |
+| 条件请求 / 范围 | `If-None-Match` → 304、`Range` → 206 | 弱网重复下载与视频拖动 |
 | 锁 | `LOCK` / `UNLOCK` 为礼节性实现（内存锁，30 分钟过期，重启即失） | 真正的并发保护靠版本比对，不是锁 |
 
 **已知边界**：
@@ -693,6 +708,47 @@ WebDAV 默认**完全关闭**，只能在 `.env` 里用 `WEBDAV=1` 打开（挂�
   实现差异很大，本项目无法覆盖所有客户端的全部行为；
 - **仍然强烈建议只在 HTTPS 或完全可信的内网下使用**。要让密码在网络上不以明文反复出现，
   唯一的办法是 TLS —— 本项目不内置 HTTPS，请用隧道（自带 https）或自行在前面放反向代理。
+
+## 缩略图（v2.0）
+
+网格视图改为请求 `GET /api/fs/thumb` 而不是原图。四点要注意：
+
+| 点 | 处理 |
+|:--|:--|
+| **权限** | 走 `preview` 权限点（含小组收窄）；路径同样过 `resolveAny` + 上下文可见性 |
+| **缓存位置** | `data/thumbs/`，不在网盘根目录内，并已加入 `safety.js` 敏感条目：不能列举、搜索、打包或按路径下载 |
+| **输入过滤** | 按扩展名白名单（不含 `svg`）+ `limitInputPixels` 限制解码像素（8000 万），`failOn: "none"` 保证畸形图片只失败、不抛到进程 |
+| **降级** | `sharp` 不可用（典型：pkg 单文件 exe）时回 501，前端退回图标，不影响其它功能 |
+
+并发限制：最多 2 个解码任务、排队 64（超出 503）；单文件 ≤ 64 MB。
+
+## Service Worker 的边界（v2.0）
+
+弱网优化引入了一个同源 Service Worker（`web/public/sw.js`），边界写死：
+
+| 边界 | 说明 |
+|:--|:--|
+| **不接管接口** | `/api/*`、`/dav` 直接放过，避免把业务响应（含用户数据）留在 Cache Storage |
+| **不接管页面导航** | `index.html` 带 no-cache 且引用哈希资源，缓存会导致"旧壳配新 chunk" |
+| **不缓存 Range 请求** | 视频拖动的 206 分片不进缓存 |
+| **只在安全上下文注册** | HTTPS 或 localhost 才有 `navigator.serviceWorker` |
+| **版本化缓存 + 清理** | 缓存名带 `VERSION`，`activate` 时删掉不匹配的缓存 |
+
+## 插件（v2.0，默认关闭）
+
+插件是**唯一会加载第三方内容**的功能，按"默认关、白名单、不信任"三层设计：
+
+| 层 | 措施 |
+|:--|:--|
+| **准入** | `pluginsEnabled` 默认 `false`，关闭时安装接口 403；只有超管能访问 `/api/admin/plugins` |
+| **清单** | 未知顶层字段直接拒绝；`id` / `version` / `kind` / `apiVersion` / `permissions` 全走白名单；主题插件**不允许**申请权限 |
+| **包** | 上限 2 MB / 解压 10 MB / 300 条目；逐条校验路径，拒绝 `..`、绝对路径、符号链接（防 zip-slip 与 zip 炸弹） |
+| **主题值** | 令牌名须匹配 `--[a-zA-Z0-9-]{1,40}`；值禁止 `;{}@<>\\`、换行、`url(`、`expression(`、`javascript:` —— 否则可逃出当前声明，甚至引出远程请求 |
+| **隔离** | `data/plugins/` 不在网盘根目录内且为敏感条目；插件**永远不直接访问 `/api`**，`fileType` 运行时将来跑在 `sandbox="allow-scripts"`（无 `allow-same-origin`）的 iframe 里，靠 `postMessage` 请求宿主代执行 |
+| **能力** | 白名单目前只有 `fs.read` / `fs.write` / `ui.toast` / `settings.rw`；能力上限 = 当前登录用户权限 |
+| **设置** | 服务端按 JSON Schema 二次校验（类型 / 枚举 / 范围），只保存声明过的键 |
+
+> 主题 CSS 由**服务端**拼好（`themeCss()`）并限定在 `html[data-theme-plugin="<id>"]`，前端只注入不拼接。
 
 ## 已知边界
 

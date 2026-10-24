@@ -2,6 +2,7 @@
   "title": "开发者",
   "pages": [
     "architecture",
+    "plugins",
     "build",
     "testing",
     "release"

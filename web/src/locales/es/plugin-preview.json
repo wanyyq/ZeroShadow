@@ -1,0 +1,8 @@
+{
+  "ui.preview.plugin_loading": "Representando con el complemento «{name}»…",
+  "ui.preview.plugin_failed": "El complemento no pudo cargarse",
+  "ui.preview.plugin_dirty": "Hay cambios sin guardar",
+  "ui.preview.plugin_read_failed": "El complemento no pudo leer el archivo",
+  "ui.preview.plugin_too_large": "El archivo es demasiado grande para que el complemento lo lea",
+  "ui.preview.plugin_readonly": "Sin permiso de edición: el complemento es de solo lectura"
+}

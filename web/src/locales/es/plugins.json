@@ -1,7 +1,7 @@
 {
   "ui.settings.tabs.plugins": "Complementos",
   "ui.plugins.title": "Complementos instalados",
-  "ui.plugins.desc": "Los complementos amplían el disco. Esta versión admite temas; más tipos de archivo para previsualizar y editar llegarán después.",
+  "ui.plugins.desc": "Los complementos amplían el disco: los temas se aplican al instante y los de tipo de archivo abren formatos que la vista previa integrada no admite.",
   "ui.plugins.enable": "Activar complementos",
   "ui.plugins.enable_hint": "Desactivado por defecto. Los complementos son contenido de terceros; al activarlo podrás instalarlos y gestionarlos. Al desactivarlo dejan de aplicarse (los archivos se conservan).",
   "ui.plugins.install": "Instalar complemento…",

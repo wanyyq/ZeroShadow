@@ -7,9 +7,12 @@ import { info } from "../logger.js"
 import { themeCss } from "../plugins/manifest.js"
 import {
   activeThemeManifest,
+  enabledRuntimePlugins,
   installPlugin,
   listPlugins,
+  pluginEntryFile,
   pluginsSummary,
+  runtimeSettings,
   savePluginSettings,
   setActiveTheme,
   setPluginEnabled,
@@ -37,6 +40,62 @@ publicPluginRouter.get("/theme", (_req, res) => {
   res.setHeader("Cache-Control", "no-cache")
   res.json({ id: manifest.id, name: manifest.name, css: themeCss(manifest) })
 })
+
+/**
+ * 已启用的「前端运行时」插件清单。
+ *
+ * 给预览页用：它只知道"这个后缀交给哪个插件渲染"，不需要任何管理信息。
+ * 未启用的插件、主题插件、损坏的插件都不会出现在这里。
+ */
+publicPluginRouter.get("/list", (_req, res) => {
+  res.setHeader("Cache-Control", "no-cache")
+  res.json({ plugins: enabledRuntimePlugins() })
+})
+
+/**
+ * 插件的入口 HTML（被 `sandbox="allow-scripts"` 的 iframe 加载）。
+ *
+ * 这里的安全约束是**"自包含 + 零网络"**：
+ *   - 只返回 manifest 里声明的 **entry 文件**，不接受任意路径（防路径穿越）；
+ *   - 响应头 CSP 把文档锁死：`default-src 'none'`，只允许内联脚本/样式与 data: 图片，
+ *     `connect-src 'none'`（插件发不出任何请求）、`form-action 'none'`、`base-uri 'none'`；
+ *   - `sandbox allow-scripts` 让它成为**不透明源**：拿不到本站 Cookie、读不到父页面、
+ *     也算不上同源（所以即使有人在插件里写 `fetch('/api/...')` 也会被 CORS 拦下）。
+ *     插件要读写文件，只能 `postMessage` 回来让宿主代执行（宿主再走 `req.perms`）。
+ */
+publicPluginRouter.get("/entry/:id", async (req, res, next) => {
+  try {
+    const id = String(req.params.id)
+    const entry = pluginEntryFile(id)
+    if (!entry) throw httpError(404, "插件不存在或未启用", { errorKey: "api.plugins.not_found" })
+    res.setHeader("Content-Type", "text/html; charset=utf-8")
+    res.setHeader("Cache-Control", "no-cache")
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'none'",
+        "script-src 'unsafe-inline'",
+        "style-src 'unsafe-inline'",
+        "img-src data: blob:",
+        "connect-src 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "sandbox allow-scripts",
+      ].join("; ")
+    )
+    res.setHeader("X-Content-Type-Options", "nosniff")
+    res.sendFile(entry.file, { cacheControl: false }, (err) => {
+      if (err && !res.headersSent) next(err)
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** 插件自己的设置值（只给已启用的运行时插件，供 init 消息使用） */
+export function pluginRuntimeSettings(id) {
+  return runtimeSettings(id)
+}
 
 export const adminPluginRouter = Router()
 adminPluginRouter.use(requireRole("superadmin"))

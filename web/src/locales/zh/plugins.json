@@ -1,7 +1,7 @@
 {
   "ui.settings.tabs.plugins": "插件",
   "ui.plugins.title": "已安装插件",
-  "ui.plugins.desc": "插件用来给网盘加能力：这一版支持主题，后续会支持更多文件后缀的预览与编辑。",
+  "ui.plugins.desc": "插件用来扩展网盘能力：主题插件立即生效，文件类型插件能在预览页打开内置不支持的后缀。",
   "ui.plugins.enable": "启用插件功能",
   "ui.plugins.enable_hint": "默认关闭。插件是第三方内容，开启后才能安装与管理；关闭后已装插件不再生效（文件保留）。",
   "ui.plugins.install": "安装插件…",

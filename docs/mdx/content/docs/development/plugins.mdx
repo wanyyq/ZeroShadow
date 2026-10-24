@@ -1,0 +1,139 @@
+---
+title: 插件开发
+description: manifest.json 字段、apiVersion 策略、主题令牌安全约束、权限白名单与 JSON Schema 设置
+---
+
+对应版本：**v2.0.0-beta**。插件体系目前处于 **P1 阶段**：`theme`（主题）插件已完整可用；
+`fileType`（预览/编辑）与 `server`（服务端）插件**可以安装、启停**，但运行时在后续版本接入，
+列表里会明确标注"暂不生效"。
+
+## 它是什么
+
+插件是**一个 zip 包**，里面必须有 `manifest.json`：
+
+```
+my-theme.zip
+├── manifest.json        # 必需，唯一入口
+└── （主题插件不需要其它文件）
+```
+
+管理员在「设置 → 插件」上传 zip → 服务端校验 → 装进 `data/plugins/<id>/` →
+**默认禁用**（要手动启用）→ 主题插件还要再点「应用主题」。
+
+<Callout type="warn" title="两扇默认关着的门">
+插件总开关 `pluginsEnabled` **默认关闭**：关着的时候安装接口直接 **403**。
+装完之后插件也是**默认禁用**的。插件是第三方内容，必须由管理员显式打开。
+</Callout>
+
+## manifest.json
+
+```json
+{
+  "id": "org.example.solarized",
+  "name": "Solarized 主题",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "theme",
+  "description": "低饱和的暖色主题",
+  "author": "example",
+  "homepage": "https://example.org/solarized",
+  "theme": {
+    "light": { "--background": "oklch(0.98 0.01 90)" },
+    "dark": { "--background": "oklch(0.22 0.02 220)" },
+    "fontSans": "'Google Sans Flex', system-ui, sans-serif"
+  },
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "accent": { "type": "string", "title": "主色", "enum": ["auto", "blue"], "default": "auto" },
+      "compact": { "type": "boolean", "title": "紧凑模式", "default": false },
+      "size": { "type": "integer", "title": "字号", "minimum": 12, "maximum": 20, "default": 16 }
+    }
+  }
+}
+```
+
+| 字段 | 必填 | 约束 |
+|:--|:--|:--|
+| `id` | ✅ | `^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+){1,5}$`，全局唯一 |
+| `name` | ✅ | ≤ 40 字符 |
+| `version` | ✅ | `x.y.z`（可带 prerelease） |
+| `apiVersion` | ✅ | 目前**只接受 `1`** |
+| `kind` | ✅ | `theme` / `fileType` / `server` |
+| `permissions` | | 白名单 `fs.read` `fs.write` `ui.toast` `settings.rw`；**`theme` 必须为空** |
+| `theme` | kind=theme | 见下 |
+| `settings` | | JSON Schema 子集 |
+| `entry` | kind≠theme | 包内相对路径，不能含 `..` |
+
+<Callout type="info" title="未知字段会直接导致安装失败">
+这是有意的：宁可装不上，也不要"某个字段被静默忽略、作者以为生效了"。
+</Callout>
+
+## 主题插件
+
+`theme` 只接受**声明式 CSS 变量**，不接受任何 JS，因此零执行风险。
+
+- `theme.light` / `theme.dark`：键必须是 `--` 开头的自定义属性（每个 ≤ 80 个）；
+- `theme.fontSans`：可选字体栈，作用到 `body`；
+- **值的约束**：≤ 200 字符，禁止 `;` `{` `}` `@` `<` `>` `\`、换行，以及 `url(` / `expression(` / `javascript:`。
+  原因：这些值会被拼进一条 CSS 规则，能"逃出规则"就能改掉整页样式，`url()` 甚至能引出远程请求。
+
+应用方式：服务端把令牌拼成 `html[data-theme-plugin="<id>"]` 作用域的 CSS，前端注入 `<style>`。
+
+## 权限白名单
+
+| 权限 | 含义 | 状态 |
+|:--|:--|:--|
+| `fs.read` | 读取当前用户可见的文件 | 保留，随 `fileType` 运行时启用 |
+| `fs.write` | 保存文件（仍受 `fileWrite` + `editFiles` 约束） | 同上 |
+| `ui.toast` | 由宿主弹提示 | 同上 |
+| `settings.rw` | 读写插件自己的设置 | 已可用 |
+
+设计底线：**插件永远不直接访问 `/api`**。`fileType` 插件将来跑在
+`sandbox="allow-scripts"`（**无** `allow-same-origin`）的 iframe 里，靠 `postMessage` 请求宿主代执行，
+宿主照常走 `req.perms`。插件的能力上限 = 当前登录用户的权限。
+
+## 设置项（JSON Schema 子集）
+
+声明 `settings` 后，后台「设置 → 插件 → 设置」会自动渲染表单：
+
+- `type: "object"` + **扁平** `properties`（≤ 20 项），`additionalProperties` 只能 `false`；
+- 属性 `type` ∈ `string` / `number` / `integer` / `boolean`；
+- `string` 可带 `enum`、`maxLength`、`default`、`placeholder`；数字可带 `minimum` / `maximum`；
+- 可选的 `title` / `description` 用于展示。
+
+服务端保存时**按 schema 再校验一遍**（越界 / 非枚举 / 类型不符都 400），并且只保留声明过的键。
+
+## 接口
+
+```
+GET    /api/admin/plugins                    列出 + 总开关状态
+POST   /api/admin/plugins?filename=x.zip     安装（body 为 zip 原始字节，Content-Type: application/zip）
+PATCH  /api/admin/plugins/:id                { enabled?, settings? }
+POST   /api/admin/plugins/:id/theme          { active: true }
+DELETE /api/admin/plugins/:id                卸载
+GET    /api/plugins/theme                    公开：当前主题 CSS
+```
+
+## 自测清单
+
+- [ ] 总开关关闭时安装返回 403
+- [ ] 装完列表里 `enabled: false`
+- [ ] 未启用就应用主题返回 400
+- [ ] 应用后 `/api/plugins/theme` 的 CSS 含 `data-theme-plugin` 与自己的变量
+- [ ] 设置越界值返回 400
+- [ ] 卸载后主题自动恢复默认
+
+## 已知边界
+
+- `fileType` / `server` 运行时尚未接入（可装可启停，不生效）；
+- 同一时间只能有一个主题生效；
+- 插件不能加自己的路由、不能读写任意路径、不能直连网络；
+- 插件**不会**自动更新：更新意味着权限可能变化，必须由管理员重新确认。
+
+<Cards>
+  <Card title="管理员指南" href="/docs/zeroshadow/admin/admin-guide" description="安装、启用、应用主题与卸载" />
+  <Card title="安全设计" href="/docs/zeroshadow/security/design" description="插件的七层校验" />
+  <Card title="API 参考" href="/docs/zeroshadow/api/reference" description="插件接口与权限" />
+</Cards>

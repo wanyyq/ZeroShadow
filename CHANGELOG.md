@@ -11,6 +11,77 @@
 
 ---
 
+## [2.0.0-beta] - 2026-10-25
+
+v2.0 的第一个 beta。**产品定位从「局域网网盘」调整为「工作室网盘」**：服务端一个命令跑起来、
+客户端只要有浏览器，局域网直连与公网隧道是同一套权限与界面。功能面已经齐全，
+标 beta 的原因是插件运行时目前只覆盖主题（`fileType` / `server` 插件可装但不生效）。
+
+### 新增
+
+- **WebDAV 转为正式功能**（`server/src/webdav.js`）：后台「设置 → 公网 → WebDAV」可直接开关与改挂载路径，
+  **运行时立即生效、不用重启**；`.env` 的 `WEBDAV` / `WEBDAV_PATH` 退为默认值，`data/config.json` 优先。
+  - 硬化：`Depth: infinity` → 403、单次列目录 5000 项上限、锁表 2000 / 单账号 200、
+    非 `PUT` 请求体 64 KB、每 IP 每分钟 1200 次、`Destination` 跨主机 502、
+    Basic 凭据校验结果缓存 60 秒（改密码/禁用立即失效）、超管显式 403、
+    挂载点不能占用 `/api` `/ping` `/s` `/assets` `/resources` `/robustness` 与前端路由。
+  - 不变式：只认 Basic、不认 Cookie、成员专属、隐藏路径回 404 而非 403、关闭时回 JSON 404 而不是 SPA 首页。
+- **网格缩略图**（`server/src/thumbs.js`）：`GET /api/fs/thumb` 用 `sharp` 出 webp 小图，
+  内容寻址缓存（`rel + 大小 + mtime + 宽度`）落在 `data/thumbs/`，最多 2 个并发解码、
+  排队 64、输入 ≤ 64 MB / ≤ 8000 万像素、30 天 + 512 MB 预算自动清理。
+  `sharp` 不可用时（典型：`pkg` 单文件 exe）回 501，网格自动退回图标。
+- **虚拟滚动**（`web/src/lib/virtual.ts`）：列表用 `useVirtualRows` 做定高窗口化（行高实测，
+  只挂视口附近的行），网格用 `useProgressiveReveal` 渐进渲染（滚到底追加 120 个）。
+- **弱网 / 内网穿透优化**：
+  - `lib/api.ts` 对幂等请求自动重试（网络错误 / 超时 / 502-504，退避 400ms→1200ms 带抖动），
+    20 秒 `AbortController` 超时，离线直接失败；`POST` 绝不重试；
+  - 网络异常提示做 8 秒节流；`visibilitychange` / `online` 时自动刷新身份；
+  - `web/public/sw.js` Service Worker：`/assets/*` cache-first、`/resources/*` SWR、
+    **不接管** `/api` `/dav` Range 与页面导航，缓存名带版本；仅在 HTTPS / localhost 注册；
+  - `/api/fs/download` 的 `Range` / `If-None-Match` 行为补了回归断言。
+- **插件体系**（`server/src/plugins/`、`web/src/pages/settings/plugins-section.tsx`）：
+  `manifest.json` + `apiVersion` + `kind` / `permissions` 白名单 + 未知字段直接拒绝；
+  安装时逐条解 zip（拒 `..` / 绝对路径 / 符号链接，2 MB 包 / 10 MB 解压 / 300 条目）；
+  **总开关默认关、装完默认禁用**；主题插件声明式令牌（名与值都校验，禁止 `;{}@<>\\`、`url(`）；
+  插件设置用 **JSON Schema** 声明，后台自动渲染表单，服务端二次校验。
+  `data/plugins.json` 已纳入备份与完整性检查。
+- 文档：新增 [插件开发](docs/插件开发.md)；`管理员指南` 增加「插件」整章与十二个标签页；
+  安全设计补「插件」「Service Worker 边界」「缩略图」三节；开发者指南补 §4.7–§4.11。
+
+### 变更
+
+- **品牌定位**：README / 文档 / mdx 首页 / 关于页标语（8 种语言）/ 网页 `<title>` 与 `description`
+  统一改为「轻量级工作室网盘 · 一款极简好用的团队私有网盘」，不再以"局域网"作为卖点
+  （局域网访问仍是主要用法之一，只是不再是产品定义）。
+- 版本号统一为 `2.0.0-beta`（`package.json` ×3、`/api/meta`、`web/src/version.ts`、文档示例）。
+- `docs/使用手册.md` 侧边栏示意图不再写死版本号，改为在正文说明"第二行显示 `v<版本号>`"。
+
+### 修复
+
+- **`smoke-test.ps1` 的 `Range` / Cookie 断言**：`HttpWebRequest` 不允许直接设 `Range` 头
+  （必须走 `AddRange()`），且局部变量 `$body` 与 `[byte[]]$Body` 参数同名会把正文变成空数组 ——
+  两处都写了注释说明，避免后来者再踩。
+- **`package.json` 被写入 BOM 导致 Vite 构建失败**（PostCSS 配置解析报 `Unexpected token '﻿'`）：
+  已剥离，并在后续文档里提醒不要用 `Set-Content -Encoding UTF8` 改 JSON。
+
+### 移除
+
+- `web/public/resources/tailwindcss.min.js`（269.8 KB、全站零引用，"关于"页里的对应条目与
+  两个死键一并删除）；
+- WebDAV 的"实验性"定位：删掉启动时的 `WEBDAV=1` 提示与命中挂载点时的静态 404 兜底，
+  统一由中间件按配置判断。
+
+### 升级说明
+
+- **WebDAV**：以前用 `WEBDAV=1` 的实例会继续生效（`.env` 只是默认值）；后台改过之后以
+  `data/config.json` 为准。客户端地址不变。
+- **插件**：默认关闭，升级后不会自动启用任何东西。
+- **缩略图**：源码运行 `pnpm setup` 会装好 `sharp`；`ZeroShadow.exe` 发布包**不含**原生模块，
+  网格退回图标，其余功能不受影响。
+- **Service Worker**：只在 HTTPS / localhost 生效；升级后浏览器需要一次导航才会更新。
+
+---
+
 ## [1.2.4] - 2026-10-18
 
 本次以 **Markdown 预览体验修复** 与 **文档全面对齐代码** 为主，无破坏性变更。

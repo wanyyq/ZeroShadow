@@ -1,14 +1,15 @@
 ---
 title: 介绍
-description: ZeroShadow 是一款轻量级局域网网盘 —— 把一台电脑变成团队共用的私有网盘，客户端只要浏览器。
+description: ZeroShadow 是一款轻量级工作室网盘 —— 把一台电脑变成团队共用的私有网盘，客户端只要浏览器。
 ---
 
-ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的工作室网盘」。
+ZeroShadow 是一款**工作室网盘**：给十几人以内的小团队准备的一块私有存储，极简、零依赖。
 
 核心思路很简单：**服务端一个命令跑起来，客户端只要有浏览器。**
 
-- 同一个局域网里，同事打开 `http://<你的局域网IP>:12345` 就能存取文件，**无需安装任何客户端**；
+- 工作室里，同事打开 `http://<服务器IP>:12345` 就能存取文件，**无需安装任何客户端**；
 - 需要给外部的人访问时，内置 SSH 反向隧道，**一次点击拿到公网地址**；
+- 需要像本地磁盘一样用时，开 WebDAV，挂进 Windows 资源管理器 / Finder / RaiDrive / rclone；
 - 角色只有三种（超级管理员 / 团队成员 / 访客），**每个权限点都能在后台单独开关**。
 
 没有数据库、没有 Docker、也没有外部服务依赖：文件直接躺在磁盘目录里，配置就是 `.env` 和
@@ -21,6 +22,7 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
   <Card title="安全设计" href="/docs/zeroshadow/security/design" description="逐项拆解认证、路径安全、SSRF 防护与限流" />
   <Card title="配置参考" href="/docs/zeroshadow/admin/configuration" description=".env 与 config.json 的全部字段与默认值" />
   <Card title="API 参考" href="/docs/zeroshadow/api/reference" description="全部 HTTP 接口、参数、权限要求与错误码" />
+  <Card title="插件开发" href="/docs/zeroshadow/development/plugins" description="manifest.json、apiVersion、权限白名单与 JSON Schema 设置" />
 </Cards>
 
 ## 为什么值得一用
@@ -34,6 +36,9 @@ ZeroShadow 是一款**轻量级局域网网盘**，定位是「极简好用的�
 | **不搬数据** | `FILES_SOFT_DIR` 把服务器上任意目录挂成**只读文件夹**，视频、素材库、软件包原地播放，零拷贝 |
 | **安全是默认值** | 默认**禁止**链接下载访问内网（防 SSRF）、默认**禁止**把只读目录内容复制进网盘、默认限制单 IP 重型操作频率；所有开关都在后台可见 |
 | **可验证** | 仓库自带安全回归测试、冒烟测试与编码单测，断言写成脚本，改完代码跑一遍就知道有没有退化 |
+| **像本地磁盘** | 开启 WebDAV 后可以挂进 Windows 资源管理器 / macOS Finder / RaiDrive / rclone，改动即时同步 |
+| **弱网也能用** | 幂等请求自动重试与退避、20 秒超时、Service Worker 缓存构建产物；图片目录用服务端缩略图，长目录窗口化渲染 |
+| **可扩展** | 插件体系：`manifest.json` + `apiVersion` + 权限白名单，主题即装即用；设置项用 JSON Schema 声明、后台自动渲染，插件不必写 React |
 
 ## 界面一览
 

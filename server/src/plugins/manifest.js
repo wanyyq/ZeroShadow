@@ -45,6 +45,7 @@ const MANIFEST_KEYS = new Set([
   "entry",
   "extensions",
   "modes",
+  "actions",
 ])
 
 /** 主题令牌允许的 CSS 自定义属性名（只允许 -- 开头的短名） */
@@ -230,22 +231,43 @@ export function normalizeManifest(raw, { packageSha256 = "" } = {}) {
     settings: normalizeSettingsSchema(raw.settings),
     packageSha256,
   }
-
   if (kind === "theme") {
     manifest.theme = normalizeTheme(raw.theme)
-  } else {
-    // fileType / server：本轮只做结构校验，运行时在后续版本接入。
-    // 这里先要求 entry 存在，避免装进来一个"什么都不做"的空壳。
+  } else if (kind === "fileType") {
+    // fileType 插件是**自包含的单个 HTML**：它的 JS/CSS 必须内联。
+    // 这样 iframe 里的文档不需要再发任何子请求（响应 CSP 里 connect-src 'none'），
+    // 也就没有"插件偷偷请求外网"的窗口。要读写文件只能走 postMessage 让宿主代执行。
     manifest.entry = asString(raw.entry, { max: 120, field: "entry", required: true })
-    if (!/^[A-Za-z0-9._/-]+\.(html|js|mjs)$/.test(manifest.entry) || manifest.entry.includes("..")) {
-      throw new ManifestError("entry 必须是包内的相对路径（.html / .js / .mjs），且不能包含 ..")
+    if (!/^[A-Za-z0-9._/-]+\.html$/.test(manifest.entry) || manifest.entry.includes("..")) {
+      throw new ManifestError("fileType 插件的 entry 必须是包内的 .html（自包含单文件）", "api.plugins.entry_invalid")
     }
     manifest.extensions = Array.isArray(raw.extensions)
       ? raw.extensions.filter((e) => typeof e === "string" && /^[A-Za-z0-9]{1,12}$/.test(e)).map((e) => e.toLowerCase())
       : []
-    manifest.modes = Array.isArray(raw.modes)
-      ? raw.modes.filter((m) => m === "preview" || m === "edit")
-      : ["preview"]
+    if (!manifest.extensions.length) {
+      throw new ManifestError("fileType 插件必须声明 extensions（它负责哪些后缀）", "api.plugins.extensions_missing")
+    }
+    manifest.modes = Array.isArray(raw.modes) ? raw.modes.filter((m) => m === "preview" || m === "edit") : ["preview"]
+    if (!manifest.modes.length) manifest.modes = ["preview"]
+  } else {
+    // server：**独立子进程**，只通过声明的 actions 被调用（协议见 plugins/runner.js）
+    manifest.entry = asString(raw.entry, { max: 120, field: "entry", required: true })
+    if (!/^[A-Za-z0-9._/-]+\.(js|mjs)$/.test(manifest.entry) || manifest.entry.includes("..")) {
+      throw new ManifestError("server 插件的 entry 必须是包内的 .js / .mjs，且不能包含 ..")
+    }
+    const actions = Array.isArray(raw.actions) ? raw.actions : []
+    if (!actions.length) {
+      throw new ManifestError("server 插件必须声明 actions（它愿意被调用哪些动作）", "api.plugins.actions_missing")
+    }
+    if (actions.length > 20) throw new ManifestError("actions 过多（上限 20 个）")
+    for (const action of actions) {
+      if (typeof action !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(action)) {
+        throw new ManifestError(`非法的 action 名：${String(action)}（小写字母开头，可含数字/下划线/连字符）`)
+      }
+    }
+    manifest.actions = [...new Set(actions)]
+    manifest.extensions = []
+    manifest.modes = []
   }
 
   return manifest

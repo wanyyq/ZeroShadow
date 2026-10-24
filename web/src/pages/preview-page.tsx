@@ -7,6 +7,8 @@ import { downloadUrl, triggerDownload } from "@/lib/api"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { officePreviewKind, parentOf, previewType } from "@/lib/format"
 import { hasUnsupportedHtml } from "@/lib/markdown-html"
+import { PluginFrame } from "@/components/plugins/plugin-frame"
+import { loadRuntimePlugins, matchPlugin, type PluginRuntime } from "@/lib/plugin-registry"
 import { isMarkdown, renderMarkdown } from "@/lib/markdown"
 import { translate, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -63,6 +65,28 @@ export default function PreviewPage() {
   const [scale, setScale] = React.useState(0)
   const [pos, setPos] = React.useState({ x: 0, y: 0 })
   const [fitScale, setFitScale] = React.useState(1)
+
+  /**
+   * 插件预览（v2.0 P2）：内置渲染器不认的后缀，交给已启用的 `fileType` 插件。
+   *
+   * 只在 `!supported` 时匹配 —— 内置渲染器永远优先，插件不能"抢"已有的格式，
+   * 这样"装了插件反而看不了 PDF"这种事不会发生。
+   */
+  const [runtimePlugins, setRuntimePlugins] = React.useState<PluginRuntime[] | null>(null)
+  React.useEffect(() => {
+    if (supported) return
+    let alive = true
+    void loadRuntimePlugins().then((list) => {
+      if (alive) setRuntimePlugins(list)
+    })
+    return () => {
+      alive = false
+    }
+  }, [supported])
+  const filePlugin = !supported && runtimePlugins ? matchPlugin(runtimePlugins, name, "preview") : null
+
+  // 插件预览下要能保存，得有 editFiles 且不是只读映射目录里的文件
+  const pluginCanWrite = me.perms.editFiles === true
   const imgRef = React.useRef<HTMLImageElement>(null)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const dragging = React.useRef(false)
@@ -108,6 +132,13 @@ export default function PreviewPage() {
 
   React.useEffect(() => { setScale(0); setPos({ x: 0, y: 0 }); setFitScale(1); setSourceView(false) }, [url])
 
+  /**
+   * 按容器尺寸算出"适应窗口"的缩放比。
+   *
+   * 注意这里**不要再引用 `scale`**：原来的 `if (!scale) setScale(0)` 是个空操作
+   * （`scale` 为 0 时再设 0），却会让这个回调在每次缩放时重建、并让
+   * React Compiler 报"无法保留手动记忆化"。依赖只留 `kind`。
+   */
   const calcFit = React.useCallback(() => {
     const img = imgRef.current
     const con = containerRef.current
@@ -115,12 +146,10 @@ export default function PreviewPage() {
     const nw = img.naturalWidth
     const nh = img.naturalHeight
     if (!nw || !nh) return
-    const cw = con.clientWidth
-    const ch = con.clientHeight
-    const s = Math.min(cw / nw, ch / nh, 1)
-    setFitScale(s)
-    if (!scale) setScale(0)
-  }, [kind, scale])
+    setFitScale(Math.min(con.clientWidth / nw, con.clientHeight / nh, 1))
+    // `setFitScale` 是 useState 的 setter（引用恒定），写进依赖只是为了配合
+    // React Compiler 的依赖推断，不会造成额外重建。
+  }, [kind, setFitScale])
 
   React.useEffect(() => {
     if (kind !== "image") return
@@ -269,7 +298,17 @@ export default function PreviewPage() {
             <OfficePreview url={url} name={name} kind={officeKind} />
           </React.Suspense>
         )}
-        {!supported && (
+        {!supported && filePlugin && (
+          <PluginFrame
+            plugin={filePlugin}
+            path={entryPath}
+            name={name}
+            size={0}
+            mtime={0}
+            canWrite={pluginCanWrite}
+          />
+        )}
+        {!supported && !filePlugin && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
             <Icon name="circle-slash" className="size-10 text-muted-foreground" />
             <p className="text-sm font-medium">{t("ui.preview.unsupported_format")}</p>

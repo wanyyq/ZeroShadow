@@ -61,10 +61,15 @@ icon: Boxes
       <File name="store.js" />
       <File name="todos.js" />
       <File name="trash.js" />
+      <File name="thumbs.js" />
       <File name="tunnel.js" />
       <File name="users.js" />
       <File name="version.js" />
       <File name="webdav.js" />
+      <Folder name="plugins">
+        <File name="manifest.js" />
+        <File name="store.js" />
+      </Folder>
       <Folder name="routes">
         <File name="auth.js" />
         <File name="fs.js" />
@@ -72,6 +77,7 @@ icon: Boxes
         <File name="avatars.js" />
         <File name="groups.js" />
         <File name="todos.js" />
+        <File name="plugins.js" />
       </Folder>
     </Folder>
   </Folder>
@@ -155,7 +161,11 @@ icon: Boxes
 | `tunnel.js` | SSH 反向隧道生命周期 |
 | `users.js` | 成员增删改查、bcrypt 校验 |
 | `version.js` | 内容版本串 `<mtimeMs>-<size>-<内容哈希>`：编辑器乐观并发控制与 HTTP `ETag` 共用同一套指纹（`versionOf()` / `compareVersion()`） |
-| `webdav.js` | WebDAV 挂载（实验性）：Basic 认证、`PROPFIND` / `GET` / `PUT` 等方法到权限点的映射、内存锁表 |
+| `webdav.js` | WebDAV 挂载（v2.0 正式功能，默认关闭）：Basic 认证、`PROPFIND` / `GET` / `PUT` 等方法到权限点的映射、内存锁表、动态挂载路径与保留前缀校验 |
+| `thumbs.js` | 图片缩略图：`sharp` 生成 webp、内容寻址缓存（`data/thumbs/`）、并发闸门与定期清理、`sharp` 缺失时降级 |
+| `plugins/manifest.js` | 插件清单校验：`apiVersion` / `kind` / 权限白名单、主题令牌值与名白名单、JSON Schema 子集归一化、`themeCss()` |
+| `plugins/store.js` | 插件安装（逐条解 zip 并校验路径与体积）、启停、卸载、私有设置、当前主题 |
+| `routes/plugins.js` | `/api/admin/plugins*`（仅超管）与 `/api/plugins/theme`（公开主题 CSS） |
 | `routes/auth.js` | `/api/auth/*` |
 | `routes/fs.js` | `/api/fs/*`（最大的一块；在线编辑的读取 / 保存端点与 `SAVE_FILE_MAX_BYTES` 也在这里） |
 | `routes/admin.js` | `/api/admin/*`（整个 router 都套了 `requireRole("superadmin")`） |

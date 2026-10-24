@@ -3,7 +3,7 @@
   "ui.about.subtitle": "Licence, auteur et liste des composants open source tiers utilisés par ce logiciel",
   "ui.about.copy_dependency_list": "Copier la liste des dépendances",
   "ui.about.dependency_list_copied": "Liste des dépendances copiée",
-  "ui.about.tagline": "Disque réseau local léger · un disque d'atelier simple et efficace",
+  "ui.about.tagline": "Disque d'atelier léger · un disque privé simple pour les petites équipes",
   "ui.about.license": "Licence",
   "ui.about.author": "Auteur",
   "ui.about.copyright": "Copyright",

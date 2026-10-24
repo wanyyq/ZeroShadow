@@ -462,7 +462,10 @@ X-Requested-With: XMLHttpRequest
 | `path` | 文件路径（**不能为空**，为空返回 400 非法路径） |
 | `inline` | 传 `1` 且扩展名可内联时，以 `Content-Disposition: inline` 返回 |
 
-- 响应：文件流。响应头包含 `Content-Type`、`Content-Disposition`（同时给 `filename` 与 UTF-8 的 `filename*`）、`Cache-Control: no-store`；
+- 响应：文件流。响应头包含 `Content-Type`、`Content-Disposition`（同时给 `filename` 与 UTF-8 的 `filename*`）、`Cache-Control: no-store`、
+  `Accept-Ranges: bytes` 与弱 `ETag`；
+  - **支持 `Range`**（视频拖动 / 断点续传）：命中返回 `206` + `Content-Range`；
+  - **支持条件请求**：带 `If-None-Match` 且未变化时返回 `304`；
   内联返回 `.html` / `.htm` / `.svg` 时会额外带上 `Content-Security-Policy: sandbox allow-scripts`。
 - 权限判定用的是**当前小组收窄后**的权限（`req.perms`），所以小组关掉 `downloadFile` / `preview` 后这里一样会被拦；
 - 「对访客隐藏」的检查**同时覆盖只读映射目录**：访客即使猜到隐藏软目录里的完整文件名，也会得到 `404 文件不存在`；
@@ -471,6 +474,36 @@ X-Requested-With: XMLHttpRequest
 
 <Callout type="info" title="单文件下载不记日志、不限流">
 单文件下载**不记录** `download` 日志（只有真正下载才记），也**不受限流**。
+</Callout>
+
+### GET /api/fs/thumb
+
+网格视图用的图片缩略图（v2.0）。
+
+- 权限：预览（`memberPerms.preview` / `guestPerms.preview`，含小组收窄）；限流：是
+- 查询参数：
+
+| 参数 | 说明 |
+|:--|:--|
+| `path` | 图片路径（**不能是根目录**，否则 400） |
+| `w` | 目标宽度，会就近收敛到白名单 `96 / 128 / 192 / 256 / 384 / 512`（默认 256） |
+
+- 响应：`image/webp`，带 `Cache-Control: max-age=604800` 与基于**内容寻址**的强 `ETag`
+  （键 = `sha1(相对路径 | 大小 | mtimeMs | 宽度)`，文件一变键就变）
+- 支持的格式：`jpg/jpeg/png/webp/gif/avif/tiff/tif/bmp`（**不含 svg**：光栅化复杂 SVG 会占用大量 CPU）
+- 错误：
+
+| 状态 | 含义 |
+|:--|:--|
+| `400` | 根目录 / 非文件 |
+| `413` | 图片超过 64 MB |
+| `415` | 格式不支持 / 无法解码 |
+| `501` | 服务端没有可用的 `sharp`（典型：`pkg` 单文件 exe），前端会退回原图 |
+| `503` | 解码队列已满（最多 2 个并发、排队 64），稍后重试 |
+
+<Callout type="info" title="缓存位置与清理">
+缩略图落在 `data/thumbs/`，30 天过期、总量 512 MB 上限，启动时与每 6 小时按最旧淘汰；
+该目录已加入敏感条目，网盘接口列举不到也下载不到。
 </Callout>
 
 ### GET /api/fs/zip
@@ -1714,8 +1747,10 @@ while True:
 | `/api/todos` | 团队待办 | 登录成员（受 `todoEnabled` 约束） |
 | `/api/avatars` | 头像读写 | 登录成员 |
 | `/api/*` 其他 | 统一 404 `{"error":"接口不存在"}` | — |
-| `/dav`（可配） | **WebDAV（实验性，默认关闭，需在 `.env` 里设 `WEBDAV=1`）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话**；挂载路径可用 `WEBDAV_PATH` 改 | 成员账号（Basic） |
-| 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 未启用时 `/dav*` 返回 404 并提示如何开启，不会被 SPA 接住 | — |
+| `/dav`（可配） | **WebDAV（v2.0 起为正式功能，默认关闭）**。协议方法与 `/api` 完全不同，**只接受 HTTP Basic 认证、不接受 Cookie 会话**；开关与挂载路径都在后台（`webdavEnabled` / `webdavPath`），改完立即生效 | 成员账号（Basic） |
+| `/api/plugins/theme` | **公开**：当前生效的主题插件 CSS（`{ id, name, css }`）。主题是视觉信息，访客也要拿得到 | 无需登录 |
+| `/api/admin/plugins*` | 插件安装（`POST`，body 为 zip 原始字节）/ 启停与设置（`PATCH`）/ 应用主题（`POST /:id/theme`）/ 卸载（`DELETE`） | **仅超级管理员** |
+| 其它任意路径 | 返回前端应用（SPA fallback）。**例外**：WebDAV 未启用时 `/dav*` 返回 404 JSON（`Allow: OPTIONS`），不会被 SPA 接住 | — |
 
 <Cards>
   <Card title="权限与角色" href="/docs/zeroshadow/guide/permissions" description="权限点默认值与依赖关系" />

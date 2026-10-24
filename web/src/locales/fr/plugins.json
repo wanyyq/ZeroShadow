@@ -1,7 +1,7 @@
 {
   "ui.settings.tabs.plugins": "Extensions",
   "ui.plugins.title": "Extensions installées",
-  "ui.plugins.desc": "Les extensions ajoutent des capacités au disque. Cette version gère les thèmes ; d'autres types de fichiers (aperçu et édition) viendront ensuite.",
+  "ui.plugins.desc": "Les extensions étendent le disque : les thèmes s'appliquent immédiatement et les extensions de type de fichier ouvrent des formats non pris en charge par l'aperçu intégré.",
   "ui.plugins.enable": "Activer les extensions",
   "ui.plugins.enable_hint": "Désactivé par défaut. Les extensions sont du contenu tiers : une fois activé, vous pouvez les installer et les gérer. Les désactiver les rend inopérantes (les fichiers sont conservés).",
   "ui.plugins.install": "Installer une extension…",

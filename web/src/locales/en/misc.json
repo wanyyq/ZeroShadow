@@ -3,7 +3,7 @@
   "ui.about.subtitle": "This software's own license and author, plus the third-party open source components it uses",
   "ui.about.copy_dependency_list": "Copy dependency list",
   "ui.about.dependency_list_copied": "Dependency list copied",
-  "ui.about.tagline": "Lightweight LAN drive · a minimal, easy-to-use studio drive",
+  "ui.about.tagline": "A lightweight studio drive · a minimal, self-hosted drive for small teams",
   "ui.about.license": "License",
   "ui.about.author": "Author",
   "ui.about.copyright": "Copyright",

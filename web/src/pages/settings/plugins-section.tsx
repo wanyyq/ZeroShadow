@@ -247,7 +247,7 @@ export function PluginsSection() {
                       </div>
                     </div>
 
-                    {info?.kind !== "theme" && (
+                    {info?.kind === "server" && (
                       <p className="mt-2 rounded-md bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
                         {t("ui.plugins.runtime_later")}
                       </p>

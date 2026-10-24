@@ -1,7 +1,7 @@
 {
   "ui.settings.tabs.plugins": "外掛",
   "ui.plugins.title": "已安裝外掛",
-  "ui.plugins.desc": "外掛用來擴充網盤能力：這一版支援主題，後續會支援更多副檔名的預覽與編輯。",
+  "ui.plugins.desc": "外掛用來擴充網盤能力：主題外掛立即生效，檔案類型外掛能在預覽頁開啟內建不支援的副檔名。",
   "ui.plugins.enable": "啟用外掛功能",
   "ui.plugins.enable_hint": "預設關閉。外掛屬於第三方內容，開啟後才能安裝與管理；關閉後已安裝外掛不再生效（檔案保留）。",
   "ui.plugins.install": "安裝外掛…",

@@ -151,6 +151,49 @@ export function activeThemeManifest() {
   return manifest
 }
 
+/**
+ * 已启用、并且带前端运行时的插件（给 `/api/plugins/list` 用）。
+ *
+ * 只暴露"渲染一个插件需要知道的信息"：id / name / kind / extensions / modes。
+ * **不含** permissions、sha256、settings schema、主题令牌 —— 那些是管理员视角的数据。
+ */
+export function enabledRuntimePlugins() {
+  const out = []
+  for (const [id, st] of Object.entries(state.plugins)) {
+    if (!st.enabled) continue
+    const manifest = readManifest(id)
+    if (!manifest) continue
+    if (manifest.kind !== "fileType") continue
+    out.push({
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      kind: manifest.kind,
+      extensions: manifest.extensions,
+      modes: manifest.modes,
+      // 插件自己的设置：由管理员在后台填，最终交给插件渲染时使用。
+      // 它属于"插件配置"而不是"网盘机密"，且拼好后的内容本来就会展示给用户。
+      settings: st.settings || {},
+    })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** 取某个插件的入口文件（只认 manifest 里声明的 entry，别的一律不给） */
+export function pluginEntryFile(id) {
+  const st = state.plugins[id]
+  if (!st?.enabled) return null
+  const manifest = readManifest(id)
+  if (!manifest || !manifest.entry) return null
+  const abs = resolvePluginAsset(id, manifest.entry)
+  return abs ? { file: abs, manifest } : null
+}
+
+/** 插件私有设置（插件运行时通过 init 消息拿到，宿主不额外暴露接口） */
+export function runtimeSettings(id) {
+  return state.plugins[id]?.settings ?? {}
+}
+
 export function pluginSettings(id) {
   return state.plugins[id]?.settings ?? {}
 }

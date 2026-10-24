@@ -1,0 +1,8 @@
+{
+  "ui.preview.plugin_loading": "正在用外掛「{name}」呈現…",
+  "ui.preview.plugin_failed": "外掛載入失敗",
+  "ui.preview.plugin_dirty": "有未儲存的變更",
+  "ui.preview.plugin_read_failed": "外掛讀取檔案失敗",
+  "ui.preview.plugin_too_large": "檔案過大，外掛無法讀取",
+  "ui.preview.plugin_readonly": "沒有編輯權限，外掛只能檢視"
+}
