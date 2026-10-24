@@ -500,9 +500,10 @@ UTF-16 文件含 NUL 是正常的，不会被拦。
 这个文件在**只读映射目录**里 —— 产物没有地方写，只能先复制/下载到普通目录再转。
 </Accordion>
 
-<Accordion title="PDF 里的中文变成了 ?">
-服务器上没找到可用的中文字体。把任意 `.ttf`/`.ttc` 中文字体放到 `data/fonts/`，
-或用 `.env` 的 `CONVERT_PDF_FONT` 指定路径，然后重启。任务提示里会写明这件事。
+<Accordion title="转换报错「服务器上没有可用的中文字体……」（api.fs.convert_no_cjk_font）">
+服务器装不出中文 PDF 的字体。**这是有意的**：与其给你一份满屏 `?` 的 PDF，不如直接告诉你怎么办。
+把任意 `.ttf`/`.ttc` 中文字体放进 `data/fonts/`（最多一分钟生效），或用 `.env` 的 `CONVERT_PDF_FONT` 指定路径后重启。
+启动日志里的 `PDF 字体:` 一行会显示当前用的是哪个字体。
 </Accordion>
 
 <Accordion title="PDF 里的图片只有一行 [图片: alt]">
@@ -585,6 +586,67 @@ Markdown 4MB / 图片 32MB；更大的内容请先在本地处理。
 
 <Accordion title="日志里 IP 全是 127.0.0.1">
 设置 `TRUST_PROXY=loopback` 并重启。
+</Accordion>
+</Accordions>
+
+## WebDAV 挂载
+
+### Windows 资源管理器挂不上？按这个顺序查
+
+| # | 检查项 | 怎么做 |
+|:--|:--|:--|
+| 1 | **入口用错了吗** | 资源管理器的「映射网络驱动器」**只支持 SMB**，填 `https://…` 必然失败。要用「此电脑」右键 → **添加一个网络位置**，或命令行 `net use Z: \\主机@SSL\dav` |
+| 2 | **地址写法对不对** | HTTPS 默认端口 `\\主机@SSL\dav`；**非 443 端口** `\\主机@SSL@8443\dav`；纯 HTTP `\\主机@端口\dav`。后台 WebDAV 卡片里的「资源管理器地址」就是按你当前访问方式算好的 |
+| 3 | **服务器开了吗** | 「设置 → 公网 → WebDAV」勾「启用 WebDAV」并保存（实时生效）；未开启时挂载点回 404 JSON |
+| 4 | **证书受信任吗**（HTTPS） | 自签名证书会让 WebClient 直接放弃（「输入的文件夹似乎无效」）。把证书或其根 CA 装进「受信任的根证书颁发机构」；**浏览器里点"继续访问"不算** |
+| 5 | **HTTP 下用了 Basic** | Windows 默认只允许 HTTPS 上用 Basic：`reg add HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters /v BasicAuthLevel /t REG_DWORD /d 2 /f`，再 `net stop webclient && net start webclient`（明文传密码，仅限可信内网） |
+| 6 | **WebClient 服务没起来** | `net start webclient`（默认手动启动，被组策略禁用时会完全静默失败） |
+| 7 | **账号用了超管** | WebDAV 不接受超级管理员账号（回 403，但资源管理器只会再弹一次密码框）。用团队成员账号 |
+| 8 | **改过密码** | `net use * /delete /y` 清掉缓存凭据后重新挂载 |
+| 9 | **大文件拷不进去** | Windows WebClient 默认单文件上限 **50 MB**：`reg add …\Parameters /v FileSizeLimitInBytes /t REG_DWORD /d 4294967295 /f`，再重启 webclient 服务 |
+| 10 | **还是不行** | 「设置 → 日志与指标」筛 `webdav`：`webdav_auth_fail` = 凭据不对，`webdav_error` = 请求到了服务端但出错；**一条都没有** = 请求没到服务（地址 / 端口 / 证书 / 服务未启动） |
+
+### 其它常见现象
+
+<Accordions>
+<Accordion title="客户端提示 404 / 打开地址看到一段 JSON">
+WebDAV **默认关闭**。去「设置 → 公网 → WebDAV」打开并保存（实时生效，不用重启），或 `.env` 里设 `WEBDAV=1` 后重启。
+</Accordion>
+
+<Accordion title="改了挂载路径后旧地址连不上">
+路径是**立即生效**的，客户端里的地址要同步改；后台卡片上的两个地址是当前正确的。
+</Accordion>
+
+<Accordion title="填了超管账号，提示 403">
+WebDAV 不接受超级管理员账号（Basic 凭据每个请求都会重发）。建一个团队成员账号来挂载。
+</Accordion>
+
+<Accordion title="用浏览器打开 /dav/ 提示 401">
+正常：DAV 只认 HTTP Basic，不认浏览器的 Cookie 会话。请用资源管理器 / Finder / RaiDrive / rclone 连接。
+</Accordion>
+
+<Accordion title="新建目录返回 409">
+上级目录不存在。`MKCOL` 要求父目录先存在（不会替你递归建整条链）。
+</Accordion>
+
+<Accordion title="PROPFIND 返回 403（propfind-finite-depth）">
+服务端拒绝"一次扫描整棵树"的请求（RFC 形式的标准拒绝），正常客户端会自动退回 `Depth: 1`。脚本里写死 `infinity` 的改成 `1`。
+</Accordion>
+
+<Accordion title="复制 / 移动返回 502">
+`Destination` 头指向了别的主机。用**当前挂载地址**作为目标；反代后面带不同端口不会再被误判。
+</Accordion>
+
+<Accordion title="覆盖保存提示 412 / 文件已被他人修改">
+2.1.0 之前 `PROPFIND` 给出的 ETag 与 `PUT` 比对的值算法不同，凡是从列表里拿到 ETag 再保存的操作都会被判冲突。现已统一，升级后重新挂载一次即可。
+</Accordion>
+
+<Accordion title="改了成员密码后挂载盘立刻掉线">
+预期行为：凭据校验结果缓存 60 秒，但会校验 `tokenVersion`，改密码 / 禁用立即失效。用新密码重连。
+</Accordion>
+
+<Accordion title="Office 提示锁定却仍能被别人改">
+`LOCK` 只是礼节性的；真正的并发保护靠版本比对（编辑器保存时 409）。见[安全设计](/docs/zeroshadow/security/design)。
 </Accordion>
 </Accordions>
 

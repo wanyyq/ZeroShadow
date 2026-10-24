@@ -8,6 +8,9 @@
   "ui.settings.webdav.path_hint": "以 / 開頭；不能佔用 /api、/ping 這類既有前綴。儲存後立即生效，客戶端要同步改地址。",
   "ui.settings.webdav.mount_url": "掛載地址",
   "ui.settings.webdav.copied": "已複製掛載地址",
+  "ui.settings.webdav.unc_label": "資源管理器地址（Windows / 網絡位置）",
+  "ui.settings.webdav.unc_hint": "資源管理器必須用「新增一個網絡位置」或命令行 net use，用「映射網絡驅動器」填 https 地址是掛不上的。非 443 端口要寫成 \\\\主機@SSL@端口\\dav。",
+  "ui.settings.webdav.windows_hint": "Windows 默認只允許在 HTTPS 上使用 Basic 認證：內網走 HTTP 需改註冊表 BasicAuthLevel=2；自簽證書要先在客戶端受信任，否則會提示「文件夾無效」。步驟見「常見問題 → WebDAV 掛載」。",
   "ui.settings.webdav.warn_title": "只建議在 HTTPS 或完全可信的內網使用",
   "ui.settings.webdav.warn_body": "WebDAV 客戶端普遍只支援 Basic 認證，用戶名與密碼會在每一個請求裡重複發送，HTTP 下等於反覆明文傳輸。它也不接受超級管理員賬號，請使用團隊成員賬號連接。",
   "ui.settings.webdav.saved": "已保存"

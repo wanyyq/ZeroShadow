@@ -1,7 +1,6 @@
 {
   "api.admin.webdav_path_invalid": "webdavPath debe ser una ruta de montaje segura (p. ej. /dav)",
   "api.webdav.body_too_large": "El cuerpo de la solicitud es demasiado grande",
-  "api.webdav.depth_infinity_denied": "Depth: infinity no está admitido (recorrería todo el árbol); usa Depth: 0 o 1",
   "api.webdav.destination_host_mismatch": "El destino no pertenece a este sitio",
   "api.webdav.mkcol_body_unsupported": "MKCOL no acepta cuerpo de solicitud",
   "api.webdav.put_on_directory": "El destino es un directorio; PUT no puede sobrescribirlo",

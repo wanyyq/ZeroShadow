@@ -31,9 +31,14 @@ md→PDF 是完全自实现的（手写 PDF 1.7 写出器 + TrueType 子集化�
 - **md→PDF 自实现，零新增依赖**：手写 PDF 1.7 写出器 + TrueType 子集化（保留原始字形号的
   CIDFontType2 + Identity-H），文字**可选中复制 / 搜索**、链接可点击、A4 分页带页脚页码；
   支持标题 / 列表 / 代码块 / 引用 / 表格 / 分割线 / 行内样式。
-  - 字体按平台自动发现（Windows 微软雅黑等、macOS 苹方、Linux 文泉驿 / Droid），也可用
-    `CONVERT_PDF_FONT` 或 `data/fonts/` 指定；找不到中文字体时中文显示为 `?` 并在任务提示里说明，
-    **不报错**。
+  - 字体自动发现：`CONVERT_PDF_FONT` → `data/fonts/` → **扫描平台字体目录**（Windows 的
+    `%WINDIR%\Fonts` 与 `%LOCALAPPDATA%\Microsoft\Windows\Fonts`、macOS 的 `/System/Library/Fonts`、
+    Linux 的 `/usr/share/fonts` 等）→ 兜底绝对路径；候选按常见中文字体名排序后逐个真解析验证。
+    **不再硬编码 `C:/Windows/Fonts`** —— Windows 装在 D 盘、字体"仅为当前用户安装"、精简系统
+    都不会再让字体找不到。启动横幅新增一行 `PDF 字体: <路径>`，找不到时另记一条 `pdf_font_missing` 日志。
+  - 字体一个都找不到时**拒绝转换**（`api.fs.convert_no_cjk_font`）并提示把字体放进 `data/fonts/`，
+    而不是把中文写成 `?` 交出一份内容已损坏的 PDF —— 与在线编辑"目标编码表示不了的字符一律拒绝保存"
+    同一原则。纯 ASCII 文档不受影响（用 PDF 内置 Helvetica）。`data/fonts/` 放进字体最多一分钟生效。
 - **新权限点 `convertFiles`（后台名称「文件转换」，默认开启）**：受写操作总开关 `fileWrite` 约束、
   可被小组收窄；**访客恒不可转换**。权限点总数 **19 → 20**。
 - **并发闸门（`server/src/convert/queue.js`）**：同时最多 4 个转换在执行、最多 32 个排队，
@@ -54,10 +59,46 @@ md→PDF 是完全自实现的（手写 PDF 1.7 写出器 + TrueType 子集化�
   `web/src/locales/<语言>/convert.json`。
 - 后台「设置 → 权限 → 成员权限 → 高级功能」多一项「文件转换」；小组编辑的「高级权限」分组
   多一项同名开关。
+- **WebDAV 后台卡片新增「资源管理器地址」**：按当前访问方式直接给出 Windows UNC 写法
+  （`\\主机@SSL\dav`、非 443 端口 `\\主机@SSL@8443\dav`、HTTP `\\主机@端口\dav`），并说明
+  资源管理器要用「添加一个网络位置」而不是「映射网络驱动器」。这两条是"填对了也挂不上"的最主要来源。
+- 新增 `scripts/webdav-test.mjs`（70 项断言）：照 Windows WebClient / Finder 的真实请求序列打一遍
+  `OPTIONS → PROPFIND → MKCOL → PUT → PROPPATCH → GET/HEAD → LOCK → UNLOCK → COPY → MOVE → DELETE`，
+  每步按 RFC 4918 与客户端实际期望断言状态码、必需响应头和 XML 形状。
 
 ### 修复
 
-- 无 —— 本次为纯新增功能，不含对既有行为的修复。
+**WebDAV 挂载不上 / 挂上后保存失败（本轮实测发现，均有回归断言）**
+
+- **`getetag` 写反了，且三处 ETag 算法互不一致**（`webdav.js`）：
+  旧实现给**目录**编了一个假的 `"d-<mtime>"`、给**文件**什么都不给；而 `GET` 用内容哈希、
+  `PUT` 的 `If-Match` 也比内容哈希。于是"客户端从 `PROPFIND` 拿到 ETag → 保存时带回 `If-Match`"
+  这条最正常的路径**永远返回 412「文件已被他人修改」**（Office 保存、资源管理器覆盖粘贴都会踩到）。
+  现在统一为 `davEtag()` 一个来源：`"s-<mtimeMs>-<size>"`，PROPFIND / GET / HEAD / PUT 完全一致；
+  目录不再有 ETag，文件一定带 `getetag`。
+- **`PROPPATCH` 返回的不是 DAV 响应**（`webdav.js`）：旧实现回了一段 `<D:multivaluedate/>`
+  —— 既不是 `multistatus` 也不是合法元素，任何认真解析响应的客户端都判定"属性写入失败"
+  （Office 保存后提示"文档已被修改"）。现在按 RFC 回 `207 multistatus`、逐属性给状态，
+  并把 `Win32LastModifiedTime` **真的应用**到文件 mtime（复制 / 另存为时客户端最在意的一项）。
+- **`OPTIONS` 只认挂载点、不认站点根**（`webdav.js`）：部分客户端在挂载前会先探测 `OPTIONS /`，
+  根上不声明 DAV 时它会直接放弃，连配置好的 `/dav` 都不再尝试。现在根上的 `OPTIONS` 也回 DAV 能力头
+  （只接管 `OPTIONS`，前端页面不受影响）。
+- **反代后面所有 COPY / MOVE 都回 502**（`webdav.js`）：`Destination` 头与 `Host` 头是**连端口一起比**的，
+  而 Caddy / Nginx 后面客户端拼出的端口往往与 Node 收到的 `Host` 不一致。现在只比 **hostname**，
+  并接受 `X-Forwarded-Host`；真的指向别的站点仍然拒绝。
+- **`PROPFIND` 无视请求体**（`webdav.js`）：客户端点名的属性（`creationdate`、`lockdiscovery`、
+  `getcontenttype` …）以前一律得不到回答。现在解析请求体：能给的进 200 的 `propstat`，
+  给不了的按 RFC 4918 进 **404 的 `propstat`**；同时补上 `creationdate` 与空的 `lockdiscovery`
+  —— Office 对"问了 `lockdiscovery` 却什么都没回"很敏感。
+- **`Depth: infinity` 的拒绝方式不合规**（`webdav.js`）：以前回一段 JSON，客户端解析不出 precondition；
+  现在按 RFC 回 `403` + `<D:propfind-finite-depth/>` 的 XML。
+- **`LOCK` 对不存在的文件也回 200**（`webdav.js`）：RFC 要求 lock-null 回 **201**，
+  否则资源管理器/Word 新建文件后会误以为文件已存在，随后的 `PUT` 变成"覆盖"（还要 `delete` 权限）。
+- **`PROPFIND` / `PROPPATCH` / `LOCK` 的请求体没被读干净**（`webdav.js`）：不读就走，
+  Node 会在响应后丢弃未读请求体，部分客户端看到连接被重置（"保存失败"但服务端日志只有 200）。
+  现在显式收下（上限 64 KB，与原有的长度检查一致）。
+- **所有 DAV 响应统一带 `DAV` / `Allow` / `Cache-Control: no-store`**（`webdav.js`）：
+  Windows WebClient 缓存很激进，删掉的文件会一直显示；部分客户端在 207 上也会检查能力头。
 
 ---
 

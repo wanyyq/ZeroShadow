@@ -1,7 +1,6 @@
 {
   "api.admin.webdav_path_invalid": "webdavPath は安全なマウントパス（例: /dav）である必要があります",
   "api.webdav.body_too_large": "リクエスト本文が大きすぎます",
-  "api.webdav.depth_infinity_denied": "Depth: infinity は未対応です（ディレクトリツリー全体を走査します）。Depth: 0 または 1 を使用してください",
   "api.webdav.destination_host_mismatch": "宛先がこのサイトのものではありません",
   "api.webdav.mkcol_body_unsupported": "MKCOL はリクエスト本文を受け付けません",
   "api.webdav.put_on_directory": "対象はディレクトリのため PUT で上書きできません",

@@ -10,6 +10,7 @@
   "api.fs.convert_too_large": "Archivo demasiado grande ({size}); el límite de conversión es {limit}",
   "api.fs.convert_empty": "Este archivo está vacío, no hay nada que convertir",
   "api.fs.convert_no_sharp": "sharp no está instalado en el servidor, la conversión de imágenes no está disponible",
+  "api.fs.convert_no_cjk_font": "No hay ninguna fuente CJK utilizable en el servidor, así que no se puede generar un PDF con chino. Coloca una fuente .ttf/.ttc en data/fonts/ o define CONVERT_PDF_FONT y vuelve a intentarlo (resultado de la detección: {reason})",
   "api.fs.convert_bad_image": "No se pudo leer este archivo de imagen",
   "api.fs.convert_busy": "Hay demasiadas conversiones en curso; inténtalo de nuevo más tarde",
   "api.fs.invalid_params": "Formato de parámetros incorrecto",

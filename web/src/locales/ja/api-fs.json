@@ -10,6 +10,7 @@
   "api.fs.convert_too_large": "ファイルが大きすぎます（{size}）。変換の上限は {limit} です",
   "api.fs.convert_empty": "空のファイルのため、変換できる内容がありません",
   "api.fs.convert_no_sharp": "サーバーに sharp が入っていないため、画像変換は利用できません",
+  "api.fs.convert_no_cjk_font": "サーバーに使用可能な日本語・中国語フォントがないため、日本語を含む PDF を作成できません。.ttf / .ttc フォントを data/fonts/ に置くか、CONVERT_PDF_FONT でパスを指定してから再試行してください（検出結果：{reason}）",
   "api.fs.convert_bad_image": "この画像ファイルを読み込めませんでした",
   "api.fs.convert_busy": "変換タスクが多すぎます。しばらくしてから再試行してください",
   "api.fs.invalid_params": "パラメータの形式が正しくありません",

@@ -8,6 +8,9 @@
   "ui.settings.webdav.path_hint": "Doit commencer par / ; /api et /ping sont réservés. Les changements s'appliquent immédiatement : mettez aussi à jour le client.",
   "ui.settings.webdav.mount_url": "URL de montage",
   "ui.settings.webdav.copied": "URL de montage copiée",
+  "ui.settings.webdav.unc_label": "Adresse pour l'Explorateur (Windows / emplacement réseau)",
+  "ui.settings.webdav.unc_hint": "Dans l'Explorateur, utilisez « Ajouter un emplacement réseau » ou net use ; « Connecter un lecteur réseau » ne peut pas monter une URL https. Pour un port autre que 443, écrivez \\\\hôte@SSL@port\\dav.",
+  "ui.settings.webdav.windows_hint": "Windows n'autorise Basic que sur HTTPS par défaut : pour du HTTP sur le LAN, passez BasicAuthLevel=2 dans le registre. Un certificat auto-signé doit être approuvé sur le client, sinon l'Explorateur dit que le dossier est invalide. Voir FAQ → WebDAV.",
   "ui.settings.webdav.warn_title": "À utiliser uniquement en HTTPS ou sur un réseau totalement fiable",
   "ui.settings.webdav.warn_body": "Les clients WebDAV ne gèrent généralement que l'authentification Basic : l'identifiant et le mot de passe sont renvoyés à chaque requête — en HTTP, cela revient à répéter des identifiants en clair. Les comptes super-administrateur sont refusés ; connectez-vous avec un compte membre de l'équipe.",
   "ui.settings.webdav.saved": "Enregistré"

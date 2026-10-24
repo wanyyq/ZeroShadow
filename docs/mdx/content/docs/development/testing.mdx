@@ -16,6 +16,7 @@ icon: FlaskConical
 | `scripts/markdown-url-test.mjs` | Markdown 相对路径解析单测 | 18 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/markdown-html-test.mjs` | Markdown 安全 HTML 白名单单测 | 28 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/convert-test.mjs` | 文件转换单测（Markdown 解析 / md→txt / md→PDF 结构与字体子集 / 图片互转 / 并发闸门） | 44 项 | **否** | 失败项数量（0 / 1） |
+| `scripts/webdav-test.mjs` | WebDAV 协议兼容性（Windows WebClient / Finder 的真实请求序列） | 70 项 | 是 | 失败项数量（0 / 1） |
 | `i18n-check.mjs` | 多语言文案校验（键完整性 + 剩余硬编码中文） | — | **否** | 错误数（0 = 通过） |
 
 这些脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过

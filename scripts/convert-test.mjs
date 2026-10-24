@@ -324,6 +324,10 @@ check("空 Markdown 不炸，输出为空串而不是 undefined", () => {
 section("Markdown → PDF")
 
 const mdPdf = registry.getConverter("md-to-pdf")
+const mdPdfMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "converters", "md-to-pdf.js")).href)
+const fontMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "font.js")).href)
+const layoutMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "layout.js")).href)
+const docMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "document.js")).href)
 let pdfBuffer = null
 const pdfNotes = []
 
@@ -494,10 +498,6 @@ await checkAsync("纯 ASCII 文档在没有中文字体时也能生成（退化�
 })
 
 await checkAsync("真·退化路径（没有中文字体）：退回内置 Helvetica，中文变 ? 且 PDF 仍合法", async () => {
-  const fontMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "font.js")).href)
-  const layoutMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "layout.js")).href)
-  const docMod = await import(pathToFileURL(path.join(root, "server", "src", "convert", "pdf", "document.js")).href)
-
   const fallback = fontMod.fallbackFontView()
   const layout = layoutMod.layoutDocument({
     blocks: markdown.parseMarkdown("# 中文标题\n\n正文里有中文与 ASCII text。\n"),
@@ -510,9 +510,41 @@ await checkAsync("真·退化路径（没有中文字体）：退回内置 Helve
   assert.ok(/\/Subtype \/Type1/.test(info.raw), "退化路径没有用 Type1 内置字体")
   assert.ok(/\/WinAnsiEncoding/.test(info.raw), "退化路径没有声明 WinAnsiEncoding")
   assert.ok(!/\/FontFile2/.test(info.raw), "退化路径不该引用字体程序")
-  // 中文被替换成 '?'，并且这件事被记进了 missingChars（上层会拼成任务提示）
+  // 中文被替换成 '?'，并且这件事被记进了 missingChars
   assert.ok(fallback.missingChars.size > 0, "缺字没有被记录")
-  assert.deepEqual(layout.warnings.length >= 0, true)
+})
+
+check("needsCjkFont：中文与全角标点要字体，纯 ASCII 不要", () => {
+  assert.equal(mdPdfMod.needsCjkFont("# 标题"), true)
+  assert.equal(mdPdfMod.needsCjkFont("全角标点：，。！"), true)
+  assert.equal(mdPdfMod.needsCjkFont("plain ASCII, 123, punctuation; ok!"), false)
+  // Latin-1 范围内的重音字母 WinAnsi 有，不算"缺字"；希腊字母/箭头之类就超界了
+  assert.equal(mdPdfMod.needsCjkFont("café résumé"), false)
+  assert.equal(mdPdfMod.needsCjkFont("Ω → ∞"), true)
+  assert.equal(mdPdfMod.needsCjkFont(""), false)
+})
+
+await checkAsync("没有中文字体时：含中文的 md→PDF **直接报错**（绝不写出满屏问号）", async () => {
+  const fallback = fontMod.fallbackFontView()
+  assert.throws(
+    () => mdPdfMod.assertRenderable("# 中文标题\n", fallback, "测试原因"),
+    (err) => err.errorKey === "api.fs.convert_no_cjk_font" && err.status === 501 && /data\/fonts/.test(err.message)
+  )
+  // 纯 ASCII 文档在没有字体时照样能转（内置 Helvetica 够用）
+  assert.doesNotThrow(() => mdPdfMod.assertRenderable("# Hello\n\nworld 123\n", fallback, "测试原因"))
+})
+
+await checkAsync("有中文字体时 assertRenderable 放行（并报告是哪个字体）", async () => {
+  const loaded = await fontMod.loadFont()
+  if (!loaded.ok) {
+    console.log(`      （这台机器没有中文字体，跳过：${loaded.reason}）`)
+    return
+  }
+  assert.doesNotThrow(() => mdPdfMod.assertRenderable("# 中文标题\n", loaded.font))
+  assert.ok(typeof loaded.source === "string" && loaded.source.length > 3, "没有给出字体路径")
+  const status = fontMod.fontStatus()
+  assert.equal(status.ok, true)
+  assert.equal(status.source, loaded.source)
 })
 
 /* ---------------------------------------------------------------- 4. 图片互转 */

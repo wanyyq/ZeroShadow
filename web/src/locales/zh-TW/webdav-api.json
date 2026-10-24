@@ -1,7 +1,6 @@
 {
   "api.admin.webdav_path_invalid": "webdavPath 必須是安全的掛載路徑（如 /dav）",
   "api.webdav.body_too_large": "請求主體過大",
-  "api.webdav.depth_infinity_denied": "不支援 Depth: infinity（會掃描整個目錄樹），請改用 Depth: 0 或 1",
   "api.webdav.destination_host_mismatch": "目標位址不屬於本站點",
   "api.webdav.mkcol_body_unsupported": "MKCOL 不接受請求主體",
   "api.webdav.put_on_directory": "目標是目錄，不能用 PUT 覆蓋",

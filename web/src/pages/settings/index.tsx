@@ -1074,6 +1074,23 @@ function WebdavSection() {
     return `${base}${path.replace(/\/+$/, "")}/`
   }, [path])
 
+  /**
+   * Windows 资源管理器的 **UNC 形式**挂载地址。
+   *
+   * 为什么必须单独给：资源管理器不能直接把 `https://…` 填进去 ——
+   * 「映射网络驱动器」只认 SMB，WebDAV 要走「添加一个网络位置」或 `net use`，
+   * 而它们接受的写法是 `\\主机@SSL\路径`（非 443 端口是 `\\主机@SSL@端口\路径`，
+   * HTTP 则是 `\\主机@端口\路径`）。这三条规则每次都有人写错，
+   * 而写错的表现只是"文件夹无效"，没有任何提示。
+   */
+  const uncMount = React.useMemo(() => {
+    if (typeof window === "undefined") return ""
+    const { protocol, hostname, port } = window.location
+    const segs = path.replace(/^\/+|\/+$/g, "")
+    const hostPart = protocol === "https:" ? (port ? `${hostname}@SSL@${port}` : `${hostname}@SSL`) : port ? `${hostname}@${port}` : hostname
+    return `\\\\${hostPart}\\${segs}`
+  }, [path])
+
   if (!loaded) return <p className="py-8 text-center text-sm text-muted-foreground">{t("ui.common.loading")}</p>
 
   return (
@@ -1128,9 +1145,30 @@ function WebdavSection() {
           </div>
         </div>
 
+        <div className="grid gap-2">
+          <Label>{t("ui.settings.webdav.unc_label")}</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input readOnly value={uncMount} className="h-8 min-w-0 flex-1 font-mono text-xs" onFocus={(e) => e.target.select()} />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard?.writeText(uncMount).then(
+                  () => toast.success(t("ui.settings.webdav.copied")),
+                  () => toast.error(t("ui.common.copy_failed"))
+                )
+              }}
+            >
+              <Icon name="clipboard-copy" /> {t("ui.common.copy")}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("ui.settings.webdav.unc_hint")}</p>
+        </div>
+
         <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
           <p className="mb-1 font-medium text-foreground">{t("ui.settings.webdav.warn_title")}</p>
           <p>{t("ui.settings.webdav.warn_body")}</p>
+          <p className="mt-2">{t("ui.settings.webdav.windows_hint")}</p>
         </div>
       </div>
     </div>

@@ -748,6 +748,7 @@ X-ZS-Group: <小组 id>
 | 413 | `api.fs.convert_too_large` | 超过该转换器的源文件上限（`errorParams: { size, limit }`） |
 | 415 | `api.fs.binary_not_editable` | 文本类转换的源文件看起来是二进制 |
 | 501 | `api.fs.convert_no_sharp` | 图片转换，但服务端没有 `sharp`（单文件 exe 常见） |
+| 501 | `api.fs.convert_no_cjk_font` | md→PDF 找不到中文字体，而文档里含非单字节字符（`errorParams: { reason }`）。**不会写出满屏 `?` 的 PDF** |
 | 503 | `api.fs.convert_busy` | 转换队列已满（同时 4 个在执行、32 个排队） |
 
 - 图片转换复用缩略图那套 `sharp`；没有它时返回 **501**（`api.fs.convert_no_sharp`），

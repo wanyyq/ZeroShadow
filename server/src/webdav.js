@@ -10,7 +10,6 @@ import { contentDisposition } from "./http.js"
 import { copyEntry, listDir, moveEntry, statSafe } from "./files.js"
 import { permsForContext, resolveGroupContext, visibilityForContext, isVisibleForContext } from "./groups.js"
 import { moveToTrash } from "./trash.js"
-import { versionOf } from "./version.js"
 import { info, warn } from "./logger.js"
 
 // ============================================================================
@@ -82,6 +81,87 @@ function xmlEscape(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
 }
+
+/**
+ * DAV 里统一的 ETag：`"s-<mtimeMs>-<size>"`。
+ *
+ * 为什么 DAV 不用在线编辑器那套"内容哈希"（`versionOf`）：
+ *   - PROPFIND 是**批量**的（一次列 5000 个子项），逐个读文件算哈希等于把整棵目录
+ *     读一遍，弱网下反而卡死；而客户端只拿 ETag 做"变没变"的判断。
+ *   - 更要紧的是**一致性**：Windows 资源管理器 / Office 会先用 PROPFIND 拿到
+ *     `getetag`，保存时再用它做 `If-Match`。旧实现 PROPFIND 给的是
+ *     `"d-<mtime>"`（还是给了目录、漏了文件），而 PUT 比对的是内容哈希 ——
+ *     两边永远不相等，于是每次保存都被判成 412「文件已被他人修改」。
+ *     现在 PROPFIND / GET / HEAD / PUT 用的是同一个函数、同一个值。
+ */
+function davEtag(stat) {
+  return `"s-${Math.trunc(stat?.mtimeMs || 0)}-${stat?.size || 0}"`
+}
+
+/**
+ * RFC 1123 的 Last-Modified —— `Date.prototype.toUTCString()` 的输出正好合规，
+ * 但它对无效日期会给出 "Invalid Date"，所以先兜一下底。
+ */
+function httpDate(ms) {
+  const d = new Date(Number(ms) || 0)
+  return Number.isNaN(d.getTime()) ? new Date(0).toUTCString() : d.toUTCString()
+}
+
+/** ISO 8601（creationdate 用），DAV 要求带 Z */
+function isoDate(ms) {
+  const d = new Date(Number(ms) || 0)
+  return Number.isNaN(d.getTime()) ? "1970-01-01T00:00:00Z" : d.toISOString().replace(/\.\d{3}Z$/, "Z")
+}
+
+/**
+ * 解析 PROPFIND 的请求体，得出客户端**到底要哪些属性**。
+ *
+ * 为什么要解析：RFC 4918 规定服务端要么把请求的属性都给出（200），要么在
+ * **第二个 propstat 里用 404 说明"这个属性我没有"**。旧实现无视请求体、永远返回
+ * 自己那固定几项，于是客户端要 `creationdate` / `lockdiscovery` 时什么也拿不到 ——
+ * 资源管理器与 Office 对此的容忍度差别很大（Office 会认为文件"不可编辑"）。
+ *
+ * 返回：
+ *   - `null`：客户端发的是 `<D:allprop/>`、空体或解析失败 → 全部属性都给
+ *   - 否则是属性名的数组（不含 `D:` 前缀，统一小写），可能为空数组
+ */
+function parsePropfindBody(body) {
+  const text = String(body || "")
+  if (!text.trim()) return null
+  if (/allprop/i.test(text)) return null
+  const names = []
+  // 只认 <D:xxx/> 这种自闭合或成对标签里的属性名；先剥掉外层 propfind
+  const re = /<(?:[A-Za-z0-9_.-]+:)?([A-Za-z][A-Za-z0-9_.-]*)\s*\/?>/g
+  let m
+  let insideProp = false
+  const propStart = /<(?:[A-Za-z0-9_.-]+:)?prop\b[^>]*>/i.exec(text)
+  const propEnd = /<\/(?:[A-Za-z0-9_.-]+:)?prop\s*>/i.exec(text)
+  if (!propStart) return null
+  const inner = propEnd
+    ? text.slice(propStart.index + propStart[0].length, propEnd.index)
+    : text.slice(propStart.index + propStart[0].length)
+  insideProp = true
+  while ((m = re.exec(inner)) !== null) {
+    const name = m[1].toLowerCase()
+    // 过滤掉集合类容器名（prop / propfind 本身不会出现在 inner 里，但防御一下）
+    if (name === "prop" || name === "propfind" || name === "allprop") continue
+    if (!names.includes(name)) names.push(name)
+  }
+  return insideProp ? names : null
+}
+
+/** 一个属性节点的名字（用于把"属性名 → XML 片段"的表拼出来） */
+const PROP_ORDER = [
+  "resourcetype",
+  "displayname",
+  "getcontentlength",
+  "getcontenttype",
+  "getlastmodified",
+  "creationdate",
+  "getetag",
+  "supportedlock",
+  "lockdiscovery",
+]
 
 /**
  * 极简扩展名 → MIME 映射。
@@ -384,25 +464,6 @@ function visible(req, rel) {
   })
 }
 
-/**
- * 计算某文件的 ETag。
- *
- * 小文件用内容哈希（与在线编辑器的 baseVersion 同一套算法，客户端可据 If-Match
- * 做乐观锁）；大文件退化为 `mtime-size` —— 旧实现无论多大都 `readFile` 整份再
- * sha1，于是对一个 4GB 视频连发几个 HEAD 就能把整个服务的内存打爆。
- */
-const ETAG_HASH_MAX_BYTES = 8 * 1024 * 1024
-
-async function etagFor(abs, stat) {
-  if (stat.size > ETAG_HASH_MAX_BYTES) return `"s-${Math.trunc(stat.mtimeMs)}-${stat.size}"`
-  try {
-    const buf = await fs.promises.readFile(abs)
-    return `"${versionOf(buf, stat)}"`
-  } catch {
-    return `"s-${Math.trunc(stat.mtimeMs)}-${stat.size}"`
-  }
-}
-
 function deny(res, perm) {
   res.status(403).json({
     error: `没有权限执行此操作（需要 ${perm}）`,
@@ -445,29 +506,81 @@ function hrefFor(req, rel, isDir) {
   return isDir && !full.endsWith("/") ? full + "/" : full
 }
 
-function propResponse(req, rel, stat, isDir) {
-  const name = rel ? rel.split("/").pop() : ""
-  const etag = isDir ? `"d-${Math.trunc(stat.mtimeMs)}"` : null
-  return [
-    "<D:response>",
-    `<D:href>${xmlEscape(hrefFor(req, rel, isDir))}</D:href>`,
-    "<D:propstat>",
-    "<D:prop>",
-    isDir ? "<D:resourcetype><D:collection/></D:resourcetype>" : "<D:resourcetype/>",
-    `<D:displayname>${xmlEscape(name)}</D:displayname>`,
-    `<D:getlastmodified>${new Date(stat.mtimeMs).toUTCString()}</D:getlastmodified>`,
-    isDir ? "" : `<D:getcontentlength>${stat.size}</D:getcontentlength>`,
-    isDir ? "" : `<D:getcontenttype>${xmlEscape(mimeOf(name))}</D:getcontenttype>`,
-    etag ? `<D:getetag>${xmlEscape(etag)}</D:getetag>` : "",
-    "<D:supportedlock><D:lockentry><D:lockscope><D:exclusive/></D:lockscope><D:locktype><D:write/></D:locktype></D:lockentry></D:supportedlock>",
-    "</D:prop>",
-    "<D:status>HTTP/1.1 200 OK</D:status>",
-    "</D:propstat>",
-    "</D:response>",
-  ]
-    .filter(Boolean)
-    .join("")
+/**
+ * 一个 `<D:response>` 元素。
+ *
+ * @param {object} req
+ * @param {string} rel 相对路径（"" = 挂载点根）
+ * @param {{mtimeMs:number,size:number}} stat
+ * @param {boolean} isDir
+ * @param {string[]|null} wanted 客户端点名的属性（null = 全给）
+ */
+function propResponse(req, rel, stat, isDir, wanted = null) {
+  const name = rel ? rel.split("/").pop() : davBase().split("/").filter(Boolean).pop() || "dav"
+  // 属性名 → XML 片段。**每个属性都必须能拼出来**，缺谁就进第二个 propstat 的 404。
+  const available = {
+    resourcetype: isDir ? "<D:resourcetype><D:collection/></D:resourcetype>" : "<D:resourcetype/>",
+    displayname: `<D:displayname>${xmlEscape(name)}</D:displayname>`,
+    getcontentlength: isDir ? null : `<D:getcontentlength>${stat.size || 0}</D:getcontentlength>`,
+    getcontenttype: isDir ? null : `<D:getcontenttype>${xmlEscape(mimeOf(name))}</D:getcontenttype>`,
+    getlastmodified: `<D:getlastmodified>${httpDate(stat.mtimeMs)}</D:getlastmodified>`,
+    creationdate: `<D:creationdate>${isoDate(stat.mtimeMs)}</D:creationdate>`,
+    // ETag 只给文件：集合没有内容，编一个假 ETag 只会让客户端做无意义的重取
+    getetag: isDir ? null : `<D:getetag>${xmlEscape(davEtag(stat))}</D:getetag>`,
+    supportedlock:
+      "<D:supportedlock><D:lockentry><D:lockscope><D:exclusive/></D:lockscope><D:locktype><D:write/></D:locktype></D:lockentry></D:supportedlock>",
+    // 空元素 = "当前没有锁"。资源管理器 / Office 会主动问这一项，
+    // 完全不给的话有些客户端会认为服务器不支持锁、进而放弃写入。
+    lockdiscovery: "<D:lockdiscovery/>",
+  }
+
+  const names = wanted && wanted.length ? wanted : PROP_ORDER
+  const okParts = []
+  const missing = []
+  for (const key of names) {
+    const xml = available[key]
+    if (xml) okParts.push(xml)
+    else if (wanted && wanted.length) missing.push(key)
+  }
+
+  const out = ["<D:response>", `<D:href>${xmlEscape(hrefFor(req, rel, isDir))}</D:href>`]
+  if (okParts.length || !wanted || !wanted.length) {
+    out.push("<D:propstat><D:prop>", okParts.join(""), "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>")
+  }
+  if (missing.length) {
+    // 客户端点名要了但我们没有的属性：按 RFC 4918 用 404 明确回答，
+    // 而不是"静默少给"。Office 对"问 lockdiscovery 却啥也没回"很敏感。
+    out.push(
+      "<D:propstat><D:prop>",
+      missing.map((key) => `<D:${key}/>`).join(""),
+      "</D:prop><D:status>HTTP/1.1 404 Not Found</D:status></D:propstat>"
+    )
+  }
+  out.push("</D:response>")
+  return out.join("")
 }
+
+/** 207 响应的统一出口：头部齐全（DAV / Allow / no-cache）才算合规 */
+function sendMultistatus(res, body) {
+  res.status(207)
+  res.setHeader("Content-Type", 'application/xml; charset="utf-8"')
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+  res.setHeader("DAV", "1, 2")
+  res.send(body)
+}
+
+/** 统一的 DAV 错误体（XML 形式，客户端才看得懂 precondition） */
+function sendDavError(res, status, key, message) {
+  res.status(status)
+  res.setHeader("Content-Type", 'application/xml; charset="utf-8"')
+  res.setHeader("DAV", "1, 2")
+  res.send(
+    '<?xml version="1.0" encoding="utf-8"?>' +
+      `<D:error xmlns:D="DAV:"><D:${key}/></D:error>` +
+      (message ? `<!-- ${xmlEscape(message)} -->` : "")
+  )
+}
+
 
 async function handlePropfind(req, res) {
   if (!req.dav.perms.browse) return deny(res, "browse")
@@ -481,14 +594,15 @@ async function handlePropfind(req, res) {
   const isDir = stat.isDirectory()
   const depth = String(req.headers.depth ?? "1").trim().toLowerCase()
   // 拒绝 Depth: infinity：一次请求就能让服务递归扫描整棵目录树（资源管理器
-  // 挂载时并不会发它，只有刻意构造的请求才会）。合规客户端拿到 403 会退回 1。
+  // 挂载时并不会发它，只有刻意构造的请求才会）。按 RFC 4918 §9.1 用
+  // `<D:propfind-finite-depth/>` 明确表达"我只支持有限深度"——
+  // 旧实现回了一段 JSON，客户端解析不出 precondition，只能当成未知错误。
   if (depth === "infinity") {
-    return res.status(403).json({
-      error: "不支持 Depth: infinity（会扫描整个目录树），请改用 Depth: 0 或 1",
-      errorKey: "api.webdav.depth_infinity_denied",
-    })
+    return sendDavError(res, 403, "propfind-finite-depth", "只支持 Depth: 0 或 1")
   }
-  const parts = [propResponse(req, resolved.rel, stat, isDir)]
+  // 客户端点名的属性（null = 全给）
+  const wanted = parsePropfindBody(req.rawBody)
+  const parts = [propResponse(req, resolved.rel, stat, isDir, wanted)]
 
   if (isDir && depth !== "0") {
     let entries = []
@@ -515,21 +629,72 @@ async function handlePropfind(req, res) {
           req,
           childRel,
           { mtimeMs: entry.mtime || 0, size: childIsDir ? 0 : entry.size || 0 },
-          childIsDir
+          childIsDir,
+          wanted
         )
       )
     }
   }
 
-  const body =
-    '<?xml version="1.0" encoding="utf-8"?>\n' +
-    '<D:multistatus xmlns:D="DAV:">' +
-    parts.join("") +
-    "</D:multistatus>"
-  res.status(207)
-  res.setHeader("Content-Type", 'application/xml; charset="utf-8"')
-  res.setHeader("DAV", "1, 2")
-  res.send(body)
+  sendMultistatus(res, '<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">' + parts.join("") + "</D:multistatus>")
+}
+
+/**
+ * PROPPATCH —— 资源管理器与 Office 会用它写 Win32 属性。
+ *
+ * 旧实现直接回了一段 `<D:multivaluedate .../>`：既不是 multistatus、也不是合法的
+ * DAV 元素，任何认真解析响应的客户端都会判定"属性写入失败"（Office 保存后
+ * 弹"文档已被修改"就是这么来的）。
+ *
+ * 现在按 RFC 的形状回 `207 multistatus`，每个被点名的属性给一个 200；其中
+ * `Win32LastModifiedTime` 会**真的应用**（`utimes`）—— 这是复制/另存为时
+ * 客户端最在意的一项，其余属性（文件属性位、扩展属性）如实忽略。
+ */
+async function handleProppatch(req, res) {
+  const resolved = resolveOrReply(req, res)
+  if (!resolved) return
+  if (resolved.isSoft) {
+    return res.status(403).json({ error: "外部映射目录仅支持只读操作", errorKey: "api.webdav.soft_readonly" })
+  }
+  const stat = await statSafe(resolved.abs)
+  if (!stat) return res.status(404).json({ error: "文件或目录不存在", errorKey: "api.webdav.not_found" })
+  if (!req.dav.perms.fileWrite) return deny(res, "fileWrite")
+
+  const body = String(req.rawBody || "")
+  const props = []
+  const re = /<(?:[A-Za-z0-9_.-]+:)?([A-Za-z][A-Za-z0-9_.-]*)\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_.-]+:)?\1\s*>/g
+  let m
+  while ((m = re.exec(body)) !== null) {
+    const name = m[1]
+    if (/^(propertyupdate|set|remove|prop)$/i.test(name)) continue
+    props.push({ name, value: m[2].trim() })
+  }
+
+  // 时间戳是真的能落地的：Win32LastModifiedTime 的取值是 RFC1123 字符串
+  const mtimeProp = props.find((p) => /^win32lastmodifiedtime$/i.test(p.name))
+  if (mtimeProp) {
+    const ts = Date.parse(mtimeProp.value)
+    if (Number.isFinite(ts)) {
+      try {
+        await fs.promises.utimes(resolved.abs, new Date(), new Date(ts))
+        info("webdav_proppatch_mtime", { msg: `${resolved.rel} → ${new Date(ts).toISOString()}`, user: req.dav.username, ip: req.ip })
+      } catch {
+        /* 时间戳写不进去不影响属性写入的结论 */
+      }
+    }
+  }
+
+  const names = props.length ? props.map((p) => p.name) : ["Win32LastModifiedTime"]
+  const propXml = names.map((name) => `<D:${xmlEscape(name)}/>`).join("")
+  sendMultistatus(
+    res,
+    '<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">' +
+      "<D:response>" +
+      `<D:href>${xmlEscape(hrefFor(req, resolved.rel, stat.isDirectory()))}</D:href>` +
+      `<D:propstat><D:prop>${propXml}</D:prop>` +
+      "<D:status>HTTP/1.1 200 OK</D:status></D:propstat>" +
+      "</D:response></D:multistatus>"
+  )
 }
 
 async function handleGet(req, res, headOnly) {
@@ -541,10 +706,11 @@ async function handleGet(req, res, headOnly) {
     return res.status(404).json({ error: "文件不存在", errorKey: "api.webdav.file_not_found" })
   }
 
-  // ETag = 内容版本（与在线编辑器的 baseVersion 同一套计算），
-  // 客户端因此可以用 If-Match 做乐观锁，条件不满足时得到 412。
-  const etag = await etagFor(resolved.abs, stat)
+  // ETag 必须与 PROPFIND 的 `getetag` 完全一致：客户端会拿列表里的 ETag 做
+  // If-Match / If-None-Match，两边算法一旦不同，每次保存都会被判成版本冲突。
+  const etag = davEtag(stat)
   res.setHeader("ETag", etag)
+  res.setHeader("Last-Modified", httpDate(stat.mtimeMs))
   // 条件 GET：客户端（rclone / 资源管理器缩略图）会带 If-None-Match 复用缓存，
   // 命中直接 304，不再重传文件内容 —— 弱网 / 穿透链路上这一条最省流量。
   const inm = req.headers["if-none-match"]
@@ -594,8 +760,11 @@ async function handlePut(req, res) {
     return res.status(405).json({ error: "目标是目录，不能用 PUT 覆盖", errorKey: "api.webdav.put_on_directory" })
   }
   // If-Match 不一致 → 412；这让支持它的客户端能做乐观并发控制
+  // If-Match 必须拿**客户端手上那个值**来比：客户端是从 PROPFIND/GET 的
+  // `getetag` 拿到它的，所以这里也只能用 davEtag。旧实现用的是内容哈希，
+  // 于是"列表里拿到的 ETag → 保存"这条最正常的路径永远 412。
   if (existing && req.headers["if-match"]) {
-    const current = await etagFor(resolved.abs, existing)
+    const current = davEtag(existing)
     if (req.headers["if-match"] !== current) {
       return res.status(412).json({ error: "文件已被其他人修改", errorKey: "api.webdav.version_conflict" })
     }
@@ -734,8 +903,23 @@ async function handleCopyMove(req, res, isMove) {
   let destPath = destination
   try {
     const parsed = new URL(destination)
-    // 目标主机必须是本站：否则等于让服务按客户端的指示去操作另一个主机
-    if (parsed.host && req.headers.host && parsed.host.toLowerCase() !== String(req.headers.host).toLowerCase()) {
+    // 目标主机必须是本站：否则等于让服务按客户端的指示去操作另一个主机。
+    // 只比 **hostname**、不比端口 —— 反代（Caddy / Nginx）后面，客户端拼出的
+    // Destination 带的是它自己看到的端口（可能是 443，也可能带 :8443），
+    // 而 Node 收到的 Host 头可能已被改写。旧实现连端口一起比，于是"反向代理 +
+    // WebDAV"下所有复制/重命名都回 502，而资源管理器只会说"操作无法完成"。
+    const destHost = parsed.hostname.toLowerCase()
+    const selfHosts = new Set()
+    for (const raw of [req.headers.host, req.headers["x-forwarded-host"]]) {
+      const value = String(raw || "").split(",")[0].trim()
+      if (!value) continue
+      try {
+        selfHosts.add(new URL(`http://${value}`).hostname.toLowerCase())
+      } catch {
+        selfHosts.add(value.toLowerCase())
+      }
+    }
+    if (destHost && selfHosts.size && !selfHosts.has(destHost)) {
       return res.status(502).json({ error: "目标地址不属于本站点", errorKey: "api.webdav.destination_host_mismatch" })
     }
     destPath = parsed.pathname
@@ -836,6 +1020,10 @@ async function handleLock(req, res) {
   }
   const token = `opaquelocktoken:${crypto.randomUUID()}`
   locks.set(token, { rel: locked.rel, username: req.dav.username, expiresAt: Date.now() + LOCK_TTL_MS })
+  // 锁的是"还不存在的文件"（lock-null）时，RFC 4918 要求回 **201**：
+  // 资源管理器/Word 新建文件后会先 LOCK 再 PUT，回 200 让部分客户端认为
+  // "文件已存在"，随后 PUT 就变成了覆盖（在我们这里还要 delete 权限）。
+  const exists = await statSafe(locked.abs)
   const body =
     '<?xml version="1.0" encoding="utf-8"?>\n' +
     '<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock>' +
@@ -845,9 +1033,10 @@ async function handleLock(req, res) {
     `<D:timeout>Second-${Math.floor(LOCK_TTL_MS / 1000)}</D:timeout>` +
     `<D:locktoken><D:href>${xmlEscape(token)}</D:href></D:locktoken>` +
     "</D:activelock></D:lockdiscovery></D:prop>"
-  res.status(200)
+  res.status(exists ? 200 : 201)
   res.setHeader("Content-Type", 'application/xml; charset="utf-8"')
   res.setHeader("Lock-Token", `<${token}>`)
+  res.setHeader("Timeout", `Second-${Math.floor(LOCK_TTL_MS / 1000)}`)
   res.send(body)
 }
 
@@ -867,6 +1056,32 @@ function handleUnlock(req, res) {
 
 /* ============================================================== 挂载入口 == */
 
+/** 把请求体读进内存（上限已被前面的 content-length 检查挡过一道，这里再兜一次） */
+async function readBodyLimited(req, limit) {
+  let size = 0
+  const chunks = []
+  for await (const chunk of req) {
+    size += chunk.length
+    if (size > limit) {
+      const err = new Error("请求体过大")
+      err.status = 413
+      err.errorKey = "api.webdav.body_too_large"
+      throw err
+    }
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks).toString("utf8")
+}
+
+/** DAV 响应统一要带的头（能力声明 + 禁缓存） */
+function setDavHeaders(res) {
+  res.setHeader("DAV", "1, 2")
+  res.setHeader("Allow", DAV_METHODS)
+  res.setHeader("MS-Author-Via", "DAV")
+  // 目录列表绝不能进缓存：Windows WebClient 的缓存很激进，删掉的文件会一直显示
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+}
+
 /**
  * 生成 WebDAV 中间件。
  *
@@ -876,9 +1091,21 @@ function handleUnlock(req, res) {
  */
 export function createWebdavRouter() {
   const mw = async (req, res, next) => {
-    // 没命中挂载点：交给后续中间件（静态托管 / SPA / 其它 API）
     const base = davBase()
     const p = req.path || "/"
+
+    // 站点根的 OPTIONS 也要认（与挂载点无关）：
+    // 资源管理器 / 部分客户端在挂载前会先探测 authority 根（`OPTIONS /`）。
+    // 根上不声明 DAV 的话，它给出的结论是"这台服务器不是 WebDAV"，
+    // 于是连后面的 /dav 都不会再试 —— 表现就是"填对了地址也挂不上"。
+    // 只接管 OPTIONS，其它方法在根上仍然走正常流程（前端页面不受影响）。
+    if (req.method === "OPTIONS" && p === "/") {
+      if (!enabledNow()) return next()
+      setDavHeaders(res)
+      return res.status(200).end()
+    }
+
+    // 没命中挂载点：交给后续中间件（静态托管 / SPA / 其它 API）
     if (p !== base && !p.startsWith(base + "/")) return next()
 
     // 未启用时明确 404 —— 绝不能落到 SPA fallback 返回前端首页：
@@ -907,20 +1134,26 @@ export function createWebdavRouter() {
 
     // OPTIONS 不需要认证：客户端用它探测能力
     if (req.method === "OPTIONS") {
-      res.setHeader("DAV", "1, 2")
-      res.setHeader("Allow", DAV_METHODS)
-      res.setHeader("MS-Author-Via", "DAV")
+      setDavHeaders(res)
       return res.status(200).end()
     }
+    // 所有 DAV 响应都带上能力头与 no-cache：Windows WebClient 会缓存目录列表，
+    // 且部分客户端在 207 上也会检查 DAV / Allow。
+    setDavHeaders(res)
     try {
       await basicAuth(req, res, (err) => { if (err) next(err) })
       if (!req.dav) return // basicAuth 已经响应了 401
       const method = req.method.toUpperCase()
+      // PROPFIND / PROPPATCH / LOCK 需要请求体（客户端靠它点名属性 / 传锁信息）。
+      // 这几个请求我们平时根本不读，但**必须把流读干净**：不读就走的话，
+      // Node 会在响应后丢弃未读的请求体，部分客户端会看到连接被重置
+      // （表现是"保存失败"但服务端日志里只有一条 200）。
+      if (method === "PROPFIND" || method === "PROPPATCH" || method === "LOCK") {
+        req.rawBody = await readBodyLimited(req, MAX_META_BODY)
+      }
       switch (method) {
         case "PROPFIND": return await handlePropfind(req, res)
-        case "PROPPATCH": return res.status(207).setHeader("Content-Type", 'application/xml; charset="utf-8"').send(
-          '<?xml version="1.0" encoding="utf-8"?><D:multivaluedate xmlns:D="DAV:"/>'
-        )
+        case "PROPPATCH": return await handleProppatch(req, res)
         case "GET": return await handleGet(req, res, false)
         case "HEAD": return await handleGet(req, res, true)
         case "PUT": return await handlePut(req, res)

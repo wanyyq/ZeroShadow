@@ -32,9 +32,12 @@
     `GET /api/fs/convert/status`。
 - **md→PDF 自实现，零新增依赖**：自写 PDF 1.7 写出器 + TrueType 子集化，文字**可选中复制 / 搜索**、
   链接可点击、A4 分页带页脚页码；支持标题 / 列表 / 代码块 / 引用 / 表格 / 分割线 / 行内样式。
-  - 字体按平台自动发现（Windows 微软雅黑等、macOS 苹方、Linux 文泉驿 / Droid），也可用
-    `CONVERT_PDF_FONT` 或 `data/fonts/` 指定；找不到中文字体时中文显示为 `?` 并在任务提示里说明，
-    **不报错**。
+  - 字体自动发现：`CONVERT_PDF_FONT` → `data/fonts/` → **扫描平台字体目录**（Windows 的
+    `%WINDIR%\Fonts` 与用户字体目录、macOS 的 `/System/Library/Fonts`、Linux 的 `/usr/share/fonts` 等）
+    → 兜底绝对路径；候选按常见中文字体名排序后逐个真解析验证。**不再硬编码 `C:/Windows/Fonts`**。
+    启动横幅新增一行 `PDF 字体: <路径>`，找不到时另记一条 `pdf_font_missing` 日志。
+  - 字体一个都找不到时**拒绝转换**（`api.fs.convert_no_cjk_font`）并提示把字体放进 `data/fonts/`，
+    而不是把中文写成 `?` 交出一份内容已损坏的 PDF。纯 ASCII 文档不受影响。
 - **新权限点 `convertFiles`（后台名称「文件转换」，默认开启）**：受写操作总开关 `fileWrite` 约束、
   可被小组收窄；**访客恒不可转换**。权限点总数 **19 → 20**。
 - **并发闸门（`server/src/convert/queue.js`）**：同时最多 4 个转换在跑、最多 32 个排队，
@@ -54,10 +57,26 @@
   `web/src/locales/<语言>/convert.json`。
 - 后台「设置 → 权限 → 成员权限 → 高级功能」多一项「文件转换」；小组编辑的「高级权限」分组
   多一项同名开关。
+- **WebDAV 后台卡片新增「资源管理器地址」**（Windows UNC 写法，按当前访问方式生成），并写明
+  资源管理器要用「添加一个网络位置」而不是「映射网络驱动器」。
+- 新增 `scripts/webdav-test.mjs`（70 项）：照资源管理器 / Finder 的真实请求序列跑一遍 WebDAV。
 
 ### 修复
 
-- 无 —— 本次为纯新增功能，不含对既有行为的修复。
+- **WebDAV 挂不上 / 挂上后保存失败**（详见下面是同批修复）：
+  - `getetag` 写反（目录有、文件没有），且 PROPFIND / GET / PUT 三处 ETag 算法互不相同 ——
+    "从列表拿 ETag 再保存"永远判 412。现统一为 `davEtag()` 一个来源：`"s-<mtimeMs>-<size>"`；
+  - `PROPPATCH` 回的是非法元素（`<D:multivaluedate/>`），客户端判定属性写入失败；
+    现按 RFC 回 `207 multistatus` 并真的应用 `Win32LastModifiedTime`；
+  - `OPTIONS /` 不声明 DAV，客户端探测 authority 根后直接放弃挂载；现在根上也声明；
+  - `Destination` 连端口一起比，反代后面所有 COPY / MOVE 都 502；现在只比 hostname
+    （并接受 `X-Forwarded-Host`），真的跨站仍然拒绝；
+  - `PROPFIND` 无视请求体，`creationdate` / `lockdiscovery` 等属性永远拿不到；
+    现在按 RFC 拆 200 / 404 两个 `propstat`；
+  - `Depth: infinity` 的拒绝从 JSON 改成 RFC 形式（`403` + `<D:propfind-finite-depth/>`）；
+  - `LOCK` 对不存在的文件也回 200，RFC 要求 201（否则新建文件会被当成覆盖，还要 delete 权限）；
+  - `PROPFIND` / `PROPPATCH` / `LOCK` 的请求体没读干净，部分客户端会看到连接重置；
+  - 所有 DAV 响应统一带 `DAV` / `Allow` / `Cache-Control: no-store`（Windows 缓存很激进）。
 
 ---
 

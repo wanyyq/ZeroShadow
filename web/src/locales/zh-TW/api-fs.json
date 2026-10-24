@@ -10,6 +10,7 @@
   "api.fs.convert_too_large": "檔案過大（{size}），轉換上限 {limit}",
   "api.fs.convert_empty": "這是空檔案，沒有可轉換的內容",
   "api.fs.convert_no_sharp": "伺服器未安裝 sharp，圖片轉換不可用",
+  "api.fs.convert_no_cjk_font": "伺服器上沒有可用的中文字型，無法產生含中文的 PDF。請把 .ttf / .ttc 字型放進 data/fonts/，或用 CONVERT_PDF_FONT 指定路徑後重試（目前偵測：{reason}）",
   "api.fs.convert_bad_image": "無法辨識這個圖片檔",
   "api.fs.convert_busy": "轉換工作過多，請稍後再試",
   "api.fs.invalid_params": "參數格式錯誤",

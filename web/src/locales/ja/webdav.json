@@ -8,6 +8,9 @@
   "ui.settings.webdav.path_hint": "/ で始まる必要があります。/api と /ping は予約済みです。保存すると即時反映されるため、クライアント側のアドレスも変更してください。",
   "ui.settings.webdav.mount_url": "マウント URL",
   "ui.settings.webdav.copied": "マウント URL をコピーしました",
+  "ui.settings.webdav.unc_label": "エクスプローラー用アドレス（Windows / ネットワークの場所）",
+  "ui.settings.webdav.unc_hint": "エクスプローラーでは「ネットワークの場所を追加」か net use を使ってください。「ネットワークドライブの割り当て」に https の URL を入れてもマウントできません。443 以外のポートは \\\\ホスト@SSL@ポート\\dav と書きます。",
+  "ui.settings.webdav.windows_hint": "Windows は既定で HTTPS 上の Basic 認証しか許可しません。HTTP で使うにはレジストリの BasicAuthLevel=2 が必要です。自己署名証明書はクライアント側で信頼させてください（そうしないと「フォルダーが無効です」と出ます）。手順は「よくある質問 → WebDAV」を参照。",
   "ui.settings.webdav.warn_title": "HTTPS または完全に信頼できるネットワークでのみ使用してください",
   "ui.settings.webdav.warn_body": "WebDAV クライアントは通常 Basic 認証しか使えないため、ユーザー名とパスワードが毎回のリクエストで送信されます（HTTP では平文が繰り返し流れます）。スーパー管理者アカウントは拒否されます。チームメンバーアカウントで接続してください。",
   "ui.settings.webdav.saved": "保存しました"

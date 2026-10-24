@@ -10,6 +10,7 @@
   "api.fs.convert_too_large": "Fichier trop volumineux ({size}) ; la limite de conversion est {limit}",
   "api.fs.convert_empty": "Ce fichier est vide, il n'y a rien à convertir",
   "api.fs.convert_no_sharp": "sharp n'est pas installé sur le serveur, la conversion d'images n'est pas disponible",
+  "api.fs.convert_no_cjk_font": "Aucune police CJK utilisable n'a été trouvée sur le serveur : impossible de générer un PDF contenant du chinois. Placez une police .ttf/.ttc dans data/fonts/ ou définissez CONVERT_PDF_FONT, puis réessayez (résultat de la détection : {reason})",
   "api.fs.convert_bad_image": "Impossible de lire ce fichier image",
   "api.fs.convert_busy": "Trop de conversions en cours, réessayez plus tard",
   "api.fs.invalid_params": "Format des paramètres incorrect",

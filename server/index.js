@@ -34,6 +34,7 @@ import { adminShareRouter, manageShareRouter, publicShareRouter } from "./src/ro
 import { adminPluginRouter, publicPluginRouter } from "./src/routes/plugins.js"
 import { reloadPlugins } from "./src/plugins/store.js"
 import { stopAllPlugins } from "./src/plugins/runner.js"
+import { warmUpFont as warmUpPdfFont } from "./src/convert/pdf/font.js"
 
 // 启动自检：隔离损坏的 JSON、清理 tmp 残留，然后重载内存态
 const integrity = runIntegrityCheck()
@@ -44,6 +45,10 @@ reloadTodos()
 reloadShares()
 reloadPlugins()
 const avatarInit = initAvatars()
+// md→PDF 的中文字体：开机就探测一次。放在这里（而不是首次转换时）是为了：
+//   1. 启动横幅能直接告诉管理员"PDF 里用哪个字体"，这是最常被问的一件事；
+//   2. 顺便把 20MB 字体读进缓存，第一次转换不用等。
+const pdfFont = await warmUpPdfFont()
 // 界面语言目录（data/lang）：首次运行时建目录并写入格式说明
 ensureLangDir()
 runDailySnapshot()
@@ -279,6 +284,17 @@ const server = app.listen(env.port, env.host, () => {
     const customLangs = customLangCodes()
     if (customLangs.length) {
       console.log(`  界面语言:   zh, en, ${customLangs.join(", ")}（data/lang）`)
+    }
+    // md→PDF 的中文字体：管理员最需要一眼看到的一行（开机时已探测好）。
+    // 找不到时中文转换会**直接报错**（不会写出满屏问号），所以提示要足够显眼。
+    if (pdfFont.ok) {
+      console.log(`  PDF 字体:   ${pdfFont.source}`)
+    } else {
+      console.log(
+        "  PDF 字体:   未找到中文字体 —— 含中文的 md→PDF 会报错。" +
+          "把 .ttf/.ttc 放进 data/fonts/ 或用 CONVERT_PDF_FONT 指定路径"
+      )
+      warn("pdf_font_missing", { msg: `md→PDF 未找到中文字体：${pdfFont.reason || "未知原因"}` })
     }
     // 放宽了 SSRF 防护时显式提醒，避免"以为还拦着内网"
     const relaxed = []
