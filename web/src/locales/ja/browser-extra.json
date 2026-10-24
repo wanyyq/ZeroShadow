@@ -41,6 +41,7 @@
   "ui.tasks.upload": "アップロード",
   "ui.tasks.compress": "圧縮",
   "ui.tasks.extract": "解凍",
+  "ui.tasks.convert": "変換",
   "ui.tasks.download": "リンクのダウンロード",
 
   "ui.progress.clear_finished": "完了した項目をクリア"

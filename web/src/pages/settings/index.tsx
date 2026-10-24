@@ -819,6 +819,7 @@ function PermsSection() {
       <div className="mb-4 grid gap-px sm:grid-cols-2">
         {permItem(t("ui.settings.perms.compress_zip"), m.compressZip, (v) => patch({ memberPerms: { compressZip: !!v } }))}
         {permItem(t("ui.settings.perms.extract_zip"), m.extractZip, (v) => patch({ memberPerms: { extractZip: !!v } }))}
+        {permItem(t("ui.settings.perms.convert_files"), m.convertFiles, (v) => patch({ memberPerms: { convertFiles: !!v } }))}
         {permItem(t("ui.settings.perms.download_url"), m.downloadUrl, (v) => patch({ memberPerms: { downloadUrl: !!v } }))}
         {permItem(t("ui.settings.perms.html_preview"), m.htmlPreview, (v) => patch({ memberPerms: { htmlPreview: !!v } }))}
         {permItem(t("ui.settings.perms.edit_files"), m.editFiles, (v) => patch({ memberPerms: { editFiles: !!v } }))}

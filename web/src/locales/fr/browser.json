@@ -21,6 +21,7 @@
   "ui.browser.html_preview": "Aperçu HTML",
   "ui.browser.edit_online": "Édition en ligne",
   "ui.browser.extract_here": "Extraire dans ce dossier",
+  "ui.browser.convert_to": "Convertir en",
   "ui.browser.compress_zip": "Compresser en Zip",
   "ui.browser.compress_selected_zip": "Compresser la sélection en Zip",
   "ui.browser.edit_shortcut": "Modifier le raccourci",

@@ -30,7 +30,7 @@ import { translate, useT } from "@/lib/i18n"
 // 权限按语义分组；键名与顺序对齐 server/src/config.js 的 MEMBER_PERM_KEYS。
 // fileWrite 是写操作总开关（服务端 effectivePerms 用 `fw && p.x` 合成），
 // 所以它关闭时下列写类子开关在界面上同步置灰，避免「看着开着其实不生效」。
-const WRITE_PERM_KEYS = ["upload", "uploadFolders", "mkdir", "copy", "move", "rename", "delete"]
+const WRITE_PERM_KEYS = ["upload", "uploadFolders", "mkdir", "copy", "move", "rename", "delete", "compressZip", "extractZip", "convertFiles"]
 
 const PERM_GROUPS: { titleKey: string; hintKey?: string; items: [string, string][] }[] = [
   {
@@ -61,6 +61,7 @@ const PERM_GROUPS: { titleKey: string; hintKey?: string; items: [string, string]
     items: [
       ["compressZip", "ui.settings.groups.perm_compress_zip"],
       ["extractZip", "ui.settings.groups.perm_extract_zip"],
+      ["convertFiles", "ui.settings.groups.perm_convert_files"],
       ["downloadUrl", "ui.settings.groups.perm_download_url"],
       ["htmlPreview", "ui.settings.groups.perm_html_preview"],
       ["editFiles", "ui.settings.groups.perm_edit_files"],

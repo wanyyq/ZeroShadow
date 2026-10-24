@@ -59,6 +59,8 @@ import { MAX_REDIRECTS, REDIRECT_CODES, insecureTlsAllowed, pinnedLookup, resolv
 import { rateLimit } from "../ratelimit.js"
 import { createJob, failJob, finishJob, jobCreatedBy, jobStatus, patchJob } from "../jobs.js"
 import { DEFAULT_THUMB_WIDTH, ensureThumb, isThumbSource, normalizeThumbWidth } from "../thumbs.js"
+import { getConverter, publicConverterList } from "../convert/index.js"
+import { acquireConvertSlot, convertQueueFull } from "../convert/queue.js"
 
 const router = Router()
 
@@ -1640,6 +1642,190 @@ router.post("/save-file", requirePerm("editFiles"), rateLimit, async (req, res, 
     next(err)
   } finally {
     if (tmp) await fs.promises.rm(tmp, { force: true }).catch(() => {})
+  }
+})
+
+// ============ 文件转换（convert）============
+// 设计要点（与"压缩 / 解压"一致的几处约定）：
+//   1. **转换器是注册表驱动的**：具体能转什么由 server/src/convert/ 决定，路由只负责
+//      鉴权、路径校验、读写与进度。加新格式不用改这里，也不用改前端（见 convert/index.js）。
+//   2. **产物写在源文件旁边**，重名自动 `(1)(2)`，不覆盖任何已有文件（uniqueName）。
+//   3. **走作业（job）而不是同步返回**：PDF 排版 / 大图转码可能要几秒到几十秒，
+//      同步请求在隧道 / 弱网下容易被网关掐断，进度也无处显示。
+//   4. 只读映射目录（soft dir）**不做转换**：产物没有地方写。前端会在菜单里置灰，
+//      这里再挡一次（前端置灰不是安全边界）。
+
+/** 取扩展名（小写、不带点）；无扩展名返回 "" */
+function extOf(name) {
+  return path.extname(String(name || "")).replace(/^\./, "").toLowerCase()
+}
+
+/**
+ * 转换产物的文件名：`原名去扩展名` + 新扩展名。
+ * 走 sanitizeFileName：源文件名可能是上传时留下的任何字符，产物名不能再带控制字符。
+ */
+function convertOutputName(name, to) {
+  const base = path.basename(name, path.extname(name)).trim() || "converted"
+  return sanitizeFileName(`${base}.${to}`)
+}
+
+/**
+ * 前端用：当前支持的全部转换器。
+ *
+ * 故意**不按路径过滤**：右键菜单要在"还没点开子菜单"时就决定显示哪些项，
+ * 每次右键都发一次请求既慢又吵；能不能转由 `POST /convert` 最终裁决
+ * （扩展名不匹配会回 400，前端也有本地判断，正常情况下用户看不到这个错误）。
+ */
+router.get("/convert/targets", requirePerm("convertFiles"), (req, res, next) => {
+  try {
+    // 转换器清单含 label（中文兜底文案），前端有对应译文时优先用译文
+    res.json({ converters: publicConverterList() })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** 真正干活的部分：读源文件 → 交给转换器 → 原子落盘 → 收尾作业 */
+async function runConvertJob(job, { abs, rel, converter, stat, req }) {
+  const dir = path.dirname(abs)
+  let tmp = null
+  // 并发闸门：同时最多 4 个转换在跑，超出的排队（见 convert/queue.js 的理由）
+  let release = null
+  try {
+    release = await acquireConvertSlot()
+    const raw = await fs.promises.readFile(abs)
+    if (!raw.length) throw httpError(400, "这是一个空文件，没有可转换的内容", { errorKey: "api.fs.convert_empty" })
+    patchJob(job.id, { percent: 5 })
+
+    const ctx = {
+      buffer: raw,
+      name: path.basename(abs),
+      ext: extOf(abs),
+      job,
+      onProgress: (percent) => {
+        const value = Number(percent)
+        if (Number.isFinite(value)) patchJob(job.id, { percent: Math.min(99, Math.max(1, Math.round(value))) })
+      },
+    }
+    if (converter.input === "text") {
+      // 文本类先按识别出的编码解码：GBK 的 .md 直接当 UTF-8 读会得到乱码 PDF
+      const detected = detectEncoding(raw)
+      const isUtf16 = detected.encoding === "utf16le" || detected.encoding === "utf16be"
+      if (!isUtf16 && looksBinary(raw)) {
+        throw httpError(415, "这看起来是二进制文件，不能按文本转换", { errorKey: "api.fs.binary_not_editable" })
+      }
+      const text = decodeBuffer(raw, detected.encoding)
+      ctx.text = text
+      ctx.encoding = detected.encoding
+      ctx.eol = detectEol(text)
+    }
+
+    const result = await converter.run(ctx)
+    const data = result?.data
+    if (!Buffer.isBuffer(data) || !data.length) throw new Error("转换没有产出内容")
+    patchJob(job.id, { percent: 96 })
+
+    // 原子写：先写同目录临时文件再 rename。写到一半被中断时，目录里不会留下
+    // 一个打不开的半个 PDF（与在线编辑保存同一套做法）。
+    //
+    // 并发说明：同一个源文件被同时转换两次时，两个任务可能在 uniqueName 之后拿到
+    // 同一个目标名；此时后完成的那个会覆盖前者。两者内容完全相同（同源同转换器），
+    // 因此不会丢数据 —— 相比为一个几乎不会发生的场景加跨进程文件锁，这个取舍更划算。
+    const outName = await uniqueName(dir, convertOutputName(path.basename(abs), converter.to))
+    const outAbs = path.join(dir, outName)
+    tmp = path.join(dir, `.${outName}.${process.pid}.${Date.now()}.tmp`)
+    await fs.promises.writeFile(tmp, data)
+    try {
+      await fs.promises.rename(tmp, outAbs)
+    } catch {
+      // Windows 上 rename 覆盖已存在文件可能失败，退化为先删目标再改名
+      await fs.promises.rm(outAbs, { force: true })
+      await fs.promises.rename(tmp, outAbs)
+    }
+    tmp = null
+
+    const notes = Array.isArray(result.notes) ? result.notes.filter(Boolean).map(String) : []
+    const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""
+    patchJob(job.id, { output: joinRel(parentRel, outName) })
+    finishJob(job.id, { state: "done", notes })
+    info("convert", {
+      msg: `${rel} → ${outName}（${converter.id}, ${data.length} 字节${notes.length ? `, 提示: ${notes.length} 条` : ""}）`,
+      ...actor(req),
+    })
+  } catch (err) {
+    failJob(job.id, err)
+  } finally {
+    if (tmp) await fs.promises.rm(tmp, { force: true }).catch(() => {})
+    if (release) release()
+  }
+}
+
+router.post("/convert", requirePerm("convertFiles"), rateLimit, async (req, res, next) => {
+  try {
+    const converter = getConverter(req.body?.target)
+    if (!converter) {
+      throw httpError(400, "不支持的转换目标", {
+        errorKey: "api.fs.convert_target_invalid",
+        errorParams: { target: String(req.body?.target ?? "") },
+      })
+    }
+    const { abs, rel, isSoft } = resolveSafe(req.body?.path)
+    if (!rel) throw httpError(400, "不能转换根目录", { errorKey: "api.fs.convert_root" })
+    // 访客隐藏 / 小组可见范围在这里统一生效（同 /file、/save-file）
+    assertContextVisible(req, rel)
+    if (isSoft) {
+      throw httpError(403, "只读映射目录内的文件不能转换（产物没有地方可写）", {
+        errorKey: "api.fs.convert_soft_readonly",
+      })
+    }
+    // 「能浏览目录」不等于「能读全文」：与 /file 同一套判定
+    const perms = req.perms || effectivePerms(req.auth.role, req.group)
+    if (!perms.preview && !perms.downloadFile) {
+      if (req.auth.role === "guest") {
+        return res.status(401).json({ error: "请先登录", errorKey: "api.auth.login_required" })
+      }
+      return res.status(403).json({ error: "没有权限读取文件内容", errorKey: "api.fs.read_forbidden" })
+    }
+    const stat = await fs.promises.stat(abs).catch(() => null)
+    if (!stat || !stat.isFile()) throw httpError(404, "文件不存在", { errorKey: "api.fs.file_not_found" })
+
+    const ext = extOf(rel)
+    if (!converter.from.includes(ext)) {
+      throw httpError(400, `「.${ext || "无扩展名"}」不能转换成 .${converter.to}`, {
+        errorKey: "api.fs.convert_ext_mismatch",
+        errorParams: { from: ext || "-", to: converter.to },
+      })
+    }
+    if (stat.size > converter.maxBytes) {
+      const limitMB = Math.round((converter.maxBytes / 1024 / 1024) * 10) / 10
+      throw httpError(413, `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB），转换上限 ${limitMB}MB`, {
+        errorKey: "api.fs.convert_too_large",
+        errorParams: { size: `${(stat.size / 1024 / 1024).toFixed(1)}MB`, limit: `${limitMB}MB` },
+      })
+    }
+
+    const label = `${path.basename(abs)} → .${converter.to}`
+    // 队列已满时不要建任务：建了也只会排到 10 分钟 TTL 之后才轮到，
+    // 用户看到的是"进度 1% 卡住"，不如直接告诉他稍后再试（与缩略图的 503 同理）
+    if (convertQueueFull()) {
+      throw httpError(503, "转换任务过多，请稍后再试", { errorKey: "api.fs.convert_busy" })
+    }
+    const job = createJob("convert", { label, total: 1, totalBytes: stat.size })
+    job.createdBy = req.auth.username || "guest"
+    res.json({ jobId: job.id })
+    void runConvertJob(job, { abs, rel, converter, stat, req })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.get("/convert/status", requirePerm("convertFiles"), (req, res, next) => {
+  try {
+    const status = visibleJobStatus(req, String(req.query.job || ""))
+    if (!status) return res.json({ id: String(req.query.job || ""), state: "gone" })
+    res.json(status)
+  } catch (err) {
+    next(err)
   }
 })
 

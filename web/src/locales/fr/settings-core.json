@@ -137,6 +137,7 @@
   "ui.settings.perms.advanced_title": "Fonctions avancées",
   "ui.settings.perms.compress_zip": "Compresser en Zip",
   "ui.settings.perms.extract_zip": "Extraire un Zip",
+  "ui.settings.perms.convert_files": "Conversion de fichiers",
   "ui.settings.perms.download_url": "Téléchargeur multithread",
   "ui.settings.perms.html_preview": "Aperçu HTML plein écran",
   "ui.settings.perms.edit_files": "Éditer les fichiers en ligne",

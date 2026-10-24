@@ -93,6 +93,14 @@ const DEFAULTS = {
     extractZip: true,
     downloadUrl: true,
     changePassword: true,
+    /**
+     * 文件转换（.md→.txt/.pdf、.png↔.jpg …）。
+     *
+     * 它会**往网盘里写新文件**，所以和压缩/解压一样受 fileWrite 总开关约束；
+     * 访客恒为 false（见下面 guest 分支：转换等于"以服务器身份生成并落盘文件"，
+     * 不该是匿名可用的能力）。
+     */
+    convertFiles: true,
   },
   guestPerms: {
     browse: true,
@@ -228,6 +236,7 @@ export function effectivePerms(role, group = null) {
       extractZip: true,
       downloadUrl: true,
       changePassword: true,
+      convertFiles: true,
     }
   }
   if (role === "member") {
@@ -258,6 +267,8 @@ export function effectivePerms(role, group = null) {
       compressZip: fw && !!p.compressZip,
       extractZip: fw && !!p.extractZip,
       downloadUrl: fw && !!p.downloadUrl,
+      // 转换同样会写出新文件：只读成员不能借"转换"往盘里塞 PDF/JPG
+      convertFiles: fw && !!p.convertFiles,
       changePassword: !!p.changePassword,
     }
     return narrowPerms(base, group?.perms ? [group.perms] : [])
@@ -285,6 +296,9 @@ export function effectivePerms(role, group = null) {
     compressZip: gw && !!g.compressZip,
     extractZip: gw && !!g.extractZip,
     downloadUrl: false,
+    // 访客永不可转换：产物是服务端以自己身份生成并落盘的新文件，
+    // 与"允许匿名访客改文件"是同一类决定，这里直接不给开关（见 docs/权限与角色.md）
+    convertFiles: false,
     changePassword: false,
   }
 }

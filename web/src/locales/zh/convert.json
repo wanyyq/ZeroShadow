@@ -1,0 +1,6 @@
+{
+  "ui.convert.md_txt": "Markdown → 纯文本（.txt）",
+  "ui.convert.md_pdf": "Markdown → PDF（.pdf）",
+  "ui.convert.png_jpg": "PNG → JPG（.jpg）",
+  "ui.convert.jpg_png": "JPG → PNG（.png）"
+}

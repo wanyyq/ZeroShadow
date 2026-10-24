@@ -21,6 +21,7 @@
   "ui.browser.html_preview": "HTML プレビュー",
   "ui.browser.edit_online": "オンライン編集",
   "ui.browser.extract_here": "現在のディレクトリに解凍",
+  "ui.browser.convert_to": "変換",
   "ui.browser.compress_zip": "Zip に圧縮",
   "ui.browser.compress_selected_zip": "選択項目を Zip に圧縮",
   "ui.browser.edit_shortcut": "ショートカットを編集",

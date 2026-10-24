@@ -13,4 +13,4 @@
  *   6. `web/public/sw.js` 的 `VERSION`（`smoke-test.ps1` 第 16 组会断言它等于
  *      根 `package.json` 的 `version`；它只用于缓存名，忘了改不会报错但会让旧缓存留下来）
  */
-export const VERSION = "2.0.0"
+export const VERSION = "2.1.0"

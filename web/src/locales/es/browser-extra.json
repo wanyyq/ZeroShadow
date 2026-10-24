@@ -49,6 +49,7 @@
   "ui.tasks.upload": "Subidas",
   "ui.tasks.compress": "Compresión",
   "ui.tasks.extract": "Extracción",
+  "ui.tasks.convert": "Conversión",
   "ui.tasks.download": "Descargas por enlace",
 
   "ui.progress.clear_finished": "Quitar completados"

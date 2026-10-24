@@ -60,6 +60,7 @@
   "ui.settings.groups.perm_group_advanced": "進階功能",
   "ui.settings.groups.perm_compress_zip": "壓縮 Zip",
   "ui.settings.groups.perm_extract_zip": "解壓 Zip",
+  "ui.settings.groups.perm_convert_files": "檔案轉換",
   "ui.settings.groups.perm_download_url": "多執行緒下載器",
   "ui.settings.groups.perm_html_preview": "HTML 全螢幕預覽",
   "ui.settings.groups.perm_edit_files": "線上編輯",

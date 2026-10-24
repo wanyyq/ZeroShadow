@@ -33,6 +33,8 @@ const GUEST: Me = {
     extractZip: false,
     downloadUrl: false,
     changePassword: false,
+    // 访客永不可转换（服务端 effectivePerms 里 guest 恒为 false）
+    convertFiles: false,
   },
   uploadLimitMB: 0,
 }

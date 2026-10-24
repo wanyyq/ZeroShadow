@@ -21,6 +21,8 @@ export interface Perms {
   extractZip: boolean
   downloadUrl: boolean
   changePassword: boolean
+  /** 文件转换（.md→.txt/.pdf、.png↔.jpg …）；会写出新文件，所以写类总开关关掉时一并失效 */
+  convertFiles: boolean
 }
 
 export interface PublicGroup {
@@ -341,6 +343,7 @@ export interface AdminConfig {
     extractZip: boolean
     downloadUrl: boolean
     changePassword: boolean
+    convertFiles: boolean
   }
   guestPerms: {
     browse: boolean
@@ -485,7 +488,7 @@ export interface UploadResult {
   maxFilesPerRequest?: number
 }
 
-export type OpType = "compress" | "extract" | "download"
+export type OpType = "compress" | "extract" | "download" | "convert"
 
 export interface OperationStatus {
   id: string
@@ -499,4 +502,24 @@ export interface OperationStatus {
   totalBytes: number
   error: string | null
   count?: number
+  /** 补充说明（目前只有转换会用到：如"字体缺字已用 ? 代替"） */
+  notes?: string[]
+  /** 产出物的相对路径（转换成功时由服务端给出） */
+  output?: string | null
+}
+
+/**
+ * 一个转换器（由服务端 `/api/fs/convert/targets` 下发）。
+ *
+ * 前端**不硬编码**支持的格式：右键菜单里的「转换」子项就是遍历这份清单按扩展名筛出来的，
+ * 所以服务端加一种新转换，前端不用改一行代码（见 server/src/convert/registry.js）。
+ */
+export interface ConvertTarget {
+  id: string
+  from: string[]
+  to: string
+  /** 兜底文案（中文），没有对应译文时显示它 */
+  label: string
+  /** i18n 键；有译文就优先用译文 */
+  labelKey: string | null
 }

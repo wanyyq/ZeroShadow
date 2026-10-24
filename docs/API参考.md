@@ -681,6 +681,106 @@ X-ZS-Group: <小组 id>
 
 同上，查询解压任务状态。
 
+### `GET /api/fs/convert/targets`
+
+返回当前支持的全部转换器（v2.1.0 起）。右键菜单的「转换为」子项**按这份清单动态渲染**，
+所以加一种新格式既不用改路由，也不用改前端。
+
+- 权限：`convertFiles`
+- 查询参数：无
+- 响应：
+
+```json
+{
+  "converters": [
+    { "id": "md-to-txt",  "from": ["md", "markdown", "mdown", "mkd"], "to": "txt", "label": "Markdown → 纯文本", "labelKey": "ui.convert.md_txt" },
+    { "id": "md-to-pdf",  "from": ["md", "markdown", "mdown", "mkd"], "to": "pdf", "label": "Markdown → PDF",    "labelKey": "ui.convert.md_pdf" },
+    { "id": "png-to-jpg", "from": ["png"],                            "to": "jpg", "label": "PNG → JPG",         "labelKey": "ui.convert.png_jpg" },
+    { "id": "jpg-to-png", "from": ["jpg", "jpeg"],                    "to": "png", "label": "JPG → PNG",         "labelKey": "ui.convert.jpg_png" }
+  ]
+}
+```
+
+| 字段 | 说明 |
+|:-------- |:----------------------------------------------------------- |
+| `id` | 转换器标识，`POST /api/fs/convert` 的 `target` 就传它 |
+| `from` | 源扩展名数组（**不含点、全小写**） |
+| `to` | 目标扩展名（不含点、全小写），决定产物的扩展名 |
+| `label` | 中文兜底文案，前端没有对应译文时显示它 |
+| `labelKey` | i18n 键；缺译文时回落到 `label`，不会显示成键名 |
+
+- 清单**不按路径过滤**：右键菜单要先知道"有哪些项"才能展开，每次按路径算一遍既慢又吵；
+  真正能不能转由 `POST /api/fs/convert` 裁决（扩展名不匹配回 400）。
+
+### `POST /api/fs/convert`
+
+启动一个转换任务，**立即返回**任务 id；产物写在**源文件同目录**。
+
+- 权限：`convertFiles` **加上**读权限（`preview` 或 `downloadFile` 至少有一个）　限流：是
+- 请求体：
+
+| 字段 | 必填 | 说明 |
+|:-------- |:--- |:----------------------------------------------------------- |
+| `path` | 是 | 源文件相对路径（**不能是根目录**，也不能落在只读映射目录里） |
+| `target` | 是 | 转换器 id，取自 `GET /api/fs/convert/targets` 的 `id` |
+
+- 响应：`{ "jobId": "1f2e3d..." }`
+- 产物：文件名 = **源文件名去掉扩展名 + 新的扩展名**，重名自动加 `(1)`、`(2)`…，**绝不覆盖**已有文件；
+  落盘是原子的（先写同目录临时文件再 `rename`），中途失败不会留下半个 PDF / JPG。
+- 上限：Markdown 源文件 **4 MB**、图片源文件 **32 MB**；PDF 最多 **400 页**（超出截断并在 `notes` 里说明）；
+  图片解码像素上限 **1.2 亿**。
+- 权限细节：
+  - 「能浏览目录」不等于「能读全文」，所以 `convertFiles` 之外还要求 `preview` 或 `downloadFile`
+    （与 `GET /api/fs/file` 同一套判定）；
+  - **访客恒无 `convertFiles`**（后台也没有访客侧的这个开关），一律 401。
+- 错误（全部带 `errorKey`，`error` 里仍是中文原文）：
+
+| 状态码 | errorKey | 触发条件 |
+|:--- |:------------------------------------ |:----------------------------------------------------------- |
+| 400 | `api.fs.convert_target_invalid` | `target` 不存在 |
+| 400 | `api.fs.convert_root` | `path` 是根目录 |
+| 400 | `api.fs.convert_ext_mismatch` | 源文件扩展名不在转换器的 `from` 里（`errorParams: { from, to }`） |
+| 400 | `api.fs.convert_empty` | 源文件是空文件 |
+| 401 | `api.auth.login_required` | 访客（访客恒无 `convertFiles`） |
+| 403 | `api.fs.read_forbidden` | 有 `convertFiles`，但既不能预览也不能下载 |
+| 403 | `api.fs.convert_soft_readonly` | 源文件在只读映射目录里（产物没有地方写） |
+| 404 | `api.fs.file_not_found` / `api.fs.not_found` | 文件不存在 / 路径越界或对访客隐藏 |
+| 413 | `api.fs.convert_too_large` | 超过该转换器的源文件上限（`errorParams: { size, limit }`） |
+| 415 | `api.fs.binary_not_editable` | 文本类转换的源文件看起来是二进制 |
+| 501 | `api.fs.convert_no_sharp` | 图片转换，但服务端没有 `sharp`（单文件 exe 常见） |
+| 503 | `api.fs.convert_busy` | 转换队列已满（同时 4 个在执行、32 个排队） |
+
+- 图片转换复用缩略图那套 `sharp`；没有它时返回 **501**（`api.fs.convert_no_sharp`），
+  与缩略图同一套降级思路：如实告知原因，而不是让整个功能报错。
+
+示例（看清单 → 启动任务 → 轮询）：
+
+```bash
+BASE=http://localhost:12345
+# 当前支持哪些转换
+curl -s -b cookie.txt "$BASE/api/fs/convert/targets"
+
+# 启动转换（Markdown → PDF）
+curl -s -b cookie.txt -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' \
+     -d '{"path":"文档/说明.md","target":"md-to-pdf"}' "$BASE/api/fs/convert"
+
+# 轮询（jobId 换成上一步返回的）
+curl -s -b cookie.txt "$BASE/api/fs/convert/status?job=<jobId>"
+```
+
+### `GET /api/fs/convert/status`
+
+- 权限：`convertFiles`
+- 查询参数：`job`（形如 `/api/fs/convert/status?job=<jobId>`）
+- 响应：任务状态对象（见 [§9](#9-任务状态对象)），额外带两个字段：
+
+| 字段 | 说明 |
+|:-- |:----------------------------------------------------------- |
+| `notes` | `string[]`，补充提示，例如「字体缺字已用 `?` 代替」「PDF 页数超出上限已截断」；没有提示时是空数组 |
+| `output` | 产物相对路径（`string`）；还没写出来时是 `null` |
+
+- 任务不存在或不属于调用者时返回 `{ "id": "...", "state": "gone" }`。
+
 ### `GET /api/fs/file`
 
 按识别出的编码把文本读出来，供在线编辑器打开文件。**这是在线编辑的读取侧**，
@@ -1192,7 +1292,7 @@ X-ZS-Group: <小组 id>
 }
 ```
 
-- `perms` 是**该小组的权限收窄表**，键与 `memberPerms` 完全相同（19 个），值只会在全局权限
+- `perms` 是**该小组的权限收窄表**，键与 `memberPerms` 完全相同（20 个），值只会在全局权限
   基础上继续关闭；
 - `leaderCaps` 顶层字段是四个能力的**字段名清单**（给前端渲染用）。
 
@@ -1715,7 +1815,8 @@ i18n 键的后缀（`ui.share.expire.<key>`）。
 
 ## 9. 任务状态对象
 
-`/api/fs/compress/status`、`/api/fs/extract/status`、`/api/fs/download-url/status` 返回同一结构：
+`/api/fs/compress/status`、`/api/fs/extract/status`、`/api/fs/download-url/status`、
+`/api/fs/convert/status` 返回同一结构：
 
 ```json
 {
@@ -1736,10 +1837,11 @@ i18n 键的后缀（`ui.share.expire.<key>`）。
 | 字段 | 说明 |
 |:----------------- |:------------------------------------------------------- |
 | `state` | `running` / `done` / `error` / `gone`（`gone` = 任务不存在、已过期或无权查看） |
-| `type` | `compress` / `extract` / `download` |
+| `type` | `compress` / `extract` / `download` / `convert` |
 | `percent` | 0–100；压缩按文件条目、解压按已处理条目、链接下载按 `Content-Length` |
 | `error` | 失败原因；成功时为 `null` |
 | `count` | 解压时表示实际写出的文件数 |
+| `notes` / `output` | **仅转换任务有**：`notes` 是补充提示数组，`output` 是产物相对路径（未完成时为 `null`） |
 | 过期 | 任务状态保留 **10 分钟**，之后查询得到 `gone` |
 
 ---
@@ -1812,7 +1914,7 @@ while True:
 | `/ping` | 健康检查 | 无 |
 | `/api/meta` | 名称与版本 | 无 |
 | `/api/auth` | 登录、改密、登出、查身份、可切换的小组清单 | 部分 |
-| `/api/fs` | 文件与目录、打包、压缩、解压、在线编辑、**新建空文件**、链接下载 | 按权限点 |
+| `/api/fs` | 文件与目录、打包、压缩、解压、**文件转换**、在线编辑、**新建空文件**、链接下载 | 按权限点 |
 | `/api/shares` | 登录用户：创建分享、列出自己创建的、取消 | 已登录（超管 / 成员） |
 | `/api/share` | **公开的分享访问**：元信息、验密码换票据、目录浏览、下载 | 默认匿名（可被管理员收成仅登录） |
 | `/api/avatars` | 头像列表、读取、上传、删除 | 已登录（超管 / 成员） |

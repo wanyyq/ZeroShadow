@@ -49,6 +49,7 @@
   "ui.tasks.upload": "上传",
   "ui.tasks.compress": "压缩",
   "ui.tasks.extract": "解压",
+  "ui.tasks.convert": "转换",
   "ui.tasks.download": "链接下载",
 
   "ui.progress.clear_finished": "清除已完成"

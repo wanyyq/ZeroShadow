@@ -118,7 +118,7 @@ app.use("/api/fs/save-file", express.json({ limit: SAVE_FILE_MAX_BYTES }))
 app.use(express.json({ limit: "1mb" }))
 
 app.get("/api/meta", (_req, res) => {
-  res.json({ name: "ZeroShadow", version: "2.0.0" })
+  res.json({ name: "ZeroShadow", version: "2.1.0" })
 })
 
 app.use("/api/auth", authRoutes)

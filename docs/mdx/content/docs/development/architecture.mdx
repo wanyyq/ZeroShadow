@@ -44,6 +44,23 @@ icon: Boxes
       <File name="backup.js" />
       <File name="config.js" />
       <File name="context.js" />
+      <Folder name="convert">
+        <File name="index.js" />
+        <File name="registry.js" />
+        <File name="queue.js" />
+        <File name="markdown.js" />
+        <Folder name="converters">
+          <File name="md-to-txt.js" />
+          <File name="md-to-pdf.js" />
+          <File name="image.js" />
+        </Folder>
+        <Folder name="pdf">
+          <File name="font.js" />
+          <File name="truetype.js" />
+          <File name="layout.js" />
+          <File name="document.js" />
+        </Folder>
+      </Folder>
       <File name="env.js" />
       <File name="encoding.js" />
       <File name="fileinfo.js" />
@@ -141,6 +158,17 @@ icon: Boxes
 | `backup.js` | 四个受管数据文件的快照与回滚（`data/backups/<文件名>/`） |
 | `config.js` | 运行时配置 + 权限矩阵 + 各类上限计算（**权限的唯一真相来源**），并负责小组权限收窄 |
 | `context.js` | 请求上下文：解析小组（`X-ZS-Group` 头 / `?group=` 兜底）并算出 `req.perms` |
+| `convert/index.js` | 内置转换器的注册点（`registerConverter(...)`），也是转换模块的对外出口 |
+| `convert/registry.js` | 转换器注册表：校验定义、按扩展名查表、生成下发给前端的清单 |
+| `convert/queue.js` | 并发闸门：同时最多 4 个转换在执行、32 个排队，队列满回 503（`api.fs.convert_busy`） |
+| `convert/markdown.js` | 手写 Markdown 解析器（块级 + 行内）与纯文本渲染 |
+| `convert/converters/md-to-txt.js` | Markdown → 纯文本 |
+| `convert/converters/md-to-pdf.js` | Markdown → PDF（A4） |
+| `convert/converters/image.js` | PNG → JPG、JPG → PNG（走 `sharp`，可降级） |
+| `convert/pdf/font.js` | 找一个能排中文的系统字体，提供度量视图 |
+| `convert/pdf/truetype.js` | 只读 TrueType 解析 + 子集化（保留原始字形号，供 Identity-H 内嵌） |
+| `convert/pdf/layout.js` | 块列表 → 页面操作（折行、分页、表格、页脚、链接矩形） |
+| `convert/pdf/document.js` | 最小 PDF 1.7 写出器（对象 / xref / trailer / 内容流 / 字体对象） |
 | `env.js` | `.env` 加载、密钥生成、目录准备、只读映射目录解析 |
 | `encoding.js` | 在线编辑器的编解码与编码探测（`iconv-lite`；导出 `EDITOR_MAX_BYTES` / `EDITOR_ENCODINGS` / `detectEncoding` 等纯函数） |
 | `fileinfo.js` | 「详细信息」的元数据提取：签名（magic）/ 哈希 / EXIF / 文档属性 / 音视频 / 文本编码 |
@@ -475,6 +503,89 @@ router.post("/my-op", requirePerm("editFiles"), rateLimit, async (req, res, next
 - **不新增配置项**：上限都是模块内常量（`HEAD_BYTES` / `HASH_MAX_BYTES` / `TEXT_SCAN_BYTES`），
   不为一次详情点击引入需要文档化的新开关。
 
+## 文件转换（`server/src/convert/`）
+
+v2.1.0 引入。路由只负责鉴权、路径校验、读写与进度，具体能转什么全由这里的注册表决定：
+
+| 文件 | 职责 |
+|:--|:--|
+| `index.js` | 内置转换器的**注册点**（`registerConverter(...)`），也是对外出口 |
+| `registry.js` | 转换器注册表：校验定义、按扩展名查表、生成下发给前端的清单 |
+| `queue.js` | 并发闸门：同时最多 4 个转换在执行、32 个排队，队列满回 503（`api.fs.convert_busy`） |
+| `markdown.js` | 手写 Markdown 解析器（块级 + 行内）与纯文本渲染 |
+| `converters/md-to-txt.js` | Markdown → 纯文本 |
+| `converters/md-to-pdf.js` | Markdown → PDF（A4） |
+| `converters/image.js` | PNG → JPG、JPG → PNG（走 `sharp`，可降级） |
+| `pdf/font.js` | 找一个能排中文的系统字体，提供度量视图 |
+| `pdf/truetype.js` | 只读 TrueType 解析 + 子集化（保留原始字形号，供 Identity-H 内嵌） |
+| `pdf/layout.js` | 块列表 → 页面操作（折行、分页、表格、页脚、链接矩形） |
+| `pdf/document.js` | 最小 PDF 1.7 写出器（对象 / xref / trailer / 内容流 / 字体对象） |
+
+三个设计取舍：
+
+- **零新增依赖**：PDF 写出与 TrueType 子集化都是自己写的。后端依赖清单刻意精简
+  （见 [技术底座](#技术底座) 那张表），为一个导出功能引入 PDF / 字体库不划算；
+- **注册表驱动**：加一种格式不需要改路由、也不需要改前端——右键菜单的「转换为」子项按
+  `GET /api/fs/convert/targets` 返回的清单动态渲染。图片转换复用项目已有的 `sharp`；
+  单文件 exe 里没有 `sharp` 时返回 **501**（`api.fs.convert_no_sharp`），与缩略图是同一套降级思路。
+- **为什么需要 `queue.js`**：图片转换走原生解码、PDF 排版是纯 CPU 循环，两者都会把单个核心吃满。
+  网盘是"一个人的机器给全组人用"，没有配额也没有进程管理器，所以转换必须自己限并发
+  （与缩略图队列同一思路，参数按"用户主动发起"放宽到 4 / 32）。新加的转换器**自动**被这个闸门保护。
+
+<Callout type="info" title="接口、错误码与上限">
+三个接口（`targets` / `convert` / `status`）的参数、返回结构与全部 `errorKey` 见
+[API 参考](/docs/zeroshadow/api/reference)。它们都挂在 `convertFiles` 权限点下，
+`POST /api/fs/convert` 另外要求对源文件有读权限（`preview` 或 `downloadFile`）。
+它和压缩 / 解压共用同一套作业模型（`createJob` / `patchJob` / `finishJob` / `failJob`），
+只是任务状态里多两个字段：`notes`（补充提示，例如字体缺字已用 `?` 代替）与 `output`（产物相对路径）。
+</Callout>
+
+## 如何新增一种转换
+
+四步，全在服务端：
+
+1. **写模块**：在 `server/src/convert/converters/` 下新建一个 `.js`，导出一个（或几个）转换器对象；
+2. **注册**：在 `server/src/convert/index.js` 里 `import` 进来并 `registerConverter(你的转换器)` 一次
+   ——数组顺序即右键菜单里的显示顺序，定义写错会**在启动时就抛错**，而不是等用户点了菜单才 500；
+3. **补译文**：给它的 `labelKey` 在 `web/src/locales/<语言>/convert.json` 里补上译文
+   （不补也能用，会显示 `label` 里的中文兜底）；
+4. **补断言**：在 `scripts/convert-test.mjs` 里加一条（`node scripts/convert-test.mjs` **不需要起服务**，
+   产物写到系统临时目录）。
+
+转换器对象的字段（`registry.js` 的 `registerConverter` 会逐个校验）：
+
+| 字段 | 必填 | 说明 |
+|:--|:--|:--|
+| `id` | 是 | 唯一标识，会出现在接口里（`POST /api/fs/convert` 的 `target` 传它） |
+| `from` | 是 | 源扩展名数组，小写、不带点 |
+| `to` | 是 | 目标扩展名，小写、不带点——决定产物文件名 |
+| `label` | 否 | 中文兜底文案；缺省时由 `from` / `to` 拼出来 |
+| `labelKey` | 否 | i18n 键，如 `ui.convert.md_pdf` |
+| `input` | 否 | `"text"` = 先按识别出的编码解码，再把 `text` 交给 `run`；`"buffer"`（默认）= 传原始字节 |
+| `maxBytes` | 是 | 源文件上限（字节），超过直接 413、不进转换 |
+| `run` | 是 | `async (ctx) => ({ data: Buffer, notes?: string[] })` |
+
+`run` 拿到的 `ctx` 是 `{ text?, buffer?, name, ext, encoding?, eol?, onProgress(percent), job }`，
+返回的 `notes` 会原样进任务状态的 `notes` 数组。
+
+示例（内置的 `converters/md-to-txt.js` 节选，`run` 的换行处理从略）：
+
+```js
+export const mdToTxt = {
+  id: "md-to-txt",
+  from: ["md", "markdown", "mdown", "mkd"],
+  to: "txt",
+  label: "Markdown → 纯文本",
+  labelKey: "ui.convert.md_txt",
+  input: "text",
+  maxBytes: TEXT_MAX_BYTES,   // 4 MB
+  run({ text, eol }) { /* 解析 → 去标记 → 按源文件的换行风格输出 */ },
+}
+```
+
+新转换器会自动纳入并发闸门（`convert/queue.js`）：同时最多 4 个执行、32 个排队，排队与 503
+都由闸门处理，转换器自己**不需要**处理排队；要调这两个数就改 `queue.js` 顶部的常量。
+
 ## WebDAV（实验性，`server/src/webdav.js`）
 
 **默认关闭，只能在 `.env` 里用 `WEBDAV=1` 打开**（挂载点由 `WEBDAV_PATH` 决定，默认 `/dav`）。
@@ -522,7 +633,7 @@ ThemeProvider(zs-theme)
             └── ClientSettingsProvider   外观与浏览偏好（localStorage: zs-client-settings，含界面密度 / 字号 / 减少动画）
                 └── ClipboardProvider    复制/剪切的内存剪贴板
                     └── UploadsProvider  上传任务队列与进度
-                        └── OperationsProvider  压缩/解压/链接下载的轮询与进度
+                        └── OperationsProvider  压缩/解压/链接下载/文件转换的轮询与进度
                             └── TooltipProvider → BrowserRouter → Routes → Toaster
 ```
 

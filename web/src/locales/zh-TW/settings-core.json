@@ -137,6 +137,7 @@
   "ui.settings.perms.advanced_title": "進階功能",
   "ui.settings.perms.compress_zip": "壓縮為 Zip",
   "ui.settings.perms.extract_zip": "解壓縮 Zip",
+  "ui.settings.perms.convert_files": "檔案轉換",
   "ui.settings.perms.download_url": "多執行緒下載器",
   "ui.settings.perms.html_preview": "HTML 全螢幕預覽",
   "ui.settings.perms.edit_files": "線上編輯檔案",

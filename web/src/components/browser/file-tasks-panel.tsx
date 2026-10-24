@@ -49,6 +49,12 @@ export function FileTasksPanel({ open, onClose }: { open: boolean; onClose: () =
       jobs: ops.jobs.filter((j) => j.type === "extract").map((job): TaskEntry => ({ kind: "op", job })),
     },
     {
+      key: "convert",
+      label: t("ui.tasks.convert"),
+      icon: "file-output",
+      jobs: ops.jobs.filter((j) => j.type === "convert").map((job): TaskEntry => ({ kind: "op", job })),
+    },
+    {
       key: "download",
       label: t("ui.tasks.download"),
       icon: "download",

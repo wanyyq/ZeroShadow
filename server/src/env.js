@@ -3,7 +3,8 @@ import path from "node:path"
 import crypto from "node:crypto"
 
 const isPkg = typeof process.pkg !== "undefined"
-const ROOT_DIR = isPkg ? path.dirname(process.execPath) : process.cwd()
+/** 程序根目录（打包成 exe 后是 exe 所在目录）。convert/pdf/font.js 也用它找 data/fonts/ */
+export const ROOT_DIR = isPkg ? path.dirname(process.execPath) : process.cwd()
 /** 服务自身的配置文件（含超管明文密码）——绝不允许经网盘接口读写 */
 export const ENV_FILE = path.join(ROOT_DIR, ".env")
 

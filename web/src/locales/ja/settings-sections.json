@@ -60,6 +60,7 @@
   "ui.settings.groups.perm_group_advanced": "高度な機能",
   "ui.settings.groups.perm_compress_zip": "Zip 圧縮",
   "ui.settings.groups.perm_extract_zip": "Zip 解凍",
+  "ui.settings.groups.perm_convert_files": "ファイル変換",
   "ui.settings.groups.perm_download_url": "マルチスレッドダウンローダー",
   "ui.settings.groups.perm_html_preview": "HTML 全画面プレビュー",
   "ui.settings.groups.perm_edit_files": "オンライン編集",

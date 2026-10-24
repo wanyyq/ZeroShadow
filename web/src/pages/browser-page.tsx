@@ -18,11 +18,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Icon } from "@/components/icon"
-import { api, downloadUrl, thumbUrl, triggerDownload, zipUrl } from "@/lib/api"
+import { api, downloadUrl, fetchConvertTargets, thumbUrl, triggerDownload, zipUrl } from "@/lib/api"
 import { fileKind, formatBytes, formatDate, joinPath, canPreview, isThumbSourceName } from "@/lib/format"
 import { animateListIn } from "@/lib/lucide"
 import { useProgressiveReveal, useVirtualRows } from "@/lib/virtual"
-import type { Entry, SearchResult } from "@/lib/types"
+import type { ConvertTarget, Entry, SearchResult } from "@/lib/types"
 import { useAuth } from "@/state/auth"
 import { useGroups } from "@/state/groups"
 import { useClientSettings } from "@/state/client-settings"
@@ -164,6 +164,24 @@ export function BrowserPage() {
   // 「文件任务」右侧折叠栏：默认完全隐藏，上传/压缩/解压开始时自动弹出
   const [tasksOpen, setTasksOpen] = React.useState(false)
 
+  /**
+   * 文件转换的目标清单（服务端下发，见 server/src/convert/registry.js）。
+   * 前端不硬编码任何格式：服务端加一种新转换，这里自动多一个菜单项。
+   * 权限关闭时（访客 / 超管关掉了转换）根本不发这个请求。
+   */
+  const [convertTargets, setConvertTargets] = React.useState<ConvertTarget[]>([])
+  React.useEffect(() => {
+    if (!me.perms.convertFiles) {
+      setConvertTargets([])
+      return
+    }
+    let alive = true
+    fetchConvertTargets()
+      .then((list) => { if (alive) setConvertTargets(list) })
+      .catch(() => { if (alive) setConvertTargets([]) })
+    return () => { alive = false }
+  }, [me.perms.convertFiles])
+
   // 请求序号：快速连续切目录时，先发出的慢响应会覆盖后发出的结果，
   // 表现为「面包屑已经是 B，列表还是 A」并且 loading 提前结束。只认最新一次。
   const reqSeqRef = React.useRef(0)
@@ -217,9 +235,9 @@ export function BrowserPage() {
     setParams({})
   }, [groupContextId, setParams])
   React.useEffect(() => uploads.onCompleted((dest) => dest === path && refresh()), [uploads, path, refresh])
-  // 压缩产物与解压结果都直接落在当前目录，两者完成后都要刷新列表
+  // 压缩产物、解压结果与转换产物都直接落在当前目录，完成后都要刷新列表
   React.useEffect(
-    () => operations.onCompleted((job) => job.status === "done" && (job.type === "extract" || job.type === "compress") && refresh()),
+    () => operations.onCompleted((job) => job.status === "done" && (job.type === "extract" || job.type === "compress" || job.type === "convert") && refresh()),
     [operations, refresh]
   )
 
@@ -488,6 +506,24 @@ export function BrowserPage() {
     if (!me.perms.extractZip) return noPermToast()
     if (isInSoftDir(entry)) return noPermSoftToast()
     operations.startExtract(entryPath(entry), entryParent(entry))
+  }
+
+  /**
+   * 文件转换。
+   * 产物由服务端写在源文件旁边（重名自动 (1)(2)），这里只负责发起任务 ——
+   * 进度/成功/失败都在「文件任务」面板与 toast 里，和压缩解压是同一套体验。
+   */
+  const doConvert = (entry: Entry, target: ConvertTarget) => {
+    if (!me.perms.convertFiles) return noPermToast()
+    if (isInSoftDir(entry) || entry.softReadOnly) return noPermSoftToast()
+    operations.startConvert(entryPath(entry), target.id, `${displayName(entry)} → .${target.to}`)
+  }
+
+  /** 转换项文案：有译文用译文，没有就用服务端给的 label（新转换器不补译文也能用） */
+  const convertLabel = (target: ConvertTarget) => {
+    if (!target.labelKey) return target.label
+    const text = t(target.labelKey)
+    return text === target.labelKey ? target.label : text
   }
 
   const doEdit = (entry: Entry) => {
@@ -952,6 +988,31 @@ export function BrowserPage() {
           <Icon name="folder-archive" /> {t("ui.browser.compress_selected_zip")}
         </ContextMenuItem>
       )
+    }
+    // 文件转换：子项按服务端下发的清单动态生成（前端不硬编码格式），
+    // 因此"服务端加一种转换"在界面上会自动出现，见 server/src/convert/registry.js
+    if (single && entry.type === "file") {
+      const targetsForExt = convertTargets.filter((target) => target.from.includes(entryExt))
+      if (targetsForExt.length) {
+        push(
+          <ContextMenuSub key="convert">
+            <ContextMenuSubTrigger disabled={!me.perms.convertFiles}>
+              <Icon name="file-output" /> {t("ui.browser.convert_to")}
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {targetsForExt.map((target) => (
+                <ContextMenuItem
+                  key={target.id}
+                  disabled={entry.softReadOnly}
+                  onClick={() => doConvert(entry, target)}
+                >
+                  {convertLabel(target)}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )
+      }
     }
     if (single && entry.type !== "shortcut") {
       push(

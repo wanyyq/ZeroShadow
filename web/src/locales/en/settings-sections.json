@@ -60,6 +60,7 @@
   "ui.settings.groups.perm_group_advanced": "Advanced features",
   "ui.settings.groups.perm_compress_zip": "Compress Zip",
   "ui.settings.groups.perm_extract_zip": "Extract Zip",
+  "ui.settings.groups.perm_convert_files": "File conversion",
   "ui.settings.groups.perm_download_url": "Multi-threaded downloader",
   "ui.settings.groups.perm_html_preview": "Full-screen HTML preview",
   "ui.settings.groups.perm_edit_files": "Edit online",

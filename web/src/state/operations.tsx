@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { toast } from "sonner"
-import { compressJobStatus, downloadUrlJobStatus, extractJobStatus, startCompressJob, startDownloadUrlJob, startExtractJob } from "@/lib/api"
+import { compressJobStatus, convertJobStatus, downloadUrlJobStatus, extractJobStatus, startCompressJob, startConvertJob, startDownloadUrlJob, startExtractJob } from "@/lib/api"
 import { uid } from "@/lib/format"
 import { useT } from "@/lib/i18n"
 import type { OpType } from "@/lib/types"
@@ -14,6 +14,10 @@ export interface OpJob {
   status: "running" | "done" | "error"
   error?: string
   count?: number
+  /** 服务端给的补充说明（转换时可能是"字体缺字"这类提醒） */
+  notes?: string[]
+  /** 产出物的相对路径（转换成功时给出，便于提示"已生成 xxx"） */
+  output?: string | null
 }
 
 interface OpsState {
@@ -21,6 +25,7 @@ interface OpsState {
   startCompress: (paths: string[]) => void
   startExtract: (path: string, dest: string) => void
   startDownloadUrl: (url: string, dest: string, filename?: string) => void
+  startConvert: (path: string, target: string, label: string) => void
   dismiss: (id: string) => void
   clearFinished: () => void
   onCompleted: (listener: (job: OpJob) => void) => () => void
@@ -94,14 +99,34 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
       setJobs((prev) =>
         prev.map((j) =>
           j.id === job.id
-            ? { ...j, status: job.status, percent: job.percent, error: job.error, count: job.count }
+            ? {
+                ...j,
+                status: job.status,
+                percent: job.percent,
+                error: job.error,
+                count: job.count,
+                notes: job.notes,
+                output: job.output,
+              }
             : j
         )
       )
       if (job.status === "done") {
         if (job.type === "compress") toast.success(t("ui.operations.compress_done"))
         else if (job.type === "download") toast.success(t("ui.operations.download_done"))
-        else {
+        else if (job.type === "convert") {
+          // 转换成功的提示带上产物名；服务端给了提示（例如字体缺字）就作为副标题展示
+          const name = job.output ? String(job.output).split("/").pop() : undefined
+          const text = name
+            ? t("ui.operations.convert_done_named", { name })
+            : t("ui.operations.convert_done")
+          if (job.notes?.length) {
+            // 产物有瑕疵（缺字 / 截断）时用 warning 而不是 success，避免"看起来一切正常"
+            toast.warning(text, { description: job.notes.join("；") })
+          } else {
+            toast.success(text)
+          }
+        } else {
           toast.success(
             job.count !== undefined
               ? t("ui.operations.extract_done_count", { count: job.count })
@@ -109,11 +134,12 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
           )
         }
       } else if (job.status === "error") {
-        // 键（compress/extract/download）是代码值，只有文案取自字典
+        // 键（compress/extract/download/convert）是代码值，只有文案取自字典
         const labels: Record<string, string> = {
           compress: t("ui.operations.compress_failed"),
           extract: t("ui.operations.extract_failed"),
           download: t("ui.operations.download_failed"),
+          convert: t("ui.operations.convert_failed"),
         }
         toast.error(labels[job.type] || t("ui.common.operation_failed"), { description: job.error })
       }
@@ -124,7 +150,14 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
 
   const pollUntilDone = React.useCallback(
     (uiId: string, serverJobId: string, type: OpType, label: string, onDone: (count?: number) => void) => {
-      const getStatus = type === "compress" ? compressJobStatus : type === "extract" ? extractJobStatus : downloadUrlJobStatus
+      const getStatus =
+        type === "compress"
+          ? compressJobStatus
+          : type === "extract"
+            ? extractJobStatus
+            : type === "convert"
+              ? convertJobStatus
+              : downloadUrlJobStatus
       const apply = async (first = false) => {
         if (first && !timers.current.has(serverJobId)) return
         try {
@@ -132,7 +165,16 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
           if (s.state === "done") {
             stopPolling(serverJobId)
             uiToServer.current.delete(uiId)
-            finish({ id: uiId, type, label, percent: 100, status: "done", count: s.count })
+            finish({
+              id: uiId,
+              type,
+              label,
+              percent: 100,
+              status: "done",
+              count: s.count,
+              notes: s.notes,
+              output: s.output,
+            })
             onDone(s.count)
           } else if (s.state === "error" || s.state === "gone") {
             stopPolling(serverJobId)
@@ -201,6 +243,24 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
     [finish, pollUntilDone, pushJob, stopByUiId, t]
   )
 
+  /**
+   * 文件转换：一条任务对应一次转换。
+   * label 由调用方给（形如 `note.md → .pdf`），这样面板里能一眼看出转了哪个文件。
+   */
+  const startConvert = React.useCallback(
+    (path: string, target: string, label: string) => {
+      const id = uid()
+      pushJob({ id, type: "convert", label, percent: 0, status: "running" })
+      void startConvertJob(path, target)
+        .then(({ jobId }) => { pollUntilDone(id, jobId, "convert", label, () => {}) })
+        .catch((err) => {
+          stopByUiId(id)
+          finish({ id, type: "convert", label, percent: 0, status: "error", error: (err as Error).message })
+        })
+    },
+    [finish, pollUntilDone, pushJob, stopByUiId]
+  )
+
   const dismiss = React.useCallback(
     (id: string) => {
       stopByUiId(id)
@@ -228,8 +288,8 @@ export function OperationsProvider({ children }: { children: React.ReactNode }) 
   }, [])
 
   const value = React.useMemo(
-    () => ({ jobs, startCompress, startExtract, startDownloadUrl, dismiss, clearFinished, onCompleted }),
-    [jobs, startCompress, startExtract, startDownloadUrl, dismiss, clearFinished, onCompleted]
+    () => ({ jobs, startCompress, startExtract, startDownloadUrl, startConvert, dismiss, clearFinished, onCompleted }),
+    [jobs, startCompress, startExtract, startDownloadUrl, startConvert, dismiss, clearFinished, onCompleted]
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

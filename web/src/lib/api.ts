@@ -9,6 +9,7 @@ import type {
   TrashResponse,
   UploadResult,
   FileTextResponse,
+  ConvertTarget,
 } from "@/lib/types"
 import { translate } from "@/lib/i18n"
 
@@ -395,6 +396,35 @@ export function startDownloadUrlJob(url: string, dest: string, filename?: string
 
 export function downloadUrlJobStatus(jobId: string) {
   return api.get<OperationStatus>("/fs/download-url/status", { job: jobId })
+}
+
+/**
+ * 文件转换：当前支持哪些转换**由服务端决定**（见 server/src/convert/registry.js）。
+ * 这里只取一次清单并缓存，右键菜单按扩展名过滤 —— 服务端加新格式时前端零改动。
+ * 清单是"服务端注册了什么"，与登录身份无关，因此不需要在登录/登出时失效。
+ */
+let convertTargetsCache: Promise<ConvertTarget[]> | null = null
+
+export function fetchConvertTargets(): Promise<ConvertTarget[]> {
+  if (!convertTargetsCache) {
+    convertTargetsCache = api
+      .get<{ converters: ConvertTarget[] }>("/fs/convert/targets")
+      .then((data) => data.converters ?? [])
+      .catch((err) => {
+        // 失败不缓存，下次右键菜单打开时重试
+        convertTargetsCache = null
+        throw err
+      })
+  }
+  return convertTargetsCache
+}
+
+export function startConvertJob(path: string, target: string): Promise<{ jobId: string }> {
+  return api.post("/fs/convert", { path, target })
+}
+
+export function convertJobStatus(jobId: string) {
+  return api.get<OperationStatus>("/fs/convert/status", { job: jobId })
 }
 
 export async function triggerDownload(url: string): Promise<void> {

@@ -37,6 +37,13 @@ export function createJob(type, { label, total = 0, totalBytes = 0 }) {
     percent: 0,
     file: null,
     error: null,
+    /**
+     * 给用户的补充说明（目前只有文件转换用：例如"字体缺字已用 ? 代替"）。
+     * 做成数组是因为一次转换可能同时有多条提示。
+     */
+    notes: [],
+    /** 产出物的相对路径（转换成功时填写，前端可以据此提示"已生成 xxx"） */
+    output: null,
     createdBy: null,
     createdAt: now(),
     updatedAt: now(),
@@ -58,11 +65,12 @@ export function patchJob(id, patch) {
   Object.assign(job, patch, { updatedAt: now() })
 }
 
-export function finishJob(id, { state = "done", error = null, file } = {}) {
+export function finishJob(id, { state = "done", error = null, file, notes } = {}) {
   const job = jobs.get(id)
   if (!job) return
   const patch = { state, error, updatedAt: now() }
   if (file !== undefined) patch.file = file
+  if (notes !== undefined) patch.notes = Array.isArray(notes) ? notes.map(String) : []
   Object.assign(job, patch)
   if (state === "done") {
     job.percent = 100
@@ -75,8 +83,8 @@ export function jobStatus(id) {
   const job = jobs.get(id)
   if (!job) return null
   job.updatedAt = now()
-  const { state, type, label, percent, processed, total, processedBytes, totalBytes, error, count } = job
-  return { id, state, type, label, percent, processed, total, processedBytes, totalBytes, error, count }
+  const { state, type, label, percent, processed, total, processedBytes, totalBytes, error, count, notes, output } = job
+  return { id, state, type, label, percent, processed, total, processedBytes, totalBytes, error, count, notes, output }
 }
 
 /** 任务创建者；任务不存在时返回 undefined（用于归属校验） */

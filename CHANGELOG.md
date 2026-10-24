@@ -11,6 +11,56 @@
 
 ---
 
+## [2.1.0] - 2026-10-24
+
+本次为纯新增功能：右键「转换为」把 Markdown 转成纯文本 / PDF、PNG 与 JPG 互转；服务端做成注册表驱动，加一种格式只需注册一次。
+md→PDF 是完全自实现的（手写 PDF 1.7 写出器 + TrueType 子集化），**零新增依赖**。
+
+> 一句话：**2.1.0 = 一个可扩展的「转换为」入口（4 个内置转换 + 3 个新接口）+ 自实现的 md→PDF + 新权限点 `convertFiles`**。
+
+### 新增
+
+- **文件转换（可扩展接口）**：文件右键菜单新增「转换为」子菜单，当前自带 4 个转换 ——
+  `Markdown → 纯文本（.txt）`、`Markdown → PDF（.pdf）`、`PNG → JPG（.jpg）`、`JPG → PNG（.png）`。
+  - 产物写在**源文件同目录**，重名自动 `名称 (1).ext`、**不覆盖已有文件**；转换是一个带进度的任务，
+    完成后列表自动刷新。
+  - 服务端 `server/src/convert/` 是**注册表驱动**：新增格式只需写一个转换器模块并在 `convert/index.js`
+    里注册一次，**路由与前端都不用改**（右键菜单按 `GET /api/fs/convert/targets` 的返回动态渲染）。
+  - 三个新接口：`GET /api/fs/convert/targets`、`POST /api/fs/convert`（返回 `jobId`）、
+    `GET /api/fs/convert/status`。
+- **md→PDF 自实现，零新增依赖**：手写 PDF 1.7 写出器 + TrueType 子集化（保留原始字形号的
+  CIDFontType2 + Identity-H），文字**可选中复制 / 搜索**、链接可点击、A4 分页带页脚页码；
+  支持标题 / 列表 / 代码块 / 引用 / 表格 / 分割线 / 行内样式。
+  - 字体按平台自动发现（Windows 微软雅黑等、macOS 苹方、Linux 文泉驿 / Droid），也可用
+    `CONVERT_PDF_FONT` 或 `data/fonts/` 指定；找不到中文字体时中文显示为 `?` 并在任务提示里说明，
+    **不报错**。
+- **新权限点 `convertFiles`（后台名称「文件转换」，默认开启）**：受写操作总开关 `fileWrite` 约束、
+  可被小组收窄；**访客恒不可转换**。权限点总数 **19 → 20**。
+- **并发闸门（`server/src/convert/queue.js`）**：同时最多 4 个转换在执行、最多 32 个排队，
+  队列排满直接回 503（`api.fs.convert_busy`）—— 大图转换是纯 CPU / 原生解码，
+  不设闸门会让同组的文件列表卡住（与缩略图队列同一思路，参数按"用户主动发起"放宽）。
+- **新测试脚本 `scripts/convert-test.mjs`**：44 条断言，覆盖 Markdown 解析、md→txt、md→PDF 的
+  结构 / 字体子集 / 文本可复制性、图片互转、注册表校验与并发闸门；**不需要起服务**，
+  产物写系统临时目录。
+
+### 变更
+
+- 版本号 `2.0.0` → `2.1.0`，同步 6 处：根 / `server` / `web` 三个 `package.json`、`server/index.js`
+  的 `/api/meta`、`web/src/version.ts`、`web/public/sw.js`。
+- **多语言**：新增 `ui.browser.convert_to`、`ui.convert.*`（4 条目标文案）、
+  `ui.operations.convert_done(_named/_failed)`、`ui.settings.perms.convert_files`、
+  `ui.settings.groups.perm_convert_files` 与 9 条 `api.fs.convert_*` 错误文案，
+  **7 套语言（zh / zh-TW / zh-HK / en / ja / es / fr）全部补齐**；新增一个文案分区文件
+  `web/src/locales/<语言>/convert.json`。
+- 后台「设置 → 权限 → 成员权限 → 高级功能」多一项「文件转换」；小组编辑的「高级权限」分组
+  多一项同名开关。
+
+### 修复
+
+- 无 —— 本次为纯新增功能，不含对既有行为的修复。
+
+---
+
 ## [2.0.0] - 2026-10-25
 
 首个正式版：把 beta1–beta5 的成果（WebDAV 转正、缩略图与虚拟滚动、弱网优化、插件体系、品牌改造）合并发布，并补上一整轮安全审计与修复，同时把文档重新与代码对齐。

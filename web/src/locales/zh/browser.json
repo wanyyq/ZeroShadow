@@ -21,6 +21,7 @@
   "ui.browser.html_preview": "HTML 预览",
   "ui.browser.edit_online": "在线编辑",
   "ui.browser.extract_here": "解压到当前目录",
+  "ui.browser.convert_to": "转换为",
   "ui.browser.compress_zip": "压缩为 Zip",
   "ui.browser.compress_selected_zip": "压缩所选为 Zip",
   "ui.browser.edit_shortcut": "编辑快捷方式",

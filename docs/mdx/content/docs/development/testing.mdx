@@ -4,7 +4,7 @@ description: 冒烟测试、安全回归测试与编码单测的用法、参数�
 icon: FlaskConical
 ---
 
-仓库自带两个 PowerShell 测试脚本和五个 Node 单测 / 校验脚本。它们的价值在于**把结论固化成可重复执行的断言**——
+仓库自带两个 PowerShell 测试脚本和六个 Node 单测 / 校验脚本。它们的价值在于**把结论固化成可重复执行的断言**——
 改完代码跑一遍，就知道有没有退化。
 
 | 脚本 | 定位 | 断言数 | 需要起服务 | 退出码 |
@@ -15,6 +15,7 @@ icon: FlaskConical
 | `scripts/office-preview-test.mjs` | Office 解析单测 | 40 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/markdown-url-test.mjs` | Markdown 相对路径解析单测 | 18 项 | **否** | 失败项数量（0 / 1） |
 | `scripts/markdown-html-test.mjs` | Markdown 安全 HTML 白名单单测 | 28 项 | **否** | 失败项数量（0 / 1） |
+| `scripts/convert-test.mjs` | 文件转换单测（Markdown 解析 / md→txt / md→PDF 结构与字体子集 / 图片互转 / 并发闸门） | 44 项 | **否** | 失败项数量（0 / 1） |
 | `i18n-check.mjs` | 多语言文案校验（键完整性 + 剩余硬编码中文） | — | **否** | 错误数（0 = 通过） |
 
 这些脚本都遵循同一个约定：**退出码 = 失败项数量**，`0` 表示全部通过
@@ -217,6 +218,28 @@ node --experimental-strip-types scripts/markdown-html-test.mjs  # 28 项：安�
   白名单以外的标签（`script` / `iframe` / `a` / `img` / `style` / `svg`）仍是纯文本、
   "像标签的残句"不吞正文、`hasUnsupportedHtml` 对围栏代码块与行内代码的豁免；
 - 改 `web/src/lib/markdown*.ts` 或动 `SAFE_HTML_TAGS` 后请跑一遍 —— **加一个标签等于改安全边界**。
+
+## 文件转换单测 `scripts/convert-test.mjs`
+
+```bash
+node scripts/convert-test.mjs   # 44 项：解析 / 文本 / PDF / 字体 / 图片 / 注册表 / 并发闸门
+```
+
+不需要起服务、不需要浏览器；产物（示例 PDF）写到**系统临时目录**，不在仓库里留文件。
+
+覆盖的重点（`md → PDF` 是项目里唯一自己写文件格式的地方，所以断言最密）：
+
+- **Markdown 解析**：front matter 跳过、ATX / Setext 标题、软换行（中文之间不插空格）、
+  任务列表与嵌套列表、引用、围栏代码块、表格对齐、图片与原始 HTML 的处理；
+- **md → txt**：标记清除、列表/引用/代码块前缀、链接保留 URL、CRLF 跟随源文件；
+- **md → PDF 结构**：文件头、**每个 xref 偏移必须精确指向 `n 0 obj`**、流 `/Length` 与压缩后字节数一致、
+  `%%EOF`；字体是 Type0 + Identity-H + CIDFontType2 + `/CIDToGIDMap /Identity` 且带 ToUnicode；
+- **正文可复制**：把内容流里的十六进制字形号用 ToUnicode CMap 反查回 Unicode，
+  断言读回来的正文与源 Markdown 一致（等价于"用户在阅读器里选中复制"）；
+- **字形有真实轮廓**：解压内嵌字体、解析表目录，确认「中」的字形在 `glyf` 里长度大于 20 字节；
+- **图片互转**（`sharp` 可用时）：PNG 透明区铺白底、JPG→PNG 尺寸不变、坏图片回可识别的错误；
+- **注册表与并发闸门**：按扩展名查表、下发清单不含 `run`/`maxBytes`、非法定义立刻抛错、
+  4 个执行位 + 32 个排队 + 队列满回 503。
 
 ## 它会临时改动什么
 

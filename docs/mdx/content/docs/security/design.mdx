@@ -545,6 +545,10 @@ frame-ancestors 'self'
 | 目录详情统计条目数 | 20 万个 | 服务端硬编码（超出标记为部分统计） |
 | 成员总数 | 500 | 服务端硬编码 |
 | 单次批量创建成员 | 200 | `/api/admin/members` |
+| 文件转换的源文件 | Markdown 4 MB / 图片 32 MB | `server/src/convert/converters/*.js` 的 `maxBytes` |
+| md→PDF 的页数 | 400 页 | `server/src/convert/pdf/layout.js` 的 `MAX_PAGES`，超出截断并在任务 `notes` 里说明 |
+| 文件转换的解码像素 | 1.2 亿 | `server/src/convert/converters/image.js` 的 `MAX_INPUT_PIXELS` |
+| 文件转换的并发 | 4 个执行 / 32 个排队 | `server/src/convert/queue.js`，队列满回 503 |
 
 ### 解压的三重保护
 
@@ -562,6 +566,21 @@ frame-ancestors 'self'
 并把已经写出的半成品目录**整个删掉**。
 </Step>
 </Steps>
+
+### 文件转换（v2.1）
+
+转换会**读源文件、再写出一个新文件**，因此按"写接口"的标准对待：
+
+| 点 | 处理 |
+|:--|:--|
+| **权限** | 新权限点 `convertFiles`（默认开，受 `fileWrite` 总开关约束，可被小组收窄）；除此之外还要对源文件有读权限（`preview` 或 `downloadFile` 之一）。**访客恒为 `false`**：转换等于以服务端身份生成并落盘文件，不该是匿名可用的能力 |
+| **路径** | 同一套 `resolveAny` / `resolveSafe` + `assertContextVisible`：**先解析成规范化绝对路径再判定**访客隐藏与小组可见范围，8.3 短名、符号链接、`..` 都绕不过去（同 S-1 的修法） |
+| **只读映射目录** | 直接 403（产物没有地方写）。前端也把菜单项置灰，但置灰不是安全边界 |
+| **落盘** | 产物写在源文件同一目录，重名自动 `名称 (1).ext`，**不存在覆盖已有文件的路径**；先写同目录临时文件再 `rename`，中断不会留下半个文件 |
+| **不执行外部程序** | PDF 写出与 TrueType 子集化都是**进程内的纯 JS**（无子进程、无 shell）；图片转换走 `sharp` 的库调用，不拼命令行 |
+| **无出站请求** | 转换不访问网络。Markdown 里的外链图片**不会被下载**（只渲染 `[图片: alt]` 占位），这条路径上没有 SSRF 面 |
+| **资源** | 源文件体积上限 + PDF 页数上限 + 图片解码像素上限；同时执行的转换最多 **4 个**、排队上限 **32**，队列满直接 503（`api.fs.convert_busy`） |
+| **降级** | `sharp` 不可用（单文件 exe）时图片转换回 501，PDF / 纯文本转换不受影响 |
 
 ### 接口限流
 
