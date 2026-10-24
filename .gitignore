@@ -29,7 +29,6 @@ build/
 data/
 .env
 .env.local
-SKILL/
 .env.*.local
 !.env.example
 
