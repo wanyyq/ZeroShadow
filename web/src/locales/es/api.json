@@ -12,6 +12,7 @@
   "ui.api.upload_network_error": "Error de red, subida interrumpida",
   "ui.api.upload_cancelled": "Subida cancelada",
   "ui.api.download_failed": "Error al descargar ({status})",
+  "ui.api.download_inapp_hint": "Si no empieza la descarga, abre esta página en el navegador del sistema: los navegadores integrados suelen bloquear descargas",
   "ui.api.avatar_fetch_failed": "Error al obtener el avatar ({status})",
   "ui.api.avatar_upload_failed": "Error al subir el avatar ({status})"
 }

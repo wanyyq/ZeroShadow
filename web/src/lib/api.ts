@@ -12,6 +12,7 @@ import type {
   ConvertTarget,
 } from "@/lib/types"
 import { translate } from "@/lib/i18n"
+import { isInAppUserAgent, pickDownloadMode } from "@/lib/download-mode"
 
 export class ApiError extends Error {
   status: number
@@ -427,20 +428,85 @@ export function convertJobStatus(jobId: string) {
   return api.get<OperationStatus>("/fs/convert/status", { job: jobId })
 }
 
+/**
+ * 是不是**内置浏览器**（微信 / QQ / 微博 / 钉钉 / 夸克 / UC / 支付宝…）。
+ *
+ * 为什么要在意：这些 WebView **普遍拦截 `blob:` 下载**，只认"响应带
+ * `Content-Disposition: attachment` 的原生导航"。老实现把整个文件读进内存再点
+ * 一个 blob 链接，在它们里面就是"点了没反应"，我们还会把异常吞掉 —— 用户看到的
+ * 只有沉默。判断逻辑见 `lib/download-mode.ts`（纯函数、有单测）。
+ */
+export function isInAppBrowser(): boolean {
+  if (typeof navigator === "undefined") return false
+  return isInAppUserAgent(navigator.userAgent)
+}
+
+/** 从错误响应里取一条能显示给人看的话（拿不到就用带状态码的默认文案） */
+async function downloadErrorMessage(res: Response, status: number): Promise<string> {
+  let message = translate("ui.api.download_failed", { status })
+  try {
+    const data = await res.json()
+    if (data && typeof data === "object" && "error" in data) message = String((data as { error: string }).error)
+  } catch {
+    /* 非 JSON 错误体（例如 HEAD 没有正文）就用默认文案 */
+  }
+  return message
+}
+
+/** 让浏览器用原生方式下载一个 URL（服务端已带 `Content-Disposition: attachment`） */
+function nativeDownload(url: string) {
+  const a = document.createElement("a")
+  a.href = url
+  a.rel = "noopener"
+  // 刻意**不设 `download` 属性**：文件名由服务端的 RFC 5987 `filename*` 决定
+  // （中文名才不会被截成 `___`），而且不设它更接近"用户点了链接"，兼容性最好。
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/**
+ * 触发一次文件下载。
+ *
+ * 三步，顺序是有意的：
+ *   1. **先 HEAD 探路**（服务端 `/download` 用 `res.sendFile`、`/zip` 专门为 HEAD
+ *      提前返回，实测 3~9ms）—— 权限不足 / 文件不存在这类错误在这里就能拿到，
+ *      抛给调用方弹提示。老实现是先 `fetch` 整个文件再判断，等于把错误和流量一起吞掉。
+ *   2. 用 `pickDownloadMode()` 决定走哪条路（纯函数，见 lib/download-mode.ts）：
+ *      **内置浏览器 / 大文件 → 原生导航**（不占内存、支持断点、WebView 也认）；
+ *      普通浏览器的小文件 → blob（能精确控制中文文件名）。
+ *   3. blob 路径里 GET 若返回 4xx 也要抛错，绝不把一段 JSON 错误体当文件存下来。
+ */
 export async function triggerDownload(url: string): Promise<void> {
+  const head = await fetch(url, {
+    method: "HEAD",
+    credentials: "same-origin",
+    headers: contextHeaders(),
+  })
+  const mode = pickDownloadMode(
+    { status: head.status, size: Number(head.headers.get("Content-Length") || 0) },
+    { inApp: isInAppBrowser() }
+  )
+
+  if (mode === "error") {
+    if (head.status === 401 || head.status === 403) onPermissionDenied?.()
+    throw new ApiError(head.status, await downloadErrorMessage(head, head.status))
+  }
+
+  if (mode === "native") {
+    nativeDownload(url)
+    return
+  }
+
   const res = await fetch(url, { credentials: "same-origin", headers: contextHeaders() })
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      onPermissionDenied?.()
+    // HEAD 过了但 GET 不过（会话刚好过期之类）。4xx 抛错；5xx 交给浏览器重试。
+    if (res.status >= 400 && res.status < 500) {
+      if (res.status === 401 || res.status === 403) onPermissionDenied?.()
+      throw new ApiError(res.status, await downloadErrorMessage(res, res.status))
     }
-    let message = translate("ui.api.download_failed", { status: res.status })
-    try {
-      const data = await res.json()
-      if (data && typeof data === "object" && "error" in data) {
-        message = String((data as { error: string }).error)
-      }
-    } catch { /* ignore parse errors */ }
-    throw new ApiError(res.status, message)
+    nativeDownload(url)
+    return
   }
   const blob = await res.blob()
   const objUrl = URL.createObjectURL(blob)

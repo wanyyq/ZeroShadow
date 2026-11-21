@@ -12,6 +12,7 @@
   "ui.api.upload_network_error": "網絡錯誤，上載中斷",
   "ui.api.upload_cancelled": "已取消上載",
   "ui.api.download_failed": "下載失敗 ({status})",
+  "ui.api.download_inapp_hint": "如果沒開始下載，請點右上角「用瀏覽器開啟」——內建瀏覽器常會攔掉下載",
   "ui.api.avatar_fetch_failed": "頭像取得失敗 ({status})",
   "ui.api.avatar_upload_failed": "頭像上載失敗 ({status})"
 }

@@ -521,6 +521,14 @@ router.get("/zip", requirePerm("downloadFolder"), rateLimit, async (req, res, ne
     res.setHeader("Content-Disposition", contentDisposition("attachment", zipName))
     res.setHeader("Cache-Control", "no-store")
 
+    // HEAD 只做"能不能下"的探路（前端点下载前会先 HEAD 一次，好在拿不到权限时给出提示）。
+    // 这里必须**提前结束**：否则会为了一个不会发送的响应把整包 zip 压缩一遍，
+    // 大目录下等于白白烧掉一次 CPU 与磁盘读。
+    if (req.method === "HEAD") {
+      res.end()
+      return
+    }
+
     const archive = archiver("zip", { zlib: { level: 1 } })
     archive.on("error", (err) => {
       if (!res.headersSent) next(err)

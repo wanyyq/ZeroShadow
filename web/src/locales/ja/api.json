@@ -12,6 +12,7 @@
   "ui.api.upload_network_error": "ネットワークエラーによりアップロードが中断されました",
   "ui.api.upload_cancelled": "アップロードをキャンセルしました",
   "ui.api.download_failed": "ダウンロードに失敗しました ({status})",
+  "ui.api.download_inapp_hint": "ダウンロードが始まらない場合は、右上の「ブラウザで開く」からシステムのブラウザで開いてください（アプリ内ブラウザはダウンロードを遮断することがあります）",
   "ui.api.avatar_fetch_failed": "アバターの取得に失敗しました ({status})",
   "ui.api.avatar_upload_failed": "アバターのアップロードに失敗しました ({status})"
 }

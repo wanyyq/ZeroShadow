@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Icon } from "@/components/icon"
-import { api, downloadUrl, fetchConvertTargets, thumbUrl, triggerDownload, zipUrl } from "@/lib/api"
+import { api, downloadUrl, fetchConvertTargets, isInAppBrowser, thumbUrl, triggerDownload, zipUrl } from "@/lib/api"
 import { fileKind, formatBytes, formatDate, joinPath, canPreview, isThumbSourceName } from "@/lib/format"
 import { animateListIn } from "@/lib/lucide"
 import { useProgressiveReveal, useVirtualRows } from "@/lib/virtual"
@@ -325,9 +325,7 @@ export function BrowserPage() {
       if (me.perms.preview) {
         navigate(`/preview?path=${encodeURIComponent(targetUrl)}`)
       } else {
-        triggerDownload(downloadUrl(targetUrl)).catch(() => {
-          toast.error(t("ui.browser.target_missing_or_denied"))
-        })
+        downloadWithToast(downloadUrl(targetUrl), t("ui.browser.target_missing_or_denied"))
       }
     } else {
       goto(targetUrl)
@@ -350,7 +348,7 @@ export function BrowserPage() {
         navigate(`/preview?path=${encodeURIComponent(rel)}`)
       }
     } else if (me.perms.downloadFile) {
-      triggerDownload(downloadUrl(rel)).catch(() => {})
+      downloadWithToast(downloadUrl(rel))
     }
   }
 
@@ -402,13 +400,33 @@ export function BrowserPage() {
           ? [entry]
           : []
 
+  /**
+   * 统一的下载入口：**错误一定要说出来**。
+   *
+   * 老实现到处写 `.catch(() => {})`，于是"没有权限 / 文件不在 / 会话过期"这些情况
+   * 全都表现成"点了没反应"——用户只能猜。现在失败一律弹提示，并且在内置浏览器里
+   * 额外提示"用系统浏览器打开"，因为那里的 WebView 常常拦掉下载。
+   */
+  const downloadWithToast = React.useCallback(
+    (url: string, fallbackMessage?: string) => {
+      void triggerDownload(url).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        toast.error(message || fallbackMessage || t("ui.api.download_failed", { status: 0 }))
+      })
+      if (isInAppBrowser()) {
+        toast.info(t("ui.api.download_inapp_hint"))
+      }
+    },
+    [t]
+  )
+
   const doDownload = (targets: Entry[]) => {
     if (targets.length === 1 && targets[0].type === "file") {
       if (!me.perms.downloadFile) return noPermToast()
-      triggerDownload(downloadUrl(entryPath(targets[0]))).catch(() => {})
+      downloadWithToast(downloadUrl(entryPath(targets[0])))
     } else if (targets.length) {
       if (!me.perms.downloadFolder) return noPermToast()
-      triggerDownload(zipUrl(targets.map((tgt) => entryPath(tgt)))).catch(() => {})
+      downloadWithToast(zipUrl(targets.map((tgt) => entryPath(tgt))))
     }
   }
 
@@ -1118,7 +1136,7 @@ export function BrowserPage() {
     )
     items.push(<ContextMenuSeparator key="s3" />)
     items.push(
-      <ContextMenuItem key="zipHere" disabled={!me.perms.downloadFolder || !path} onClick={() => { if (!me.perms.downloadFolder) noPermToast(); else triggerDownload(zipUrl([path])).catch(() => {}) }}>
+      <ContextMenuItem key="zipHere" disabled={!me.perms.downloadFolder || !path} onClick={() => { if (!me.perms.downloadFolder) noPermToast(); else downloadWithToast(zipUrl([path])) }}>
         <Icon name="folder-archive" /> {t("ui.browser.zip_current_dir")}
       </ContextMenuItem>,
       <ContextMenuItem key="shortcut" disabled={!canUpload} onClick={() => { if (!canUpload) noPermToast(); else { setShortcutEntry(null); setShortcutBase(path); setShortcutOpen(true) } }}>

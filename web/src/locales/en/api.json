@@ -12,6 +12,7 @@
   "ui.api.upload_network_error": "Network error, the upload was interrupted",
   "ui.api.upload_cancelled": "Upload cancelled",
   "ui.api.download_failed": "Download failed ({status})",
+  "ui.api.download_inapp_hint": "If nothing downloads, open this page in your system browser — in-app browsers often block downloads",
   "ui.api.avatar_fetch_failed": "Could not load the avatar ({status})",
   "ui.api.avatar_upload_failed": "Could not upload the avatar ({status})"
 }

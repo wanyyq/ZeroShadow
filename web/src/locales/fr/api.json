@@ -12,6 +12,7 @@
   "ui.api.upload_network_error": "Erreur réseau, import interrompu",
   "ui.api.upload_cancelled": "Import annulé",
   "ui.api.download_failed": "Échec du téléchargement ({status})",
+  "ui.api.download_inapp_hint": "Si rien ne se télécharge, ouvrez cette page dans le navigateur du système : les navigateurs intégrés bloquent souvent les téléchargements",
   "ui.api.avatar_fetch_failed": "Échec de la récupération de l'avatar ({status})",
   "ui.api.avatar_upload_failed": "Échec de l'envoi de l'avatar ({status})"
 }
